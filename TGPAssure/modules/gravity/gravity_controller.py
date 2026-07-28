@@ -1,0 +1,91 @@
+from __future__ import annotations
+
+from typing import Any, Iterable
+
+from PySide6.QtCore import QObject, Signal
+
+from core.data_access.db_engine import DatabaseEngine
+from core.infrastructure.job_manager import JobManager
+from modules.gravity.context import GravityQcContext
+from modules.gravity.gravity_engine import GravityQcJob, GravityQcPipeline
+from modules.gravity.gravity_profiles import get_profile
+from modules.gravity.gravity_repository import GravityRepository
+from modules.gravity.models import GravityDataset
+
+
+class GravityQcController(QObject):
+    run_started = Signal(int)
+    progress_changed = Signal(int, int, str)
+    stage_completed = Signal(str)
+    run_completed = Signal(dict)
+    run_failed = Signal(str)
+    run_cancelled = Signal()
+
+    def __init__(self, db_engine: DatabaseEngine, job_manager: JobManager, parent: QObject | None = None) -> None:
+        super().__init__(parent)
+        self.job_manager = job_manager
+        self.repository = GravityRepository(db_engine)
+        self.pipeline = GravityQcPipeline(self.repository)
+        self._active_job_id: int | None = None
+        self._latest_context: GravityQcContext | None = None
+        job_manager.job_completed.connect(self._on_job_completed)
+        job_manager.job_failed.connect(self._on_job_failed)
+        job_manager.job_cancelled.connect(self._on_job_cancelled)
+
+    @property
+    def active_job_id(self) -> int | None:
+        return self._active_job_id
+
+    @property
+    def latest_context(self) -> GravityQcContext | None:
+        return self._latest_context
+
+    def run_qc(self, observations: GravityDataset, *, base: GravityDataset | None = None,
+               profile_name: str = "standard", threshold_overrides: dict[str, float] | None = None,
+               selected_stage_keys: Iterable[str] | None = None, density_g_cm3: float = 2.67,
+               processing_products: dict[str, Any] | None = None) -> int:
+        if self._active_job_id is not None:
+            raise RuntimeError("A gravity QC job is already running")
+        context = GravityQcContext(
+            observations=observations,
+            base=base,
+            profile_name=profile_name,
+            thresholds=get_profile(profile_name, threshold_overrides),
+            density_g_cm3=float(density_g_cm3),
+            processing_products=dict(processing_products or {}),
+        )
+        self._latest_context = context
+        job = GravityQcJob(
+            context, self.pipeline, selected_stage_keys,
+            progress_callback=lambda current, total, message: self.progress_changed.emit(current, total, message),
+            stage_callback=self.stage_completed.emit,
+        )
+        job_id = self.job_manager.submit(job)
+        self._active_job_id = job_id
+        self.run_started.emit(job_id)
+        return job_id
+
+    def run_sync(self, context: GravityQcContext, selected_stage_keys=None) -> dict[str, Any]:
+        return self.pipeline.run(context, selected_stage_keys=selected_stage_keys).as_dict()
+
+    def cancel(self) -> bool:
+        return False if self._active_job_id is None else self.job_manager.cancel(self._active_job_id)
+
+    def _on_job_completed(self, job_id: int, result: object) -> None:
+        if job_id != self._active_job_id:
+            return
+        self._active_job_id = None
+        if isinstance(result, dict):
+            self.run_completed.emit(result)
+        else:
+            self.run_failed.emit("Gravity QC returned an invalid result")
+
+    def _on_job_failed(self, job_id: int, error: str) -> None:
+        if job_id == self._active_job_id:
+            self._active_job_id = None
+            self.run_failed.emit(error)
+
+    def _on_job_cancelled(self, job_id: int) -> None:
+        if job_id == self._active_job_id:
+            self._active_job_id = None
+            self.run_cancelled.emit()

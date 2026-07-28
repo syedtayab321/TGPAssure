@@ -1,0 +1,560 @@
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Any, Iterable
+
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import (
+    QButtonGroup,
+    QComboBox,
+    QDialog,
+    QDialogButtonBox,
+    QFrame,
+    QGridLayout,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QRadioButton,
+    QScrollArea,
+    QTabWidget,
+    QTableWidget,
+    QTableWidgetItem,
+    QVBoxLayout,
+    QWidget,
+)
+
+from modules.magnetic.models import MagneticSurveyType
+
+
+_DIALOG_QSS = """
+QDialog {
+    background: #F5F7FA;
+}
+QFrame#headerCard,
+QFrame#infoCard,
+QFrame#noticeCard {
+    background: #FFFFFF;
+    border: 1px solid #D8E1E8;
+    border-radius: 8px;
+}
+QFrame#noticeCard {
+    background: #FFF8E6;
+    border-color: #E5C86D;
+}
+QLabel#dialogTitle {
+    color: #123047;
+    font-size: 18px;
+    font-weight: 700;
+}
+QLabel#dialogSubtitle {
+    color: #5E7182;
+    font-size: 10px;
+}
+QLabel#sectionTitle {
+    color: #173A52;
+    font-size: 11px;
+    font-weight: 700;
+}
+QLabel#statusPill {
+    background: #E8F4EC;
+    color: #167044;
+    border: 1px solid #B9DEC7;
+    border-radius: 9px;
+    padding: 3px 9px;
+    font-size: 9px;
+    font-weight: 700;
+}
+QLabel#mutedLabel {
+    color: #66798A;
+}
+QTabWidget::pane {
+    border: 1px solid #D7E0E7;
+    background: #FFFFFF;
+    top: -1px;
+}
+QTabBar::tab {
+    background: #EEF2F6;
+    color: #455A6C;
+    border: 1px solid #D7E0E7;
+    padding: 8px 16px;
+    min-width: 105px;
+}
+QTabBar::tab:selected {
+    background: #FFFFFF;
+    color: #0B6FA4;
+    border-bottom-color: #FFFFFF;
+    font-weight: 700;
+}
+QTabBar::tab:hover:!selected {
+    background: #E5EEF5;
+}
+QTableWidget {
+    background: #FFFFFF;
+    alternate-background-color: #F7F9FB;
+    border: 0;
+    gridline-color: #E4EAF0;
+    selection-background-color: #DCEEF8;
+    selection-color: #18384E;
+}
+QHeaderView::section {
+    background: #EDF2F6;
+    color: #344B5E;
+    border: 0;
+    border-bottom: 1px solid #D8E1E8;
+    padding: 6px;
+    font-weight: 700;
+}
+QLineEdit,
+QComboBox {
+    min-height: 28px;
+    border: 1px solid #C9D5DF;
+    border-radius: 4px;
+    background: #FFFFFF;
+    padding: 2px 7px;
+}
+QLineEdit:disabled,
+QComboBox:disabled {
+    color: #81909D;
+    background: #EEF2F5;
+}
+QPushButton {
+    min-height: 28px;
+    padding: 3px 14px;
+}
+"""
+
+
+class MagneticImportDialog(QDialog):
+    """Review-first import dialog for magnetic datasets.
+
+    The dialog deliberately avoids requiring GIS expertise. When the reader
+    confidently detects a CRS, that CRS is selected automatically. If the CRS
+    is unknown, the user can still import the dataset and spatially dependent
+    QC stages can be skipped until a CRS is assigned later.
+    """
+
+    def __init__(
+        self,
+        inspection: dict[str, Any],
+        *,
+        importing_base: bool = False,
+        parent: QWidget | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self.inspection = dict(inspection)
+        self.importing_base = importing_base
+        self.setWindowTitle("Magnetic Data Import")
+        self.resize(900, 650)
+        self.setMinimumSize(760, 540)
+        self.setStyleSheet(_DIALOG_QSS)
+        self._build_ui()
+
+    @property
+    def selected_crs(self) -> str | None:
+        if self.crs_manual_radio.isChecked():
+            value = self.crs_edit.text().strip()
+            return value or None
+        if self.crs_none_radio.isChecked():
+            return None
+        detected = str(self.inspection.get("detected_crs") or "").strip()
+        return detected or None
+
+    @property
+    def selected_survey_type(self) -> MagneticSurveyType:
+        if self.importing_base:
+            return MagneticSurveyType.BASE_STATION
+        value = str(self.survey_combo.currentData() or MagneticSurveyType.GROUND.value)
+        return MagneticSurveyType(value)
+
+    def _build_ui(self) -> None:
+        root = QVBoxLayout(self)
+        root.setContentsMargins(14, 14, 14, 14)
+        root.setSpacing(10)
+
+        root.addWidget(self._build_header())
+
+        self.tabs = QTabWidget()
+        self.tabs.setDocumentMode(True)
+        self.tabs.addTab(self._build_overview_tab(), "Overview")
+        self.tabs.addTab(self._build_coordinates_tab(), "Coordinates & GPS")
+        self.tabs.addTab(self._build_sensor_tab(), "Sensor & Channels")
+        self.tabs.addTab(self._build_options_tab(), "Import Settings")
+        root.addWidget(self.tabs, 1)
+
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        import_button = buttons.button(QDialogButtonBox.StandardButton.Ok)
+        import_button.setText("Import Dataset")
+        import_button.setDefault(True)
+        import_button.setProperty("variant", "primary")
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        root.addWidget(buttons)
+
+    def _build_header(self) -> QWidget:
+        frame = QFrame()
+        frame.setObjectName("headerCard")
+        layout = QHBoxLayout(frame)
+        layout.setContentsMargins(16, 12, 16, 12)
+        layout.setSpacing(12)
+
+        text_host = QWidget()
+        text_layout = QVBoxLayout(text_host)
+        text_layout.setContentsMargins(0, 0, 0, 0)
+        text_layout.setSpacing(2)
+
+        title = QLabel("Review detected magnetic data")
+        title.setObjectName("dialogTitle")
+        subtitle = QLabel(
+            "TGPAssure has inspected the file. Review the detected information; "
+            "you normally do not need to enter technical coordinate-system values manually."
+        )
+        subtitle.setObjectName("dialogSubtitle")
+        subtitle.setWordWrap(True)
+        text_layout.addWidget(title)
+        text_layout.addWidget(subtitle)
+
+        status = QLabel("AUTO-DETECTED")
+        status.setObjectName("statusPill")
+        status.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        status.setFixedHeight(24)
+
+        layout.addWidget(text_host, 1)
+        layout.addWidget(status, 0, Qt.AlignmentFlag.AlignTop)
+        return frame
+
+    def _build_overview_tab(self) -> QWidget:
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(10)
+
+        classification = str(
+            self.inspection.get("suggested_acquisition_classification") or ""
+        ).strip().lower()
+        if classification == "stationary" and not self.importing_base:
+            notice = QFrame()
+            notice.setObjectName("noticeCard")
+            notice_layout = QVBoxLayout(notice)
+            notice_layout.setContentsMargins(12, 9, 12, 9)
+            notice_layout.setSpacing(2)
+            heading = QLabel("Stationary / static acquisition detected")
+            heading.setObjectName("sectionTitle")
+            body = QLabel(
+                "The coordinates indicate little movement. TGPAssure can still import this as the "
+                "primary magnetic dataset and run time, sensor, GPS, noise and stability QC. "
+                "Line, tie-line and grid checks will be skipped when they are not applicable."
+            )
+            body.setWordWrap(True)
+            body.setObjectName("mutedLabel")
+            notice_layout.addWidget(heading)
+            notice_layout.addWidget(body)
+            layout.addWidget(notice)
+
+        rows = [
+            ("File", self._display_path()),
+            ("Format", self._first("format", "reader", default="Unknown")),
+            ("Log name", self._first("log_name", default="—")),
+            ("Remark", self._first("remark", default="—")),
+            ("Magnetic field", self._first("magnetic_channel", default="Detected automatically")),
+            ("Magnetic units", self._first("magnetic_units", default="nT")),
+            ("Acquisition classification", self._classification_label()),
+            ("Sensor serial", self._first("sensor_serial_number", "sensor_serial", default="—")),
+            ("Logger serial", self._first("logger_serial_number", "logger_serial", default="—")),
+        ]
+        counts = self.inspection.get("record_counts")
+        if isinstance(counts, dict):
+            for key, value in counts.items():
+                rows.append((str(key).replace("_", " ").title(), value))
+
+        layout.addWidget(self._key_value_table(rows), 1)
+        return page
+
+    def _build_coordinates_tab(self) -> QWidget:
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(10)
+
+        detected_crs = self._first("detected_crs", default="Not detected")
+        working = self._first("recommended_working_crs", default="Not required / not detected")
+
+        rows = [
+            ("Coordinate type", self._humanize(self._first("coordinate_type", default="Unknown"))),
+            ("Detected source CRS", detected_crs),
+            ("Recommended working CRS", working),
+            ("GPS rate", self._format_rate(self.inspection.get("gps_rate_hz"))),
+            ("GPS enabled", self._yes_no(self.inspection.get("gps_enabled"))),
+            ("GPS fix type", self._first("gps_fix_type", default="—")),
+            ("HDOP", self._first("gps_hdop", "gps_dop_hdop", default="—")),
+            ("PDOP", self._first("gps_pdop", "gps_dop_pdop", default="—")),
+            ("VDOP", self._first("gps_vdop", "gps_dop_vdop", default="—")),
+        ]
+        layout.addWidget(self._key_value_table(rows), 1)
+
+        movement = self.inspection.get("movement")
+        if movement:
+            frame = QFrame()
+            frame.setObjectName("infoCard")
+            frame_layout = QVBoxLayout(frame)
+            frame_layout.setContentsMargins(12, 10, 12, 10)
+            heading = QLabel("Movement assessment")
+            heading.setObjectName("sectionTitle")
+            value = QLabel(self._pretty_value(movement))
+            value.setWordWrap(True)
+            value.setObjectName("mutedLabel")
+            frame_layout.addWidget(heading)
+            frame_layout.addWidget(value)
+            layout.addWidget(frame)
+
+        explanation = QLabel(
+            "Source CRS describes how coordinates are stored in the file. A working CRS may be used "
+            "internally for distance, spacing and gridding. Import does not rewrite the original coordinates."
+        )
+        explanation.setWordWrap(True)
+        explanation.setObjectName("mutedLabel")
+        layout.addWidget(explanation)
+        return page
+
+    def _build_sensor_tab(self) -> QWidget:
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(10)
+
+        rows = [
+            ("Sensor serial", self._first("sensor_serial_number", "sensor_serial", default="—")),
+            ("Sensor mode", self._humanize(self._first("sensor_mode", default="—"))),
+            ("Magnetic value name", self._first("sensor_value_name", default="magnetic field")),
+            ("Magnetic unit", self._first("sensor_value_unit", "magnetic_units", default="nT")),
+            ("Sensor validation", self._yes_no(self.inspection.get("sensor_validation_enabled"))),
+            ("BNO / orientation", self._yes_no(self.inspection.get("bno_enabled"))),
+            ("Primary magnetic channel", self._first("magnetic_channel", default="Detected automatically")),
+        ]
+        layout.addWidget(self._key_value_table(rows), 0)
+
+        channels = self._collect_channels()
+        channel_table = QTableWidget(0, 2)
+        self._configure_table(channel_table, ["Available field / channel", "Status"])
+        channel_table.setRowCount(len(channels))
+        for row, channel in enumerate(channels):
+            channel_table.setItem(row, 0, QTableWidgetItem(channel))
+            channel_table.setItem(row, 1, QTableWidgetItem("Available"))
+        if not channels:
+            channel_table.setRowCount(1)
+            channel_table.setItem(0, 0, QTableWidgetItem("Reader will determine channels during import"))
+            channel_table.setItem(0, 1, QTableWidgetItem("Automatic"))
+        layout.addWidget(channel_table, 1)
+        return page
+
+    def _build_options_tab(self) -> QWidget:
+        page = QWidget()
+        outer = QVBoxLayout(page)
+        outer.setContentsMargins(12, 12, 12, 12)
+        outer.setSpacing(10)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        host = QWidget()
+        layout = QVBoxLayout(host)
+        layout.setContentsMargins(0, 0, 4, 0)
+        layout.setSpacing(10)
+
+        survey_card = QFrame()
+        survey_card.setObjectName("infoCard")
+        survey_layout = QGridLayout(survey_card)
+        survey_layout.setContentsMargins(14, 12, 14, 12)
+        survey_layout.setHorizontalSpacing(12)
+        survey_layout.setVerticalSpacing(8)
+        title = QLabel("Survey platform")
+        title.setObjectName("sectionTitle")
+        self.survey_combo = QComboBox()
+        for label, value in (
+            ("Ground", MagneticSurveyType.GROUND.value),
+            ("Drone", MagneticSurveyType.DRONE.value),
+            ("Airborne", MagneticSurveyType.AIRBORNE.value),
+            ("Marine", MagneticSurveyType.MARINE.value),
+        ):
+            self.survey_combo.addItem(label, value)
+        if self.importing_base:
+            self.survey_combo.clear()
+            self.survey_combo.addItem("Base Station", MagneticSurveyType.BASE_STATION.value)
+            self.survey_combo.setEnabled(False)
+        survey_layout.addWidget(title, 0, 0)
+        survey_layout.addWidget(self.survey_combo, 0, 1)
+        survey_help = QLabel(
+            "This controls which platform-specific QC tests are applicable. It does not change the raw measurements."
+        )
+        survey_help.setWordWrap(True)
+        survey_help.setObjectName("mutedLabel")
+        survey_layout.addWidget(survey_help, 1, 0, 1, 2)
+        layout.addWidget(survey_card)
+
+        crs_card = QFrame()
+        crs_card.setObjectName("infoCard")
+        crs_layout = QVBoxLayout(crs_card)
+        crs_layout.setContentsMargins(14, 12, 14, 12)
+        crs_layout.setSpacing(8)
+        crs_title = QLabel("Coordinate system handling")
+        crs_title.setObjectName("sectionTitle")
+        crs_layout.addWidget(crs_title)
+
+        detected = str(self.inspection.get("detected_crs") or "").strip()
+        self.crs_detected_radio = QRadioButton(
+            f"Use detected coordinate system ({detected})" if detected else "Use detected coordinate system"
+        )
+        self.crs_none_radio = QRadioButton(
+            "Import without a CRS for now (spatial QC can be skipped until one is assigned)"
+        )
+        self.crs_manual_radio = QRadioButton("I know the CRS and want to enter it manually")
+        self.crs_group = QButtonGroup(self)
+        for radio in (self.crs_detected_radio, self.crs_none_radio, self.crs_manual_radio):
+            self.crs_group.addButton(radio)
+            crs_layout.addWidget(radio)
+
+        self.crs_detected_radio.setEnabled(bool(detected))
+        if detected:
+            self.crs_detected_radio.setChecked(True)
+        else:
+            self.crs_none_radio.setChecked(True)
+
+        manual_row = QHBoxLayout()
+        manual_row.setContentsMargins(22, 0, 0, 0)
+        manual_label = QLabel("Manual CRS:")
+        self.crs_edit = QLineEdit(detected)
+        self.crs_edit.setPlaceholderText("Example: EPSG:4326")
+        self.crs_edit.setEnabled(False)
+        self.crs_manual_radio.toggled.connect(self.crs_edit.setEnabled)
+        manual_row.addWidget(manual_label)
+        manual_row.addWidget(self.crs_edit, 1)
+        crs_layout.addLayout(manual_row)
+
+        crs_help = QLabel(
+            "Most users should keep the detected option. Do not guess an EPSG code. If the CRS is unknown, "
+            "continue without one; non-spatial QC can still run normally."
+        )
+        crs_help.setWordWrap(True)
+        crs_help.setObjectName("mutedLabel")
+        crs_layout.addWidget(crs_help)
+        layout.addWidget(crs_card)
+
+        missing = self.inspection.get("required_missing")
+        if missing:
+            missing_card = QFrame()
+            missing_card.setObjectName("noticeCard")
+            missing_layout = QVBoxLayout(missing_card)
+            missing_layout.setContentsMargins(12, 9, 12, 9)
+            missing_title = QLabel("Reader notes")
+            missing_title.setObjectName("sectionTitle")
+            missing_text = QLabel(self._pretty_value(missing))
+            missing_text.setWordWrap(True)
+            missing_text.setObjectName("mutedLabel")
+            missing_layout.addWidget(missing_title)
+            missing_layout.addWidget(missing_text)
+            layout.addWidget(missing_card)
+
+        layout.addStretch(1)
+        scroll.setWidget(host)
+        outer.addWidget(scroll, 1)
+        return page
+
+    def _display_path(self) -> str:
+        value = self.inspection.get("path")
+        if not value:
+            return "—"
+        path = Path(str(value))
+        return f"{path.name}  —  {path.parent}"
+
+    def _classification_label(self) -> str:
+        value = str(self.inspection.get("suggested_acquisition_classification") or "").strip()
+        if not value:
+            return "Not determined"
+        return self._humanize(value)
+
+    def _collect_channels(self) -> list[str]:
+        candidates: list[str] = []
+        for key in ("available_channels", "channels", "detected_channels", "gps_fields", "bno_fields"):
+            value = self.inspection.get(key)
+            if isinstance(value, str):
+                candidates.extend(part.strip() for part in value.split(",") if part.strip())
+            elif isinstance(value, (list, tuple, set)):
+                candidates.extend(str(item).strip() for item in value if str(item).strip())
+        primary = self.inspection.get("magnetic_channel")
+        if primary:
+            candidates.insert(0, str(primary))
+        result: list[str] = []
+        seen: set[str] = set()
+        for item in candidates:
+            if item not in seen:
+                seen.add(item)
+                result.append(item)
+        return result
+
+    def _key_value_table(self, rows: Iterable[tuple[str, Any]]) -> QTableWidget:
+        table = QTableWidget(0, 2)
+        self._configure_table(table, ["Property", "Detected value"])
+        materialized = list(rows)
+        table.setRowCount(len(materialized))
+        for row, (key, value) in enumerate(materialized):
+            key_item = QTableWidgetItem(str(key))
+            value_item = QTableWidgetItem(self._pretty_value(value))
+            key_item.setFlags(key_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            value_item.setFlags(value_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            table.setItem(row, 0, key_item)
+            table.setItem(row, 1, value_item)
+        return table
+
+    @staticmethod
+    def _configure_table(table: QTableWidget, headers: list[str]) -> None:
+        table.setColumnCount(len(headers))
+        table.setHorizontalHeaderLabels(headers)
+        table.setAlternatingRowColors(True)
+        table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        table.verticalHeader().setVisible(False)
+        header = table.horizontalHeader()
+        if len(headers) >= 2:
+            header.setStretchLastSection(True)
+            header.setSectionResizeMode(0, header.ResizeMode.ResizeToContents)
+            for index in range(1, len(headers)):
+                header.setSectionResizeMode(index, header.ResizeMode.Stretch)
+
+    def _first(self, *keys: str, default: Any = None) -> Any:
+        for key in keys:
+            value = self.inspection.get(key)
+            if value not in (None, "", [], {}):
+                return value
+        return default
+
+    @staticmethod
+    def _humanize(value: Any) -> str:
+        return str(value).replace("_", " ").strip().title()
+
+    @staticmethod
+    def _yes_no(value: Any) -> str:
+        if value is None or value == "":
+            return "—"
+        if isinstance(value, str):
+            return "Yes" if value.strip().lower() in {"yes", "true", "1", "enabled"} else "No"
+        return "Yes" if bool(value) else "No"
+
+    @staticmethod
+    def _format_rate(value: Any) -> str:
+        if value in (None, ""):
+            return "—"
+        try:
+            return f"{float(value):g} Hz"
+        except (TypeError, ValueError):
+            return str(value)
+
+    @staticmethod
+    def _pretty_value(value: Any) -> str:
+        if value is None or value == "":
+            return "—"
+        if isinstance(value, dict):
+            return ";  ".join(f"{str(k).replace('_', ' ').title()}: {v}" for k, v in value.items())
+        if isinstance(value, (list, tuple, set)):
+            return ", ".join(str(item) for item in value)
+        return str(value)
