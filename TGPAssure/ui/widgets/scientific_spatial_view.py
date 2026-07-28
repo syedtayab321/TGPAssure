@@ -8,6 +8,7 @@ import numpy as np
 import pyqtgraph as pg
 
 try:
+    import matplotlib as mpl
     from matplotlib import cm
     from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
     from matplotlib.backends.backend_qtagg import NavigationToolbar2QT as NavigationToolbar
@@ -16,6 +17,7 @@ try:
     from matplotlib.tri import Triangulation
     from mpl_toolkits.mplot3d import Axes3D  # noqa: F401 - activates matplotlib 3D projection
 except Exception:  # Matplotlib is optional; pyqtgraph fallback remains available.
+    mpl = None
     FigureCanvas = None
     NavigationToolbar = None
     Figure = None
@@ -46,6 +48,7 @@ from core.domain.spatial_visualization import (
 
 # PyOpenGL logs the absence of its optional Cython accelerator at INFO level.
 logging.getLogger("OpenGL.acceleratesupport").setLevel(logging.WARNING)
+logger = logging.getLogger(__name__)
 
 try:
     import pyqtgraph.opengl as gl
@@ -173,6 +176,8 @@ class ScientificSpatialView(QWidget):
         self.canvas_3d = None
         self.toolbar_3d = None
         self._three_d_backend = "projected"
+        self._three_d_stack_index = -1
+        self._fallback_stack_index = -1
 
         if FigureCanvas is not None and Figure is not None:
             self._three_d_backend = "matplotlib"
@@ -199,19 +204,26 @@ class ScientificSpatialView(QWidget):
                 )
                 mpl_layout.addWidget(self.toolbar_3d)
             mpl_layout.addWidget(self.canvas_3d, 1)
-            self.stack.addWidget(mpl_holder)
+            self._three_d_stack_index = self.stack.addWidget(mpl_holder)
+            # Keep a software-only 3D preview permanently available.  If a future
+            # Matplotlib/backend incompatibility occurs, the user still gets a
+            # usable scientific view instead of an application-level exception.
+            self._fallback_stack_index = self.stack.addWidget(self.plot_3d_fallback)
         elif gl is not None and _USE_NATIVE_OPENGL_3D:
             self._three_d_backend = "opengl"
             try:
                 self.view_3d = gl.GLViewWidget()
                 self.view_3d.setBackgroundColor((255, 255, 255, 255))
-                self.stack.addWidget(self.view_3d)
+                self._three_d_stack_index = self.stack.addWidget(self.view_3d)
+                self._fallback_stack_index = self.stack.addWidget(self.plot_3d_fallback)
             except Exception:
                 self.view_3d = None
                 self._three_d_backend = "projected"
-                self.stack.addWidget(self.plot_3d_fallback)
+                self._fallback_stack_index = self.stack.addWidget(self.plot_3d_fallback)
+                self._three_d_stack_index = self._fallback_stack_index
         else:
-            self.stack.addWidget(self.plot_3d_fallback)
+            self._fallback_stack_index = self.stack.addWidget(self.plot_3d_fallback)
+            self._three_d_stack_index = self._fallback_stack_index
         root.addWidget(self.stack, 1)
 
         self.status = QLabel("No dataset loaded")
@@ -283,7 +295,8 @@ class ScientificSpatialView(QWidget):
             self.stack.setCurrentIndex(0)
             self._render_2d(payload)
         else:
-            self.stack.setCurrentIndex(1)
+            if self._three_d_stack_index >= 0:
+                self.stack.setCurrentIndex(self._three_d_stack_index)
             self._render_3d(payload, relief=(mode == "3d_relief"))
 
     @staticmethod
@@ -421,16 +434,63 @@ class ScientificSpatialView(QWidget):
 
     def _render_3d(self, payload: _SpatialPayload, *, relief: bool) -> None:
         if self._three_d_backend == "matplotlib" and self.canvas_3d is not None and self.figure_3d is not None:
-            self._render_3d_matplotlib(payload, relief=relief)
-            return
+            try:
+                if self._three_d_stack_index >= 0:
+                    self.stack.setCurrentIndex(self._three_d_stack_index)
+                self._render_3d_matplotlib(payload, relief=relief)
+                return
+            except Exception as exc:
+                # Graphics/backend/API differences must never crash the application.
+                # Fall back to the software-projected scientific preview and keep
+                # the exact cause in the application log for diagnostics.
+                logger.exception("Matplotlib 3D rendering failed; using projected fallback")
+                if self._fallback_stack_index >= 0:
+                    self.stack.setCurrentIndex(self._fallback_stack_index)
+                self._render_3d_fallback(
+                    payload, relief=relief,
+                    note=f"Matplotlib 3D fallback: {type(exc).__name__}: {exc}",
+                )
+                return
         if self._three_d_backend != "opengl" or self.view_3d is None or gl is None or not _USE_NATIVE_OPENGL_3D:
+            if self._fallback_stack_index >= 0:
+                self.stack.setCurrentIndex(self._fallback_stack_index)
             self._render_3d_fallback(payload, relief=relief)
             return
         try:
+            if self._three_d_stack_index >= 0:
+                self.stack.setCurrentIndex(self._three_d_stack_index)
             self._render_3d_opengl(payload, relief=relief)
         except Exception as exc:
-            self.stack.setCurrentIndex(1)
+            logger.exception("Native OpenGL 3D rendering failed; using projected fallback")
+            if self._fallback_stack_index >= 0:
+                self.stack.setCurrentIndex(self._fallback_stack_index)
             self._render_3d_fallback(payload, relief=relief, note=f"Native OpenGL fallback: {exc}")
+
+    @staticmethod
+    def _mpl_colormap(name: str = "viridis"):
+        """Return a Matplotlib colormap across old and new Matplotlib APIs.
+
+        Matplotlib's public colormap registry moved from ``matplotlib.cm.get_cmap``
+        to ``matplotlib.colormaps``.  Some recent builds no longer expose the old
+        function, which previously caused every 3D redraw/zoom/preset action to
+        raise an AttributeError.
+        """
+        registry = getattr(mpl, "colormaps", None) if mpl is not None else None
+        if registry is not None:
+            try:
+                return registry.get_cmap(str(name))
+            except Exception:
+                try:
+                    return registry[str(name)]
+                except Exception:
+                    pass
+        getter = getattr(cm, "get_cmap", None) if cm is not None else None
+        if callable(getter):
+            try:
+                return getter(str(name))
+            except Exception:
+                pass
+        return None
 
     @staticmethod
     def _nice_range(values: np.ndarray, pad_fraction: float = 0.05) -> tuple[float, float]:
@@ -522,7 +582,7 @@ class ScientificSpatialView(QWidget):
                 vmin -= 0.5
                 vmax += 0.5
             norm = Normalize(vmin=vmin, vmax=vmax)
-            cmap_obj = cm.get_cmap("viridis")
+            cmap_obj = self._mpl_colormap("viridis")
 
         # Draw a curtain/surface first so the 3D structure is visible, then draw
         # measurement dots over it so individual readings are still inspectable.

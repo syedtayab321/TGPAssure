@@ -261,6 +261,8 @@ class SeismicVisualizationDashboard(QWidget):
         self.tabs = QTabWidget()
         self.tabs.setObjectName("seismicMainTabs")
         self.tabs.setDocumentMode(True)
+        self.tabs.setUsesScrollButtons(True)
+        self.tabs.setElideMode(Qt.ElideNone)
         self.tabs.addTab(self._build_2d_tab(), "2D Viewer")
         self.tabs.addTab(self._build_3d_tab(), "3D Viewer")
         self.tabs.addTab(self._build_map_tab(), "Map & Geometry")
@@ -294,14 +296,16 @@ class SeismicVisualizationDashboard(QWidget):
 
         controls_card = QFrame()
         controls_card.setProperty("card", True)
-        controls_card.setMinimumWidth(305)
-        controls_card.setMaximumWidth(380)
+        controls_card.setMinimumWidth(330)
+        controls_card.setMaximumWidth(440)
         controls_layout = QVBoxLayout(controls_card)
         controls_layout.setContentsMargins(8, 8, 8, 8)
         controls_layout.setSpacing(6)
 
         self.tools_2d_tabs = QTabWidget()
         self.tools_2d_tabs.setObjectName("seismicToolTabs")
+        self.tools_2d_tabs.setUsesScrollButtons(True)
+        self.tools_2d_tabs.setElideMode(Qt.ElideNone)
         self.tools_2d_tabs.addTab(self._scroll_page(self._build_section_controls()), "Section")
         self.tools_2d_tabs.addTab(self._scroll_page(self._build_display_controls()), "Display")
         self.tools_2d_tabs.addTab(self._scroll_page(self._build_picking_controls()), "Picking")
@@ -318,7 +322,7 @@ class SeismicVisualizationDashboard(QWidget):
         splitter.addWidget(view_card)
         splitter.setStretchFactor(0, 0)
         splitter.setStretchFactor(1, 1)
-        splitter.setSizes([330, 1300])
+        splitter.setSizes([365, 1265])
         layout.addWidget(splitter)
         return tab
 
@@ -509,13 +513,15 @@ class SeismicVisualizationDashboard(QWidget):
 
         controls_card = QFrame()
         controls_card.setProperty("card", True)
-        controls_card.setMinimumWidth(305)
-        controls_card.setMaximumWidth(390)
+        controls_card.setMinimumWidth(350)
+        controls_card.setMaximumWidth(470)
         controls_layout = QVBoxLayout(controls_card)
         controls_layout.setContentsMargins(8, 8, 8, 8)
 
         self.tools_3d_tabs = QTabWidget()
         self.tools_3d_tabs.setObjectName("seismicToolTabs")
+        self.tools_3d_tabs.setUsesScrollButtons(True)
+        self.tools_3d_tabs.setElideMode(Qt.ElideNone)
         self.tools_3d_tabs.addTab(self._scroll_page(self._build_volume_controls()), "Volume")
         self.tools_3d_tabs.addTab(self._scroll_page(self._build_slice_controls()), "Slices")
         self.tools_3d_tabs.addTab(self._scroll_page(self._build_well_controls()), "Wells")
@@ -532,7 +538,7 @@ class SeismicVisualizationDashboard(QWidget):
         splitter.addWidget(view_card)
         splitter.setStretchFactor(0, 0)
         splitter.setStretchFactor(1, 1)
-        splitter.setSizes([335, 1300])
+        splitter.setSizes([405, 1225])
         layout.addWidget(splitter)
         return tab
 
@@ -675,8 +681,65 @@ class SeismicVisualizationDashboard(QWidget):
         tab = QWidget()
         layout = QVBoxLayout(tab)
         layout.setContentsMargins(6, 6, 6, 6)
-        self.geometry_map = SeismicGeometryMap(tab)
-        layout.addWidget(self.geometry_map, 1)
+        layout.setSpacing(6)
+
+        splitter = QSplitter(Qt.Horizontal, tab)
+        splitter.setChildrenCollapsible(False)
+
+        sidebar = QFrame(tab)
+        sidebar.setProperty("card", True)
+        sidebar.setMinimumWidth(265)
+        sidebar.setMaximumWidth(360)
+        side_layout = QVBoxLayout(sidebar)
+        side_layout.setContentsMargins(7, 7, 7, 7)
+
+        self.map_side_tabs = QTabWidget(sidebar)
+        self.map_side_tabs.setObjectName("seismicToolTabs")
+        self.map_side_tabs.setUsesScrollButtons(True)
+
+        summary_page = QWidget()
+        summary_layout = QVBoxLayout(summary_page)
+        summary_layout.setContentsMargins(8, 8, 8, 8)
+        summary_group = QGroupBox("Geometry Summary")
+        summary_group_layout = QVBoxLayout(summary_group)
+        self.map_summary_label = QLabel("Load seismic data to populate source, receiver and midpoint geometry statistics.")
+        self.map_summary_label.setWordWrap(True)
+        self.map_summary_label.setProperty("muted", True)
+        summary_group_layout.addWidget(self.map_summary_label)
+        summary_layout.addWidget(summary_group)
+        summary_layout.addStretch(1)
+        self.map_side_tabs.addTab(summary_page, "Summary")
+
+        guide_page = QWidget()
+        guide_layout = QVBoxLayout(guide_page)
+        guide_layout.setContentsMargins(8, 8, 8, 8)
+        guide_group = QGroupBox("Map Review")
+        guide_group_layout = QVBoxLayout(guide_group)
+        guide_text = QLabel(
+            "Use the map controls above the plot to toggle sources, receivers and midpoint/CDP geometry. "
+            "Fit Map restores the full XY extent while keeping a true 1:1 spatial aspect ratio."
+        )
+        guide_text.setWordWrap(True)
+        guide_text.setProperty("muted", True)
+        guide_group_layout.addWidget(guide_text)
+        guide_layout.addWidget(guide_group)
+        guide_layout.addStretch(1)
+        self.map_side_tabs.addTab(guide_page, "Guide")
+        side_layout.addWidget(self.map_side_tabs, 1)
+
+        map_card = QFrame(tab)
+        map_card.setProperty("plotCard", True)
+        map_layout = QVBoxLayout(map_card)
+        map_layout.setContentsMargins(4, 4, 4, 4)
+        self.geometry_map = SeismicGeometryMap(map_card)
+        map_layout.addWidget(self.geometry_map, 1)
+
+        splitter.addWidget(sidebar)
+        splitter.addWidget(map_card)
+        splitter.setStretchFactor(0, 0)
+        splitter.setStretchFactor(1, 1)
+        splitter.setSizes([300, 1330])
+        layout.addWidget(splitter, 1)
         return tab
 
     def _build_geospatial_tab(self) -> QWidget:
@@ -684,29 +747,67 @@ class SeismicVisualizationDashboard(QWidget):
         layout = QVBoxLayout(tab)
         layout.setContentsMargins(6, 6, 6, 6)
         layout.setSpacing(6)
-        toolbar = QFrame()
-        toolbar.setProperty("card", True)
-        row = QHBoxLayout(toolbar)
-        row.setContentsMargins(8, 5, 8, 5)
-        row.addWidget(QLabel("Projected coordinate CRS:"))
+
+        splitter = QSplitter(Qt.Horizontal, tab)
+        splitter.setChildrenCollapsible(False)
+
+        sidebar = QFrame(tab)
+        sidebar.setProperty("card", True)
+        sidebar.setMinimumWidth(280)
+        sidebar.setMaximumWidth(390)
+        side_layout = QVBoxLayout(sidebar)
+        side_layout.setContentsMargins(7, 7, 7, 7)
+        self.geospatial_side_tabs = QTabWidget(sidebar)
+        self.geospatial_side_tabs.setObjectName("seismicToolTabs")
+
+        crs_page = QWidget()
+        crs_layout = QVBoxLayout(crs_page)
+        crs_layout.setContentsMargins(8, 8, 8, 8)
+        crs_group = QGroupBox("Coordinate Reference System")
+        crs_group_layout = QVBoxLayout(crs_group)
         self.seismic_crs_edit = QLineEdit()
-        self.seismic_crs_edit.setPlaceholderText("Required for projected SEG-Y coordinates, e.g. EPSG:32642")
-        self.seismic_crs_edit.setMaximumWidth(360)
-        row.addWidget(self.seismic_crs_edit)
+        self.seismic_crs_edit.setPlaceholderText("e.g. EPSG:32642")
+        self.seismic_crs_edit.setToolTip("Required only when SEG-Y coordinates are projected and the CRS is not embedded in project metadata.")
+        crs_group_layout.addWidget(QLabel("Projected coordinate CRS"))
+        crs_group_layout.addWidget(self.seismic_crs_edit)
         refresh = self._button("Refresh Satellite Geometry", "secondary")
         refresh.clicked.connect(self._refresh_geospatial)
-        row.addWidget(refresh)
-        row.addStretch(1)
-        layout.addWidget(toolbar)
+        crs_group_layout.addWidget(refresh)
+        crs_layout.addWidget(crs_group)
+        crs_layout.addStretch(1)
+        self.geospatial_side_tabs.addTab(crs_page, "CRS")
+
+        info_page = QWidget()
+        info_layout = QVBoxLayout(info_page)
+        info_layout.setContentsMargins(8, 8, 8, 8)
+        info_group = QGroupBox("Coordinate Notes")
+        info_group_layout = QVBoxLayout(info_group)
         note = QLabel(
-            "SEG-Y stores coordinate values and unit codes but usually does not embed a complete CRS/EPSG definition. "
-            "Decimal-degree and arc-second coordinates are handled automatically; projected coordinates require the correct CRS."
+            "SEG-Y normally stores coordinate values and unit codes but not a complete EPSG definition. "
+            "Decimal-degree and arc-second coordinates are handled automatically. For projected XY data, "
+            "enter the verified CRS before using satellite/terrain overlays or geospatial exports."
         )
         note.setWordWrap(True)
         note.setProperty("muted", True)
-        layout.addWidget(note)
-        self.geospatial_view = GoogleGeospatialView(tab, title="Seismic Geometry — Satellite & 3D Terrain")
-        layout.addWidget(self.geospatial_view, 1)
+        info_group_layout.addWidget(note)
+        info_layout.addWidget(info_group)
+        info_layout.addStretch(1)
+        self.geospatial_side_tabs.addTab(info_page, "Info")
+        side_layout.addWidget(self.geospatial_side_tabs, 1)
+
+        map_card = QFrame(tab)
+        map_card.setProperty("plotCard", True)
+        map_layout = QVBoxLayout(map_card)
+        map_layout.setContentsMargins(4, 4, 4, 4)
+        self.geospatial_view = GoogleGeospatialView(map_card, title="Seismic Geometry — Satellite & 3D Terrain")
+        map_layout.addWidget(self.geospatial_view, 1)
+
+        splitter.addWidget(sidebar)
+        splitter.addWidget(map_card)
+        splitter.setStretchFactor(0, 0)
+        splitter.setStretchFactor(1, 1)
+        splitter.setSizes([315, 1315])
+        layout.addWidget(splitter, 1)
         return tab
 
     def _build_qc_tab(self) -> QWidget:
@@ -808,7 +909,9 @@ class SeismicVisualizationDashboard(QWidget):
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.NoFrame)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        widget.setMinimumWidth(305)
         scroll.setWidget(widget)
         return scroll
 
@@ -1022,6 +1125,7 @@ class SeismicVisualizationDashboard(QWidget):
         self._geometry_cache = geometry
         if hasattr(self, "geometry_map"):
             self.geometry_map.set_geometry(geometry)
+        self._refresh_map_summary(metadata, geometry)
         self._refresh_geospatial()
         self.volume = None
         self.raw_volume = None
@@ -1122,6 +1226,32 @@ class SeismicVisualizationDashboard(QWidget):
         self._show_status(
             f"Opened successfully: {self._current_path.name} — "
             f"{source.total_traces:,} traces, {source.total_samples:,} samples"
+        )
+
+    def _refresh_map_summary(self, metadata: dict[str, Any], geometry: dict[str, np.ndarray]) -> None:
+        if not hasattr(self, "map_summary_label"):
+            return
+        def finite_count(x_key: str, y_key: str) -> int:
+            x = np.asarray(geometry.get(x_key, []), dtype=float)
+            y = np.asarray(geometry.get(y_key, []), dtype=float)
+            n = min(x.size, y.size)
+            if n == 0:
+                return 0
+            valid = np.isfinite(x[:n]) & np.isfinite(y[:n]) & ~((x[:n] == 0) & (y[:n] == 0))
+            return int(np.count_nonzero(valid))
+
+        source_count = finite_count("source_x", "source_y")
+        receiver_count = finite_count("receiver_x", "receiver_y")
+        midpoint_count = finite_count("midpoint_x", "midpoint_y")
+        geometry_type = "3D inline/crossline" if bool(metadata.get("has_3d_geometry")) else "2D / curtain"
+        coordinate_units = metadata.get("coordinate_units") or metadata.get("coordinate_unit") or "from source headers"
+        self.map_summary_label.setText(
+            f"Geometry type: {geometry_type}\n\n"
+            f"Valid source positions: {source_count:,}\n"
+            f"Valid receiver positions: {receiver_count:,}\n"
+            f"Valid midpoint/CDP positions: {midpoint_count:,}\n\n"
+            f"Coordinate units: {coordinate_units}\n\n"
+            "The map remains in source XY coordinates until a verified CRS is supplied for geospatial conversion."
         )
 
     def reload_section(self) -> None:

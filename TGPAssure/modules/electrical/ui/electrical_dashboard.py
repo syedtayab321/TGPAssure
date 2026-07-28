@@ -884,16 +884,55 @@ class ElectricalDashboard(QWidget):
         banner_layout.addWidget(severity_tile, 0)
         layout.addWidget(banner)
 
-        splitter = QSplitter(Qt.Vertical)
-        splitter.setChildrenCollapsible(False)
+        # Keep each QC product on its own page.  The previous vertical splitter
+        # squeezed both tables into the same viewport and made long findings hard
+        # to review on normal laptop displays.
+        self.qc_result_tabs = QTabWidget(self.qc_tab)
+        self.qc_result_tabs.setDocumentMode(True)
+        self.qc_result_tabs.setUsesScrollButtons(True)
+
+        scorecard_page = QWidget()
+        scorecard_layout = QVBoxLayout(scorecard_page)
+        scorecard_layout.setContentsMargins(4, 4, 4, 4)
         self.stage_table = self._new_table(["Stage", "Status", "Score", "Findings", "Key metrics", "Summary"])
-        self.stage_table.setMinimumHeight(170)
+        self.stage_table.setMinimumHeight(320)
+        scorecard_layout.addWidget(self.stage_table, 1)
+        self.qc_result_tabs.addTab(scorecard_page, "Stage Scorecard")
+
+        findings_page = QWidget()
+        findings_layout = QVBoxLayout(findings_page)
+        findings_layout.setContentsMargins(4, 4, 4, 4)
         self.finding_table = self._new_table(["Severity", "Stage", "Code", "Finding", "Observed", "Recommended action"])
-        self.finding_table.setMinimumHeight(240)
-        splitter.addWidget(self.stage_table)
-        splitter.addWidget(self.finding_table)
-        splitter.setSizes([210, 450])
-        layout.addWidget(splitter, 1)
+        self.finding_table.setMinimumHeight(320)
+        findings_layout.addWidget(self.finding_table, 1)
+        self.qc_result_tabs.addTab(findings_page, "Findings & Actions")
+
+        charts_page = QWidget()
+        charts_layout = QVBoxLayout(charts_page)
+        charts_layout.setContentsMargins(4, 4, 4, 4)
+        charts_layout.setSpacing(5)
+        chart_tabs = QTabWidget(charts_page)
+        chart_tabs.setDocumentMode(True)
+
+        self.qc_stage_plot = pg.PlotWidget(background="w")
+        self.qc_stage_plot.showGrid(x=False, y=True, alpha=0.18)
+        self.qc_stage_plot.setLabel("left", "QC score (%)")
+        self.qc_stage_plot.setYRange(0, 105, padding=0)
+        chart_tabs.addTab(self.qc_stage_plot, "Stage Scores")
+
+        self.qc_severity_plot = pg.PlotWidget(background="w")
+        self.qc_severity_plot.showGrid(x=False, y=True, alpha=0.18)
+        self.qc_severity_plot.setLabel("left", "Finding count")
+        chart_tabs.addTab(self.qc_severity_plot, "Finding Severity")
+
+        self.qc_finding_stage_plot = pg.PlotWidget(background="w")
+        self.qc_finding_stage_plot.showGrid(x=False, y=True, alpha=0.18)
+        self.qc_finding_stage_plot.setLabel("left", "Findings")
+        chart_tabs.addTab(self.qc_finding_stage_plot, "Findings by Stage")
+
+        charts_layout.addWidget(chart_tabs, 1)
+        self.qc_result_tabs.addTab(charts_page, "QC Charts")
+        layout.addWidget(self.qc_result_tabs, 1)
 
     def _build_plot_tab(self) -> None:
         layout = QVBoxLayout(self.plot_tab)
@@ -1269,6 +1308,7 @@ class ElectricalDashboard(QWidget):
             placeholder.setForeground(QColor("#607587"))
             self.stage_table.setItem(0, 0, placeholder)
             self.stage_table.setSpan(0, 0, 1, max(1, self.stage_table.columnCount()))
+            self._refresh_qc_charts()
             return
         result = self.qc_result
         self.stage_table.setRowCount(len(result.stages))
@@ -1321,6 +1361,68 @@ class ElectricalDashboard(QWidget):
         self.finding_table.setColumnWidth(3, 390)
         self.finding_table.setColumnWidth(4, 100)
         self.finding_table.horizontalHeader().setSectionResizeMode(5, QHeaderView.Stretch)
+        self._refresh_qc_charts()
+
+    def _refresh_qc_charts(self) -> None:
+        """Render compact QC graphics without hiding the underlying tabular evidence."""
+        for name in ("qc_stage_plot", "qc_severity_plot", "qc_finding_stage_plot"):
+            plot = getattr(self, name, None)
+            if plot is not None:
+                plot.clear()
+        result = self.qc_result
+        if result is None:
+            for plot in (self.qc_stage_plot, self.qc_severity_plot, self.qc_finding_stage_plot):
+                plot.setTitle("Run Full QC to populate this chart")
+            return
+
+        stages = list(result.stages)
+        x = np.arange(len(stages), dtype=float)
+        scores = np.asarray([float(stage.score) for stage in stages], dtype=float)
+        brushes = []
+        for stage in stages:
+            status = str(stage.status).lower()
+            if status in {"fail", "failed", "error"}:
+                brushes.append(pg.mkBrush("#D9534F"))
+            elif status in {"warning", "warn", "review"}:
+                brushes.append(pg.mkBrush("#E5A11B"))
+            else:
+                brushes.append(pg.mkBrush("#2E9B63"))
+        if stages:
+            self.qc_stage_plot.addItem(pg.BarGraphItem(x=x, height=scores, width=0.68, brushes=brushes, pen=pg.mkPen("#FFFFFF")))
+            self.qc_stage_plot.addItem(pg.InfiniteLine(pos=80.0, angle=0, pen=pg.mkPen("#C87B00", width=1, style=Qt.DashLine)))
+            labels = [(float(i), _short_stage_label(stage.stage_name)) for i, stage in enumerate(stages)]
+            self.qc_stage_plot.getAxis("bottom").setTicks([labels])
+            self.qc_stage_plot.setXRange(-0.8, max(0.8, len(stages) - 0.2), padding=0)
+            self.qc_stage_plot.setYRange(0, 105, padding=0)
+            self.qc_stage_plot.setTitle("QC stage scorecard — green pass, amber review, red fail")
+
+        severity_order = ["error", "warning", "info"]
+        counts = {key: 0 for key in severity_order}
+        for finding in result.findings:
+            key = str(finding.severity).lower()
+            if key in {"critical", "fail", "failed"}:
+                key = "error"
+            elif key in {"warn", "review"}:
+                key = "warning"
+            if key in counts:
+                counts[key] += 1
+        sev_x = np.arange(3, dtype=float)
+        sev_values = np.asarray([counts[key] for key in severity_order], dtype=float)
+        sev_brushes = [pg.mkBrush("#D9534F"), pg.mkBrush("#E5A11B"), pg.mkBrush("#2B8FBF")]
+        self.qc_severity_plot.addItem(pg.BarGraphItem(x=sev_x, height=sev_values, width=0.62, brushes=sev_brushes, pen=pg.mkPen("#FFFFFF")))
+        self.qc_severity_plot.getAxis("bottom").setTicks([[(0.0, "Error"), (1.0, "Warning"), (2.0, "Info")]])
+        self.qc_severity_plot.setXRange(-0.8, 2.8, padding=0)
+        self.qc_severity_plot.setYRange(0, max(1.0, float(np.max(sev_values)) * 1.18), padding=0)
+        self.qc_severity_plot.setTitle(f"Automated findings — {len(result.findings)} total")
+
+        finding_counts = np.asarray([len(stage.findings) for stage in stages], dtype=float)
+        if stages:
+            stage_brushes = [pg.mkBrush("#347FA8") for _ in stages]
+            self.qc_finding_stage_plot.addItem(pg.BarGraphItem(x=x, height=finding_counts, width=0.68, brushes=stage_brushes, pen=pg.mkPen("#FFFFFF")))
+            self.qc_finding_stage_plot.getAxis("bottom").setTicks([[(float(i), _short_stage_label(stage.stage_name)) for i, stage in enumerate(stages)]])
+            self.qc_finding_stage_plot.setXRange(-0.8, max(0.8, len(stages) - 0.2), padding=0)
+            self.qc_finding_stage_plot.setYRange(0, max(1.0, float(np.max(finding_counts)) * 1.18), padding=0)
+            self.qc_finding_stage_plot.setTitle("Finding concentration by QC stage")
 
     def _refresh_plot(self, force_mode: str | None = None) -> None:
         self.plot_widget.clear()
@@ -1559,6 +1661,11 @@ class ElectricalDashboard(QWidget):
         table.setColumnWidth(0, 190)
         table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
 
+
+
+def _short_stage_label(value: str, maximum: int = 18) -> str:
+    text = str(value or "").replace(" / ", "/").strip()
+    return text if len(text) <= maximum else text[: maximum - 1] + "…"
 
 def _display(value: Any) -> str:
     if isinstance(value, (np.floating, float)):

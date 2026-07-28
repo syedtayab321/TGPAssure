@@ -5,6 +5,7 @@ from typing import Any, Iterable
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
+    QAbstractItemView,
     QButtonGroup,
     QComboBox,
     QDialog,
@@ -30,7 +31,12 @@ _DIALOG_QSS = """
 QDialog {
     background: #F5F7FA;
 }
-QFrame#headerCard,
+QFrame#headerCard {
+    background: qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 #F7FBFE, stop:1 #EAF5FB);
+    border: 1px solid #BFD9E7;
+    border-left: 4px solid #1687B8;
+    border-radius: 8px;
+}
 QFrame#infoCard,
 QFrame#noticeCard {
     background: #FFFFFF;
@@ -42,8 +48,8 @@ QFrame#noticeCard {
     border-color: #E5C86D;
 }
 QLabel#dialogTitle {
-    color: #123047;
-    font-size: 18px;
+    color: #0C3852;
+    font-size: 16px;
     font-weight: 700;
 }
 QLabel#dialogSubtitle {
@@ -83,6 +89,8 @@ QTabBar::tab:selected {
     background: #FFFFFF;
     color: #0B6FA4;
     border-bottom-color: #FFFFFF;
+    border-top: 3px solid #1687B8;
+    padding-top: 6px;
     font-weight: 700;
 }
 QTabBar::tab:hover:!selected {
@@ -144,8 +152,8 @@ class MagneticImportDialog(QDialog):
         self.inspection = dict(inspection)
         self.importing_base = importing_base
         self.setWindowTitle("Magnetic Data Import")
-        self.resize(900, 650)
-        self.setMinimumSize(760, 540)
+        self.resize(790, 575)
+        self.setMinimumSize(700, 500)
         self.setStyleSheet(_DIALOG_QSS)
         self._build_ui()
 
@@ -178,6 +186,7 @@ class MagneticImportDialog(QDialog):
         self.tabs.addTab(self._build_overview_tab(), "Overview")
         self.tabs.addTab(self._build_coordinates_tab(), "Coordinates & GPS")
         self.tabs.addTab(self._build_sensor_tab(), "Sensor & Channels")
+        self.tabs.addTab(self._build_preview_tab(), "Data Preview")
         self.tabs.addTab(self._build_options_tab(), "Import Settings")
         root.addWidget(self.tabs, 1)
 
@@ -255,6 +264,8 @@ class MagneticImportDialog(QDialog):
         rows = [
             ("File", self._display_path()),
             ("Format", self._first("format", "reader", default="Unknown")),
+            ("Delimiter", self._first("delimiter", default="—")),
+            ("Detection confidence", self._confidence_label()),
             ("Log name", self._first("log_name", default="—")),
             ("Remark", self._first("remark", default="—")),
             ("Magnetic field", self._first("magnetic_channel", default="Detected automatically")),
@@ -331,6 +342,7 @@ class MagneticImportDialog(QDialog):
             ("Sensor validation", self._yes_no(self.inspection.get("sensor_validation_enabled"))),
             ("BNO / orientation", self._yes_no(self.inspection.get("bno_enabled"))),
             ("Primary magnetic channel", self._first("magnetic_channel", default="Detected automatically")),
+            ("Sample magnetic range", self._value_range("total_field")),
         ]
         layout.addWidget(self._key_value_table(rows), 0)
 
@@ -346,6 +358,79 @@ class MagneticImportDialog(QDialog):
             channel_table.setItem(0, 0, QTableWidgetItem("Reader will determine channels during import"))
             channel_table.setItem(0, 1, QTableWidgetItem("Automatic"))
         layout.addWidget(channel_table, 1)
+        return page
+
+    def _build_preview_tab(self) -> QWidget:
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setSpacing(8)
+
+        preview_tabs = QTabWidget(page)
+        preview_tabs.setDocumentMode(True)
+
+        mapping_page = QWidget()
+        mapping_layout = QVBoxLayout(mapping_page)
+        mapping_layout.setContentsMargins(6, 6, 6, 6)
+        mapping = self.inspection.get("mapping") if isinstance(self.inspection.get("mapping"), dict) else {}
+        mapping_table = QTableWidget(0, 4)
+        self._configure_table(mapping_table, ["TGPAssure field", "Source column", "Detected", "Sample range"] )
+        mapping_items = sorted(mapping.items()) if mapping else []
+        mapping_table.setRowCount(max(1, len(mapping_items)))
+        if mapping_items:
+            ranges = self.inspection.get("value_ranges") if isinstance(self.inspection.get("value_ranges"), dict) else {}
+            for row, (canonical, source) in enumerate(mapping_items):
+                values = [
+                    str(canonical).replace("_", " ").title(),
+                    str(source),
+                    "Mapped",
+                    str(ranges.get(canonical, "—")),
+                ]
+                for column, value in enumerate(values):
+                    item = QTableWidgetItem(value)
+                    item.setToolTip(value)
+                    mapping_table.setItem(row, column, item)
+        else:
+            mapping_table.setItem(0, 0, QTableWidgetItem("No automatic mapping was returned by the reader"))
+            mapping_table.setSpan(0, 0, 1, 4)
+        mapping_layout.addWidget(mapping_table, 1)
+        preview_tabs.addTab(mapping_page, "Detected Mapping")
+
+        source_page = QWidget()
+        source_layout = QVBoxLayout(source_page)
+        source_layout.setContentsMargins(6, 6, 6, 6)
+        preview_rows = self.inspection.get("preview") if isinstance(self.inspection.get("preview"), list) else []
+        headers = list(self.inspection.get("headers") or [])
+        if not headers and preview_rows:
+            headers = list(preview_rows[0].keys())
+        source_table = QTableWidget(0, len(headers))
+        self._configure_table(source_table, [str(header) for header in headers])
+        source_table.setRowCount(len(preview_rows))
+        for row_index, row in enumerate(preview_rows):
+            if not isinstance(row, dict):
+                continue
+            for column, header in enumerate(headers):
+                value = str(row.get(header, ""))
+                item = QTableWidgetItem(value)
+                item.setToolTip(value)
+                source_table.setItem(row_index, column, item)
+        if not preview_rows:
+            source_table.setRowCount(1)
+            source_table.setColumnCount(max(1, len(headers)))
+            if headers:
+                source_table.setHorizontalHeaderLabels(headers)
+            source_table.setItem(0, 0, QTableWidgetItem("No preview rows were returned by the reader"))
+            source_table.setSpan(0, 0, 1, max(1, len(headers)))
+        source_layout.addWidget(source_table, 1)
+        preview_tabs.addTab(source_page, "Source Values")
+
+        layout.addWidget(preview_tabs, 1)
+        hint = QLabel(
+            "These values are read directly from the selected file during inspection. The detected mapping is the mapping that will be used during import unless an explicit reader override is supplied."
+        )
+        hint.setWordWrap(True)
+        hint.setObjectName("mutedLabel")
+        layout.addWidget(hint)
         return page
 
     def _build_options_tab(self) -> QWidget:
@@ -498,12 +583,18 @@ class MagneticImportDialog(QDialog):
         materialized = list(rows)
         table.setRowCount(len(materialized))
         for row, (key, value) in enumerate(materialized):
-            key_item = QTableWidgetItem(str(key))
-            value_item = QTableWidgetItem(self._pretty_value(value))
+            key_text = str(key)
+            value_text = self._pretty_value(value)
+            key_item = QTableWidgetItem(key_text)
+            value_item = QTableWidgetItem(value_text)
+            key_item.setToolTip(key_text)
+            value_item.setToolTip(value_text)
             key_item.setFlags(key_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
             value_item.setFlags(value_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
             table.setItem(row, 0, key_item)
             table.setItem(row, 1, value_item)
+        table.setWordWrap(True)
+        table.resizeRowsToContents()
         return table
 
     @staticmethod
@@ -514,12 +605,32 @@ class MagneticImportDialog(QDialog):
         table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         table.verticalHeader().setVisible(False)
+        table.verticalHeader().setDefaultSectionSize(25)
+        table.setWordWrap(True)
+        table.setHorizontalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
+        table.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
         header = table.horizontalHeader()
         if len(headers) >= 2:
             header.setStretchLastSection(True)
             header.setSectionResizeMode(0, header.ResizeMode.ResizeToContents)
             for index in range(1, len(headers)):
                 header.setSectionResizeMode(index, header.ResizeMode.Stretch)
+
+    def _confidence_label(self) -> str:
+        value = self.inspection.get("confidence")
+        try:
+            confidence = float(value)
+        except (TypeError, ValueError):
+            return "—"
+        return f"{confidence * 100.0:.0f}%"
+
+    def _value_range(self, key: str) -> str:
+        ranges = self.inspection.get("value_ranges")
+        if isinstance(ranges, dict):
+            value = ranges.get(key)
+            if value not in (None, ""):
+                return str(value)
+        return "—"
 
     def _first(self, *keys: str, default: Any = None) -> Any:
         for key in keys:

@@ -2934,7 +2934,13 @@ class MagneticDashboard(QWidget):
         for row, (key, value) in enumerate(rows):
             key_item = QTableWidgetItem(str(key))
             value_item = QTableWidgetItem(MagneticDashboard._display_value(value))
-            key_item.setFont(QFont(key_item.font().family(), key_item.font().pointSize(), QFont.Weight.DemiBold))
+            # Preserve the inherited font size.  Qt can represent stylesheet fonts
+            # with pointSize() == -1; constructing a new QFont with that value emits
+            # QFont::setPointSize warnings.  Changing only the weight is safe for
+            # both point-sized and pixel-sized application fonts.
+            key_font = key_item.font()
+            key_font.setWeight(QFont.Weight.DemiBold)
+            key_item.setFont(key_font)
             table.setItem(row, 0, key_item)
             table.setItem(row, 1, value_item)
         table.resizeRowsToContents()

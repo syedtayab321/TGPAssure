@@ -28,22 +28,155 @@ class GenericDelimitedMagneticReader(MagneticFormatReader):
         delimiter, headers, preview = self._inspect_file(path, options)
         inspection = MagneticSchemaDetector().inspect(headers, base=options.role == MagneticDataRole.BASE)
         detected_crs, coordinate_type = self._infer_crs_from_headers(headers, inspection.mapping, options.crs)
+        profile = self._inspection_profile(path, delimiter, headers, inspection.mapping, options)
+        if not detected_crs and profile.get("x_values") is not None and profile.get("y_values") is not None:
+            detected_crs, coordinate_type = self._infer_crs_from_values(
+                profile["x_values"], profile["y_values"], options.crs
+            )
+        primary = inspection.mapping.get("total_field")
         return {
             "path": str(path),
             "reader": type(self).__name__,
             "format": "Delimited magnetic table",
             "format_id": "generic_delimited",
-            "delimiter": delimiter,
+            "delimiter": "whitespace" if delimiter == " " else delimiter,
             "headers": headers,
-            "preview": preview,
+            "preview": profile.get("preview", preview),
             "mapping": inspection.mapping,
             "required_missing": inspection.required_missing,
             "confidence": inspection.confidence,
             "detected_crs": detected_crs,
             "coordinate_type": coordinate_type,
-            "crs_confidence": "medium" if detected_crs else "unknown",
+            "crs_confidence": "high" if detected_crs == "EPSG:4326" else ("medium" if detected_crs else "unknown"),
             "recommended_working_crs": None,
+            "magnetic_channel": primary,
+            "magnetic_units": self._infer_magnetic_units(primary, headers, options.magnetic_units),
+            "available_channels": headers,
+            "record_counts": {"Data records": profile.get("record_count", 0), "Detected fields": len(headers)},
+            "suggested_acquisition_classification": profile.get("classification"),
+            "gps_enabled": bool("x" in inspection.mapping and "y" in inspection.mapping),
+            "gps_rate_hz": profile.get("gps_rate_hz"),
+            "gps_fields": [inspection.mapping[key] for key in ("x", "y", "elevation", "gps_quality", "gps_hdop", "satellites") if key in inspection.mapping],
+            "bno_fields": [inspection.mapping[key] for key in ("roll", "pitch", "yaw", "heading") if key in inspection.mapping],
+            "movement": profile.get("movement"),
+            "value_ranges": profile.get("value_ranges", {}),
         }
+
+    def _inspection_profile(
+        self,
+        path: Path,
+        delimiter: str,
+        headers: list[str],
+        mapping: dict[str, str],
+        options: ReaderOptions,
+    ) -> dict[str, Any]:
+        """Read enough real rows to populate the import dialog with evidence.
+
+        Inspection runs in the dashboard's background worker, so it is safe to
+        scan the source once here.  Only a bounded sample is retained in memory.
+        """
+        sample_rows: list[dict[str, str]] = []
+        record_count = 0
+        with path.open("r", encoding=options.encoding, errors="replace", newline="") as stream:
+            rows = self._dict_rows(self._data_lines(stream), delimiter)
+            for row in rows:
+                if not row or all(not str(value or "").strip() for value in row.values()):
+                    continue
+                record_count += 1
+                if len(sample_rows) < 250:
+                    sample_rows.append(dict(row))
+
+        x_values = self._sample_numeric(sample_rows, mapping.get("x"))
+        y_values = self._sample_numeric(sample_rows, mapping.get("y"))
+        movement: dict[str, Any] = {}
+        classification = None
+        if x_values.size and y_values.size:
+            valid = np.isfinite(x_values) & np.isfinite(y_values)
+            if np.any(valid):
+                x_span = float(np.nanmax(x_values[valid]) - np.nanmin(x_values[valid]))
+                y_span = float(np.nanmax(y_values[valid]) - np.nanmin(y_values[valid]))
+                lonlat = bool(
+                    np.all(np.abs(x_values[valid]) <= 180.0)
+                    and np.all(np.abs(y_values[valid]) <= 90.0)
+                )
+                movement_threshold = 1e-5 if lonlat else 0.5
+                classification = "moving" if max(x_span, y_span) > movement_threshold else "stationary"
+                movement = {
+                    "classification": classification,
+                    "sampled_records": int(np.count_nonzero(valid)),
+                    "x_span": round(x_span, 8),
+                    "y_span": round(y_span, 8),
+                    "coordinate_basis": "degrees" if lonlat else "source coordinate units",
+                }
+
+        value_ranges: dict[str, str] = {}
+        for canonical in ("total_field", "base_field", "x", "y", "elevation", "temperature", "gps_hdop", "satellites"):
+            source = mapping.get(canonical)
+            values = self._sample_numeric(sample_rows, source)
+            finite = values[np.isfinite(values)]
+            if finite.size:
+                value_ranges[canonical] = f"{float(np.min(finite)):g} to {float(np.max(finite)):g}"
+
+        timestamps = self._sample_timestamps(sample_rows, mapping)
+        gps_rate_hz = None
+        valid_times = timestamps[~np.isnat(timestamps)]
+        if valid_times.size >= 2:
+            deltas = np.diff(valid_times).astype("timedelta64[ms]").astype(float) / 1000.0
+            deltas = deltas[np.isfinite(deltas) & (deltas > 0)]
+            if deltas.size:
+                median_delta = float(np.median(deltas))
+                if median_delta > 0:
+                    gps_rate_hz = round(1.0 / median_delta, 3)
+
+        return {
+            "record_count": record_count,
+            "preview": sample_rows[:8],
+            "classification": classification,
+            "movement": movement,
+            "value_ranges": value_ranges,
+            "gps_rate_hz": gps_rate_hz,
+            "x_values": x_values,
+            "y_values": y_values,
+        }
+
+    @staticmethod
+    def _sample_numeric(rows: list[dict[str, str]], source: str | None) -> np.ndarray:
+        if not source:
+            return np.empty(0, dtype=float)
+        values: list[float] = []
+        for row in rows:
+            text = str(row.get(source, "") or "").strip().replace(" ", "")
+            if text.count(",") == 1 and "." not in text:
+                text = text.replace(",", ".")
+            try:
+                values.append(float(text))
+            except (TypeError, ValueError):
+                values.append(float("nan"))
+        return np.asarray(values, dtype=float)
+
+    def _sample_timestamps(self, rows: list[dict[str, str]], mapping: dict[str, str]) -> np.ndarray:
+        if not rows:
+            return np.empty(0, dtype="datetime64[ms]")
+        columns: dict[str, list[Any]] = {}
+        for canonical in ("timestamp", "date", "time"):
+            source = mapping.get(canonical)
+            if source:
+                columns[canonical] = [row.get(source, "") for row in rows]
+        if "timestamp" not in columns and not ({"date", "time"} <= columns.keys()):
+            return np.empty(0, dtype="datetime64[ms]")
+        return np.asarray([self._parse_timestamp(columns, i) for i in range(len(rows))], dtype="datetime64[ms]")
+
+    @staticmethod
+    def _infer_magnetic_units(primary: str | None, headers: list[str], fallback: str) -> str:
+        text = normalise_header(primary or "")
+        raw = str(primary or "").lower()
+        if "ut" in text or "µt" in raw or "microtesla" in raw:
+            return "µT"
+        if "gamma" in text:
+            return "gamma"
+        if "nt" in text or "nanotesla" in raw:
+            return "nT"
+        return str(fallback or "nT")
 
     def read(self, path: Path, options: ReaderOptions | None = None) -> MagneticDataset:
         options = options or ReaderOptions()
