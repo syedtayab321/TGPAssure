@@ -347,6 +347,8 @@ class SegyQcView(QWidget):
         self.main_tabs.currentChanged.connect(self._sync_sidebar_selection)
         self._apply_styles()
         self._set_tab_icons()
+        if hasattr(self, "results_empty_state"):
+            self.results_empty_state.setVisible(True)
         self._sync_sidebar_selection(0)
         self._update_responsive_layout(force=True)
 
@@ -538,8 +540,52 @@ class SegyQcView(QWidget):
         status_layout.addWidget(workflow, 0, 1)
         status_layout.setColumnStretch(1, 1)
         layout.addWidget(status_panel)
+        self.run_empty_state = self._build_empty_state(
+            "Run QC workflow is ready",
+            "After you click Run QC, stage progress, live status and report actions will appear here.",
+            [
+                "Load or inspect the raw SEG-Y file",
+                "Select the QC profile and thresholds",
+                "Run the automated QC pipeline",
+                "Review stage metrics, findings and export reports",
+            ],
+        )
+        layout.addWidget(self.run_empty_state)
         layout.addStretch(1)
         return page
+
+    def _build_empty_state(self, title: str, message: str, steps: List[str] | None = None) -> QWidget:
+        frame = QFrame()
+        frame.setObjectName("emptyState")
+        box = QVBoxLayout(frame)
+        box.setContentsMargins(12, 10, 12, 10)
+        box.setSpacing(5)
+        heading = QLabel(title)
+        heading.setObjectName("emptyTitle")
+        body = QLabel(message)
+        body.setObjectName("emptyText")
+        body.setWordWrap(True)
+        box.addWidget(heading)
+        box.addWidget(body)
+        if steps:
+            step_grid = QGridLayout()
+            step_grid.setContentsMargins(0, 3, 0, 0)
+            step_grid.setHorizontalSpacing(6)
+            step_grid.setVerticalSpacing(5)
+            for index, step in enumerate(steps):
+                badge = QLabel(str(index + 1))
+                badge.setObjectName("stepBadge")
+                badge.setAlignment(Qt.AlignCenter)
+                text = QLabel(step)
+                text.setObjectName("emptyText")
+                text.setWordWrap(True)
+                row = index // 2
+                col = (index % 2) * 2
+                step_grid.addWidget(badge, row, col)
+                step_grid.addWidget(text, row, col + 1)
+                step_grid.setColumnStretch(col + 1, 1)
+            box.addLayout(step_grid)
+        return frame
 
     def _build_source_card(self) -> QGroupBox:
         group = QGroupBox("SEG-Y Review Workflow")
@@ -760,6 +806,13 @@ class SegyQcView(QWidget):
         self.results_xlsx_button.clicked.connect(lambda: self.request_report("xlsx"))
         bar_layout.addWidget(self.results_xlsx_button)
         layout.addWidget(top_bar)
+
+        self.results_empty_state = self._build_empty_state(
+            "No QC run loaded yet",
+            "Run the SEG-Y QC pipeline or load a previous run. This area will then show stage scores, findings, metrics and report status.",
+            ["Stage table", "Selected-stage metrics", "Findings and actions", "PDF/XLSX export"],
+        )
+        layout.addWidget(self.results_empty_state)
 
         self.summary_grid_widget = QWidget()
         self.summary_grid = QGridLayout(self.summary_grid_widget)
@@ -1316,6 +1369,31 @@ class SegyQcView(QWidget):
                 border: 1px solid #E1E8EF;
                 border-radius: 6px;
             }
+            QFrame#emptyState {
+                background: #F6FAFC;
+                border: 1px dashed #BFD3E2;
+                border-radius: 8px;
+            }
+            QLabel#emptyTitle {
+                color: #17364B;
+                font-size: 10.0pt;
+                font-weight: 900;
+            }
+            QLabel#emptyText {
+                color: #607889;
+                font-size: 7.9pt;
+            }
+            QLabel#stepBadge {
+                min-width: 20px;
+                max-width: 20px;
+                min-height: 20px;
+                max-height: 20px;
+                color: #FFFFFF;
+                background: #0A86C7;
+                border-radius: 10px;
+                font-size: 7.7pt;
+                font-weight: 900;
+            }
             QLabel#tileTitle, QLabel#summaryTitle, QLabel#detailTitle {
                 color: #64748B;
                 font-size: 7.6pt;
@@ -1830,6 +1908,8 @@ class SegyQcView(QWidget):
         self.progress_message.setText("Preparing QC pipeline")
         self._set_status_badge("STARTING", "running")
         self.stage_table.setRowCount(0)
+        if hasattr(self, "results_empty_state"):
+            self.results_empty_state.setVisible(False)
         self._stage_row_by_key.clear()
         self._stage_items.clear()
         self._stage_sections.clear()
@@ -1843,6 +1923,8 @@ class SegyQcView(QWidget):
             label.setText("—")
 
     def _initialize_stages(self, stages: List[Dict[str, Any]]) -> None:
+        if hasattr(self, "results_empty_state"):
+            self.results_empty_state.setVisible(False)
         self.stage_table.setRowCount(len(stages))
         self._stage_row_by_key.clear()
         for row, stage in enumerate(stages):
@@ -2002,6 +2084,8 @@ class SegyQcView(QWidget):
         self.file_info_labels["trace_count"].setText(
             f"{int(summary.get('trace_count', 0)):,}"
         )
+        if hasattr(self, "results_empty_state"):
+            self.results_empty_state.setVisible(False)
         self._update_summary(summary)
         self.refresh_findings()
         self.refresh_history()
@@ -2083,6 +2167,8 @@ class SegyQcView(QWidget):
                 stage.get("metrics", {}),
             )
 
+        if hasattr(self, "results_empty_state"):
+            self.results_empty_state.setVisible(False)
         self._findings = findings
         self._populate_findings(findings)
         self._update_summary(summary or run)
@@ -2125,11 +2211,10 @@ class SegyQcView(QWidget):
                 current_file_only=bool(self.controller.file_path),
             )
             if not runs:
-                QMessageBox.information(
-                    self,
-                    "SEG-Y QC Results",
-                    "No QC result is available yet.",
-                )
+                if hasattr(self, "results_empty_state"):
+                    self.results_empty_state.setVisible(True)
+                self.main_tabs.setCurrentWidget(self.results_tab)
+                self.progress_message.setText("No QC result available yet")
                 return
             self.controller.load_run(runs[0]["run_uuid"])
         else:

@@ -79,6 +79,14 @@ class HomeRibbonProvider(RibbonProvider):
                 RibbonAction("Console", "toggle_console", icon="utilities-terminal", presentation="small"),
             ],
         )
+        account_group = RibbonGroup(
+            label="Account",
+            actions=[
+                RibbonAction("Subscription", "subscription_modules", icon="view-statistics", presentation="large", column=0, accent=True),
+                RibbonAction("Logout", "logout_account", icon="system-log-out", presentation="small", column=1),
+            ],
+        )
+
         settings_group = RibbonGroup(
             label="Application",
             actions=[
@@ -87,4 +95,4 @@ class HomeRibbonProvider(RibbonProvider):
                 RibbonAction("About", "about", icon="help-about", presentation="small"),
             ],
         )
-        return [file_group, clipboard_group, project_group, workspace_group, settings_group]
+        return [file_group, clipboard_group, project_group, workspace_group, account_group, settings_group]

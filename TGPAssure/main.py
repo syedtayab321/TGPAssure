@@ -18,6 +18,7 @@ from core.infrastructure.logging_configurator import LoggingConfigurator
 from core.infrastructure.settings_store import SettingsStore
 from core.infrastructure.command_bus import CommandBus
 from core.infrastructure.resource_paths import resource_path
+from core.auth import AuthEnvironment, LicenseService
 from modules.workspace.workspace_manager import WorkspaceManager
 from modules.seismic.segy_qc.segy_qc_controller import SegyQcController
 from modules.seismic.segy_qc.segy_qc_view import SegyQcView
@@ -31,6 +32,8 @@ from modules.collaboration.collaboration_service import CollaborationService
 from core.domain.data_quality_service import DataQualityService
 from ui.docks.data_quality_dashboard import DataQualityDashboard
 from ui.launch import StartupSplash, TutorialDialog
+from ui.dialogs.auth_dialog import AuthDialog
+from ui.dialogs.subscription_dialog import SubscriptionDialog
 
 
 
@@ -416,7 +419,7 @@ def initialize_database(db_engine: DatabaseEngine) -> None:
         conn.close()
 
 
-def setup_container(db_engine: DatabaseEngine, app_data_dir: Path) -> ServiceContainer:
+def setup_container(db_engine: DatabaseEngine, app_data_dir: Path, license_service: LicenseService | None = None) -> ServiceContainer:
     container = ServiceContainer()
 
     container.register(DatabaseEngine, db_engine)
@@ -463,6 +466,9 @@ def setup_container(db_engine: DatabaseEngine, app_data_dir: Path) -> ServiceCon
 
     command_bus = CommandBus()
     container.register(CommandBus, command_bus)
+
+    if license_service is not None:
+        container.register(LicenseService, license_service)
 
     return container
 
@@ -563,6 +569,18 @@ def main() -> int:
         if single_instance.forward_to_existing(startup_paths):
             return 0
 
+    auth_env = AuthEnvironment.load(Path(__file__).resolve().parent, app_data_dir)
+    license_service = LicenseService(app_data_dir, auth_env)
+    show_subscription_after_login = False
+    if not license_service.try_auto_login():
+        auth_dialog = AuthDialog(license_service)
+        if auth_dialog.exec() != AuthDialog.Accepted:
+            single_instance.close()
+            crash_handler.uninstall()
+            logger.info("Application exited before login")
+            return 0
+        show_subscription_after_login = license_service.current_plan == "free"
+
     splash = StartupSplash()
     splash.show()
     splash.set_stage('Opening secure workspace…')
@@ -574,7 +592,7 @@ def main() -> int:
     splash.set_stage('Initializing project database…')
     app.processEvents()
     initialize_database(db_engine)
-    container = setup_container(db_engine, app_data_dir)
+    container = setup_container(db_engine, app_data_dir, license_service)
 
     main_window = MainWindow(container)
     splash.set_stage('Loading quality-control tools…')
@@ -665,7 +683,15 @@ def main() -> int:
                 restore_path = str(candidate)
                 QTimer.singleShot(150, lambda path=restore_path: main_window.open_project_path(path, silent=True))
 
-    if settings_store.get('show_tutorial', True) and not startup_paths and restore_path is None:
+    if show_subscription_after_login:
+        def show_initial_subscription() -> None:
+            dialog = SubscriptionDialog(license_service, main_window, first_login=True)
+            if dialog.exec() == SubscriptionDialog.Accepted:
+                refresh = getattr(main_window, "refresh_license_ui", None)
+                if callable(refresh):
+                    refresh()
+        QTimer.singleShot(250, show_initial_subscription)
+    elif settings_store.get('show_tutorial', True) and not startup_paths and restore_path is None:
         def show_tutorial() -> None:
             tutorial = TutorialDialog(main_window)
             tutorial.exec()

@@ -189,14 +189,23 @@ class SegyViewerWidget(QWidget):
 
     def _build_ui(self) -> None:
         self.setStyleSheet(
-            "QFrame#segyTopBar{background:#f7f9fb;border-bottom:1px solid #d9e1e8;}"
-            "QListWidget#segyNav{background:#172938;color:#eaf1f6;border:0;padding:6px;}"
-            "QListWidget#segyNav::item{padding:11px 10px;margin:2px;border-radius:5px;}"
-            "QListWidget#segyNav::item:selected{background:#1778b5;color:white;font-weight:700;}"
-            "QListWidget#segyNav::item:hover{background:#24465d;}"
-            "QGroupBox{font-weight:700;border:1px solid #d9e2e9;border-radius:5px;margin-top:8px;padding-top:8px;}"
-            "QGroupBox::title{subcontrol-origin:margin;left:10px;padding:0 4px;}"
-            "QComboBox,QDoubleSpinBox,QSpinBox{min-height:22px;}"
+            "QWidget{font-size:8.0pt;color:#17324A;}"
+            "QFrame#segyTopBar{background:#F5F8FB;border-bottom:1px solid #D7E2EA;}"
+            "QPushButton{min-height:23px;padding:2px 9px;border:1px solid #AFC2D1;border-radius:5px;background:#FFFFFF;font-weight:800;color:#17324A;}"
+            "QPushButton:hover{background:#EEF6FB;}"
+            "QPushButton#primaryButton{background:#0A86C7;border-color:#0873AB;color:#FFFFFF;}"
+            "QFrame#segySide{background:#FFFFFF;border-left:1px solid #D7E2EA;}"
+            "QTabWidget#sideTabs::pane{border:1px solid #D5E1EA;border-radius:6px;background:#FFFFFF;top:-1px;}"
+            "QTabWidget#sideTabs QTabBar::tab{background:#EAF0F4;color:#38566B;border:1px solid #D4DFE7;border-bottom:0;min-height:22px;padding:3px 7px;margin-right:1px;font-size:7.7pt;font-weight:800;}"
+            "QTabWidget#sideTabs QTabBar::tab:selected{background:#FFFFFF;color:#075C84;font-weight:900;}"
+            "QGroupBox{font-weight:900;color:#17364B;border:1px solid #D9E2E9;border-radius:6px;margin-top:8px;padding-top:8px;background:#FFFFFF;}"
+            "QGroupBox::title{subcontrol-origin:margin;left:8px;padding:0 4px;background:#FFFFFF;}"
+            "QComboBox,QDoubleSpinBox,QSpinBox{min-height:21px;font-size:7.8pt;border:1px solid #C9D4DF;border-radius:4px;background:#FFFFFF;padding:1px 4px;}"
+            "QLabel{font-size:7.9pt;}"
+            "QTableWidget{font-size:7.6pt;background:#FFFFFF;alternate-background-color:#F7FAFC;border:1px solid #DCE5EC;gridline-color:#E7EDF2;}"
+            "QHeaderView::section{background:#E7F0F6;color:#29495E;border:0;border-right:1px solid #D3DFE8;border-bottom:1px solid #D3DFE8;padding:3px 4px;font-weight:900;font-size:7.5pt;}"
+            "QTextEdit{font-size:7.6pt;font-family:Consolas, Courier New, monospace;}"
+            "QScrollArea{border:0;background:transparent;}"
         )
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
@@ -213,10 +222,11 @@ class SegyViewerWidget(QWidget):
         self.info.setMinimumWidth(0)
         self.info.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
         open_button = QPushButton("Open SEG-Y")
+        open_button.setObjectName("primaryButton")
         open_button.clicked.connect(self._choose_file)
-        fit_button = QPushButton("Fit Data")
+        fit_button = QPushButton("Fit")
         fit_button.clicked.connect(self.fit)
-        export_button = QPushButton("Export Image")
+        export_button = QPushButton("Export")
         export_button.clicked.connect(self.export_image)
         row.addWidget(self.file_label)
         row.addWidget(self.info)
@@ -233,32 +243,32 @@ class SegyViewerWidget(QWidget):
         splitter.addWidget(self.canvas)
 
         side = QFrame()
-        side.setMinimumWidth(300)
-        side.setMaximumWidth(430)
-        side_layout = QHBoxLayout(side)
-        side_layout.setContentsMargins(0, 0, 0, 0)
-        side_layout.setSpacing(0)
-        self.nav = QListWidget()
-        self.nav.setObjectName("segyNav")
-        self.nav.setFixedWidth(92)
-        self.pages = QStackedWidget()
+        side.setObjectName("segySide")
+        side.setMinimumWidth(265)
+        side.setMaximumWidth(350)
+        side_layout = QVBoxLayout(side)
+        side_layout.setContentsMargins(7, 7, 7, 7)
+        side_layout.setSpacing(6)
+        self.side_tabs = QTabWidget()
+        self.side_tabs.setObjectName("sideTabs")
+        self.side_tabs.setDocumentMode(True)
+        self.side_tabs.setUsesScrollButtons(True)
         for title, page in (
             ("Display", self._display_page()),
-            ("File Info", self._file_info_page()),
+            ("Window", self._window_page()),
+            ("Attrib.", self._attribute_page()),
+            ("File", self._file_info_page()),
             ("Headers", self._headers_page()),
-            ("Trace QC", self._analysis_page()),
+            ("Trace", self._analysis_page()),
         ):
-            self.nav.addItem(QListWidgetItem(title))
-            self.pages.addWidget(page)
-        self.nav.currentRowChanged.connect(self.pages.setCurrentIndex)
-        self.nav.setCurrentRow(0)
-        side_layout.addWidget(self.nav)
-        side_layout.addWidget(self.pages, 1)
+            self.side_tabs.addTab(page, title)
+        self.pages = self.side_tabs
+        side_layout.addWidget(self.side_tabs, 1)
         splitter.addWidget(side)
         splitter.setStretchFactor(0, 10)
         splitter.setStretchFactor(1, 0)
         splitter.setCollapsible(1, True)
-        splitter.setSizes([1240, 335])
+        splitter.setSizes([1260, 305])
         root.addWidget(splitter, 1)
 
         hint = QLabel(
@@ -271,8 +281,9 @@ class SegyViewerWidget(QWidget):
     def _display_page(self) -> QWidget:
         w = QWidget()
         layout = QVBoxLayout(w)
-        layout.setContentsMargins(8, 6, 8, 6)
-        display_group = QGroupBox("Seismic Display")
+        layout.setContentsMargins(7, 6, 7, 6)
+        layout.setSpacing(6)
+        display_group = QGroupBox("Display Mode")
         form = QFormLayout(display_group)
         self._configure_form(form)
         self.mode = QComboBox()
@@ -301,15 +312,56 @@ class SegyViewerWidget(QWidget):
         self.polarity = QCheckBox("Reverse polarity")
         self.polarity.toggled.connect(self.render)
         for control in (self.mode, self.attribute, self.gain, self.agc_window, self.clip):
-            control.setMinimumWidth(110)
+            control.setMinimumWidth(100)
             control.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         form.addRow("Display", self.mode)
         form.addRow("Attribute", self.attribute)
         form.addRow("Gain", self.gain)
-        form.addRow("AGC window", self.agc_window)
+        form.addRow("AGC", self.agc_window)
         form.addRow("Clip", self.clip)
         form.addRow(self.polarity)
+        layout.addWidget(display_group)
+        hint = QLabel("Use mouse wheel on the seismic panel for true trace/time zoom. Ctrl = traces only, Shift = time only.")
+        hint.setWordWrap(True)
+        hint.setStyleSheet("color:#657B8D;background:#F6FAFC;border:1px solid #E1E9EF;border-radius:5px;padding:6px;")
+        layout.addWidget(hint)
+        layout.addStretch(1)
+        return self._scrollable_page(w)
 
+    def _window_page(self) -> QWidget:
+        w = QWidget()
+        layout = QVBoxLayout(w)
+        layout.setContentsMargins(7, 6, 7, 6)
+        layout.setSpacing(6)
+        window_group = QGroupBox("Visible Data Window")
+        window_form = QFormLayout(window_group)
+        self._configure_form(window_form)
+        self.tstart = QSpinBox()
+        self.tend = QSpinBox()
+        self.sstart = QSpinBox()
+        self.send = QSpinBox()
+        for spin in (self.tstart, self.tend, self.sstart, self.send):
+            spin.setMinimum(1)
+            spin.setMinimumWidth(90)
+            spin.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+            spin.editingFinished.connect(self._spins_window)
+        window_form.addRow("First trace", self.tstart)
+        window_form.addRow("Last trace", self.tend)
+        window_form.addRow("First sample", self.sstart)
+        window_form.addRow("Last sample", self.send)
+        fit_button = QPushButton("Fit Full Data")
+        fit_button.setObjectName("primaryButton")
+        fit_button.clicked.connect(self.fit)
+        window_form.addRow(fit_button)
+        layout.addWidget(window_group)
+        layout.addStretch(1)
+        return self._scrollable_page(w)
+
+    def _attribute_page(self) -> QWidget:
+        w = QWidget()
+        layout = QVBoxLayout(w)
+        layout.setContentsMargins(7, 6, 7, 6)
+        layout.setSpacing(6)
         attribute_group = QGroupBox("Attribute Analysis")
         attribute_form = QFormLayout(attribute_group)
         self._configure_form(attribute_form)
@@ -330,33 +382,18 @@ class SegyViewerWidget(QWidget):
         self.sweetness_floor_hz.setValue(1.0)
         self.sweetness_floor_hz.setSuffix(" Hz")
         for control in (self.rms_window_ms, self.coherence_window_ms, self.coherence_radius, self.sweetness_floor_hz):
-            control.setMinimumWidth(95)
+            control.setMinimumWidth(90)
             control.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
             control.valueChanged.connect(self.render)
-        attribute_form.addRow("RMS window", self.rms_window_ms)
-        attribute_form.addRow("Coherence window", self.coherence_window_ms)
-        attribute_form.addRow("Trace aperture radius", self.coherence_radius)
-        attribute_form.addRow("Sweetness freq. floor", self.sweetness_floor_hz)
-
-        window_group = QGroupBox("Visible Data Window")
-        window_form = QFormLayout(window_group)
-        self._configure_form(window_form)
-        self.tstart = QSpinBox()
-        self.tend = QSpinBox()
-        self.sstart = QSpinBox()
-        self.send = QSpinBox()
-        for spin in (self.tstart, self.tend, self.sstart, self.send):
-            spin.setMinimum(1)
-            spin.setMinimumWidth(95)
-            spin.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-            spin.editingFinished.connect(self._spins_window)
-        window_form.addRow("First trace", self.tstart)
-        window_form.addRow("Last trace", self.tend)
-        window_form.addRow("First display sample", self.sstart)
-        window_form.addRow("Last display sample", self.send)
-        layout.addWidget(display_group)
+        attribute_form.addRow("RMS", self.rms_window_ms)
+        attribute_form.addRow("Coherence", self.coherence_window_ms)
+        attribute_form.addRow("Aperture", self.coherence_radius)
+        attribute_form.addRow("Sweetness floor", self.sweetness_floor_hz)
         layout.addWidget(attribute_group)
-        layout.addWidget(window_group)
+        hint = QLabel("Choose the active attribute on the Display tab. Attribute rasters are rendered as density/color instead of wiggle.")
+        hint.setWordWrap(True)
+        hint.setStyleSheet("color:#657B8D;background:#F6FAFC;border:1px solid #E1E9EF;border-radius:5px;padding:6px;")
+        layout.addWidget(hint)
         layout.addStretch(1)
         return self._scrollable_page(w)
 
@@ -736,6 +773,19 @@ class SegyViewerWidget(QWidget):
             )
         except Exception as exc:
             self.analysis_label.setText(str(exc))
+
+
+    def show_display_page(self) -> None:
+        self.side_tabs.setCurrentIndex(0)
+
+    def show_file_info_page(self) -> None:
+        self.side_tabs.setCurrentIndex(3)
+
+    def show_headers_page(self) -> None:
+        self.side_tabs.setCurrentIndex(4)
+
+    def show_trace_analysis_page(self) -> None:
+        self.side_tabs.setCurrentIndex(5)
 
     def export_image(self) -> None:
         if self.canvas._image.isNull():

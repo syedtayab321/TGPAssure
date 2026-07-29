@@ -19,6 +19,8 @@ from PySide6.QtWidgets import (
 )
 
 from core.infrastructure.service_container import ServiceContainer
+from core.auth import LicenseService
+from core.auth.plans import FEATURE_BY_KEY, FEATURES, MODULE_TITLES, feature_for_action, feature_for_provider
 from ui.styles import apply_theme, Theme
 from ui.icons import get_icon, icon_color
 from ui.animations import fade_widget
@@ -39,6 +41,7 @@ from ui.ribbon.converter_ribbon import ConverterRibbonProvider
 from ui.ribbon.vibroseis_ribbon import VibroseisRibbonProvider
 from ui.empty_workspace import EmptyWorkspace
 from ui.widgets.full_page_loader import FullPageLoader
+from ui.dialogs.subscription_dialog import SubscriptionDialog
 from modules.workspace.workspace_manager import WorkspaceManager, WorkspaceTab
 from core.data_access.layout_store import LayoutStore
 
@@ -46,6 +49,7 @@ from core.data_access.layout_store import LayoutStore
 class TitleBar(QWidget):
     quick_save_requested = Signal()
     quick_open_requested = Signal()
+    subscription_requested = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -88,6 +92,14 @@ class TitleBar(QWidget):
         self.title.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         layout.addWidget(self.title, 1)
 
+        self.account_btn = QToolButton(self)
+        self.account_btn.setObjectName("windowControl")
+        self.account_btn.setText("Account")
+        self.account_btn.setToolTip("Subscription and module access")
+        self.account_btn.setCursor(Qt.PointingHandCursor)
+        self.account_btn.clicked.connect(self.subscription_requested.emit)
+        layout.addWidget(self.account_btn)
+
         self.toggle_theme_btn = QToolButton()
         self.toggle_theme_btn.setObjectName("windowControl")
         self.toggle_theme_btn.setIcon(get_icon("color", color="#4A5568", size=13))
@@ -110,7 +122,7 @@ class TitleBar(QWidget):
         self.close_btn.setIcon(get_icon("window-close", color="#4A5568", size=13))
         self.close_btn.setIconSize(QSize(13, 13))
 
-        for button in (self.toggle_theme_btn, self.fit_btn, self.min_btn, self.max_btn, self.close_btn):
+        for button in (self.account_btn, self.toggle_theme_btn, self.fit_btn, self.min_btn, self.max_btn, self.close_btn):
             button.setFixedSize(34, 28)
             button.setAutoRaise(True)
             button.setCursor(Qt.PointingHandCursor)
@@ -225,6 +237,7 @@ class MainWindow(QMainWindow):
         self._layout_store = container.resolve(LayoutStore)
         from core.infrastructure.settings_store import SettingsStore
         self._settings_store = container.resolve(SettingsStore) if container.has(SettingsStore) else None
+        self._license_service = container.resolve(LicenseService) if container.has(LicenseService) else None
         self._autosave_timer = QTimer(self)
         self._autosave_timer.timeout.connect(self._autosave_project)
         self._ribbon_workspace_timer = QTimer(self)
@@ -251,7 +264,6 @@ class MainWindow(QMainWindow):
                 ("segy_viewer", "SEGY"),
                 ("converter", "Converter"),
                 ("visualization", "2D/3D Viewer"),
-                ("segy_qc", "SEGY QC"),
             ],
             "magnetic": [
                 ("magnetic_data", "Data"),
@@ -353,6 +365,7 @@ class MainWindow(QMainWindow):
         for provider in geodetic_providers():
             self._register_ribbon_provider(provider)
         self._configure_ribbon_navigation()
+        self.refresh_license_ui()
         self._set_active_module('home')
         self._apply_responsive_chrome(force=True)
         
@@ -361,6 +374,121 @@ class MainWindow(QMainWindow):
         self._workspace_manager.file_imported.connect(lambda *_: self._update_ribbon())
         self._workspace_manager.tab_closed.connect(self._on_tab_closed)
         self._configure_autosave()
+
+    def refresh_license_ui(self) -> None:
+        self._refresh_license_top_tabs()
+        if hasattr(self, "ribbon_sub_tab_bar"):
+            self._populate_ribbon_subtabs(self._active_main_tab, self._active_module)
+        if hasattr(self, "status_bar") and self._license_service is not None:
+            user = self._license_service.user
+            if user is not None:
+                self.status_bar.showMessage(
+                    f"Logged in: {user.email} | Plan: {self._license_service.current_plan}",
+                    3500,
+                )
+        if hasattr(self, "ribbon_groups_layout"):
+            self._update_ribbon()
+
+    def open_subscription_dialog(self) -> None:
+        if self._license_service is None:
+            QMessageBox.information(self, "Subscription", "Subscription service is not available in this build.")
+            return
+        dialog = SubscriptionDialog(self._license_service, self)
+        dialog.license_changed.connect(self.refresh_license_ui)
+        if dialog.exec() == SubscriptionDialog.Accepted:
+            self.refresh_license_ui()
+
+    def _logout_account(self) -> None:
+        if self._license_service is None:
+            return
+        choice = QMessageBox.question(
+            self,
+            "Logout",
+            "Logout from this TGPAssure account on this workstation? You will need internet to create a new account or buy modules again.",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if choice != QMessageBox.Yes:
+            return
+        self._license_service.logout()
+        QMessageBox.information(self, "Logged Out", "The local login session has been removed. TGPAssure will close now.")
+        self.close()
+
+    def _refresh_license_top_tabs(self) -> None:
+        if not hasattr(self, "ribbon_tab_bar"):
+            return
+        mode = getattr(self, "_responsive_mode", "full")
+        label_index = 2 if mode == "compact" else (1 if mode == "medium" else 0)
+        for tab_id, index in self._ribbon_tabs.items():
+            labels = self._ribbon_label_sets.get(tab_id)
+            label = labels[label_index] if labels else self._ribbon_full_labels.get(tab_id, tab_id.title())
+            if tab_id != "home" and not self._is_main_tab_licensed(tab_id):
+                label = f"{label} 🔒"
+            self.ribbon_tab_bar.setTabText(index, label)
+            self.ribbon_tab_bar.setTabToolTip(index, "Locked — click to buy module access" if "🔒" in label else self._ribbon_full_labels.get(tab_id, label))
+
+    def _is_main_tab_licensed(self, main_id: str | None) -> bool:
+        module = str(main_id or "home")
+        if module == "home":
+            return True
+        if self._license_service is None:
+            return True
+        return self._license_service.has_module(module)
+
+    def _is_provider_licensed(self, provider_id: str | None) -> bool:
+        provider = str(provider_id or "")
+        if provider in {"", "home"}:
+            return True
+        if self._license_service is None:
+            return True
+        return self._license_service.has_provider(provider)
+
+    def _is_action_licensed(self, action_id: str | None) -> bool:
+        if self._license_service is None:
+            return True
+        return self._license_service.has_action(action_id)
+
+    def _is_context_licensed(self, context_id: str | None) -> bool:
+        context = str(context_id or "home")
+        if context == "home":
+            return True
+        if context in {"seismic", "magnetic", "electrical", "gravity", "vibroseis", "geodetic"}:
+            return self._is_main_tab_licensed(context)
+        return self._is_provider_licensed(context)
+
+    def _first_feature_for_module(self, module_id: str | None) -> str | None:
+        module = str(module_id or "")
+        for feature in FEATURES:
+            if feature.module == module:
+                return feature.key
+        return None
+
+    def _show_purchase_required(self, feature_key: str | None, module_id: str | None = None) -> None:
+        if self._license_service is None:
+            return
+        feature = FEATURE_BY_KEY.get(feature_key or "")
+        module_label = MODULE_TITLES.get(str(module_id or ""), str(module_id or "Module").title())
+        target = feature.title if feature is not None else module_label
+        QMessageBox.information(
+            self,
+            "Module Locked",
+            f"{target} is locked for this account. Select the required module/submodule and complete payment to activate it.",
+        )
+        dialog = SubscriptionDialog(self._license_service, self, focus_feature=feature_key)
+        dialog.license_changed.connect(self.refresh_license_ui)
+        if dialog.exec() == SubscriptionDialog.Accepted:
+            self.refresh_license_ui()
+
+    def _restore_active_ribbon_selection(self) -> None:
+        if not hasattr(self, "ribbon_tab_bar"):
+            return
+        main_index = self._ribbon_tabs.get(self._active_main_tab, self._ribbon_tabs.get("home", 0))
+        if main_index is not None:
+            self.ribbon_tab_bar.blockSignals(True)
+            self.ribbon_tab_bar.setCurrentIndex(main_index)
+            self.ribbon_tab_bar.blockSignals(False)
+        self._populate_ribbon_subtabs(self._active_main_tab, self._active_module)
+        self._refresh_license_top_tabs()
 
     def _apply_tab_styling(self):
         self.tab_widget.setDocumentMode(True)
@@ -374,6 +502,7 @@ class MainWindow(QMainWindow):
         self.title_bar.fit_btn.clicked.connect(self._fit_to_screen)
         self.title_bar.quick_save_requested.connect(self._save_project)
         self.title_bar.quick_open_requested.connect(self._open_project)
+        self.title_bar.subscription_requested.connect(self.open_subscription_dialog)
         self.setMenuWidget(self.title_bar)
 
     def _fit_to_screen(self):
@@ -417,6 +546,14 @@ class MainWindow(QMainWindow):
         import_action = QAction("&Import File", self)
         import_action.triggered.connect(self._import_file)
         file_menu.addAction(import_action)
+
+        file_menu.addSeparator()
+        subscription_action = QAction("&Subscription / Modules", self)
+        subscription_action.triggered.connect(self.open_subscription_dialog)
+        file_menu.addAction(subscription_action)
+        logout_action = QAction("&Logout", self)
+        logout_action.triggered.connect(self._logout_account)
+        file_menu.addAction(logout_action)
         
         file_menu.addSeparator()
         
@@ -480,6 +617,9 @@ class MainWindow(QMainWindow):
         file_menu.addAction("Save Project", self._save_project)
         file_menu.addSeparator()
         file_menu.addAction("Import File…", self._import_file)
+        file_menu.addSeparator()
+        file_menu.addAction("Subscription / Modules…", self.open_subscription_dialog)
+        file_menu.addAction("Logout", self._logout_account)
         file_menu.addSeparator()
         file_menu.addAction("Exit", self.close)
         self.file_button.setMenu(file_menu)
@@ -624,6 +764,7 @@ class MainWindow(QMainWindow):
             full_label = self._ribbon_full_labels.get(tab_id, label)
             self.ribbon_tab_bar.setTabToolTip(tab_index, full_label)
 
+        self._refresh_license_top_tabs()
         self.status_bar.setStyleSheet(f"QStatusBar{{font-size:{status_font}px;}} QStatusBar QLabel{{font-size:{status_font}px;}}")
         document_tab_font = self.tab_widget.tabBar().font()
         document_tab_font.setPointSize(8 if mode == "compact" else 9)
@@ -779,6 +920,14 @@ class MainWindow(QMainWindow):
         main_id = str(main_id)
         if main_id == "home":
             return
+        if not self._is_main_tab_licensed(main_id):
+            self._show_purchase_required(self._first_feature_for_module(main_id), main_id)
+            if self._is_main_tab_licensed(main_id):
+                self._set_active_module(main_id)
+                self._schedule_ribbon_workspace_activation(self._active_module)
+            else:
+                self._restore_active_ribbon_selection()
+            return
         self._set_active_module(main_id)
         self._schedule_ribbon_workspace_activation(self._active_module)
 
@@ -788,6 +937,11 @@ class MainWindow(QMainWindow):
         if not provider_id:
             return
         provider_id = str(provider_id)
+        if not self._is_provider_licensed(provider_id):
+            self._show_purchase_required(feature_for_provider(provider_id), self._active_main_tab)
+            if not self._is_provider_licensed(provider_id):
+                self._restore_active_ribbon_selection()
+                return
         self._active_module = provider_id
         self._last_subtab_by_main[self._active_main_tab] = provider_id
         self._update_ribbon()
@@ -796,7 +950,13 @@ class MainWindow(QMainWindow):
     def _on_ribbon_tab_changed(self, index: int) -> None:
         main_id = self.ribbon_tab_bar.tabData(index)
         if main_id:
-            self._set_active_module(str(main_id))
+            main_id = str(main_id)
+            if not self._is_main_tab_licensed(main_id):
+                self._show_purchase_required(self._first_feature_for_module(main_id), main_id)
+                if not self._is_main_tab_licensed(main_id):
+                    self._restore_active_ribbon_selection()
+                    return
+            self._set_active_module(main_id)
             # Opening a module dashboard can be expensive. Debounce ribbon
             # navigation so rapid clicks do not queue several heavy dashboard
             # constructors and make the application appear to close/reopen or hang.
@@ -807,6 +967,11 @@ class MainWindow(QMainWindow):
         if not provider_id:
             return
         provider_id = str(provider_id)
+        if not self._is_provider_licensed(provider_id):
+            self._show_purchase_required(feature_for_provider(provider_id), self._active_main_tab)
+            if not self._is_provider_licensed(provider_id):
+                self._restore_active_ribbon_selection()
+                return
         self._active_module = provider_id
         self._last_subtab_by_main[self._active_main_tab] = provider_id
         self._update_ribbon()
@@ -912,6 +1077,9 @@ class MainWindow(QMainWindow):
         context = str(context_id or "home")
         try:
             if context == "home":
+                return
+            if not self._is_context_licensed(context):
+                self._show_purchase_required(feature_for_provider(context), self._ribbon_provider_to_main.get(context, context))
                 return
 
             # Each seismic subtab now owns its actual workspace.  Previously all
@@ -1086,8 +1254,11 @@ class MainWindow(QMainWindow):
             return "home"
         remembered = self._last_subtab_by_main.get(main_id)
         valid = {provider_id for provider_id, _ in items}
-        if remembered in valid:
+        if remembered in valid and self._is_provider_licensed(remembered):
             return remembered
+        for provider_id, _label in items:
+            if self._is_provider_licensed(provider_id):
+                return provider_id
         return items[0][0]
 
     def _populate_ribbon_subtabs(self, main_id: str, selected_provider: str | None = None) -> None:
@@ -1096,7 +1267,8 @@ class MainWindow(QMainWindow):
         self._clear_tab_bar(self.ribbon_sub_tab_bar)
         selected_index = 0
         for idx, (provider_id, label) in enumerate(items):
-            tab_index = self.ribbon_sub_tab_bar.addTab(label)
+            display_label = f"{label} 🔒" if not self._is_provider_licensed(provider_id) else label
+            tab_index = self.ribbon_sub_tab_bar.addTab(display_label)
             self.ribbon_sub_tab_bar.setTabData(tab_index, provider_id)
             if provider_id == selected_provider:
                 selected_index = idx
@@ -1109,6 +1281,10 @@ class MainWindow(QMainWindow):
         requested = str(module_id or "home")
         if requested == "home":
             main_id, provider_id = "home", "home"
+        elif requested == "segy_qc":
+            # SEG-Y QC commands are now combined into the single SEG-Y ribbon tab.
+            # The document can still carry module_id=segy_qc for workspace logic.
+            main_id, provider_id = "seismic", "segy_viewer"
         elif requested in {"seismic", "magnetic", "electrical", "gravity", "vibroseis", "geodetic"}:
             main_id = requested
             provider_id = self._default_provider_for_main(main_id)
@@ -1220,9 +1396,12 @@ class MainWindow(QMainWindow):
         become available immediately after a file is loaded/QC finishes and are
         disabled again when their owning workspace closes.
         """
+        if not self._is_action_licensed(action_id):
+            return False
         always = {
             "new_project", "open_project", "about", "preferences", "shortcuts",
             "documentation", "report_issue", "reset_layout", "toggle_explorer",
+            "subscription_modules", "logout_account",
             "toggle_properties", "toggle_console", "save_layout", "load_layout",
             "segd_open_file", "segd_open_viewer", "segd_open_2d3d", "segy_open_file", "segy_open_2d3d",
             "visualization_open",
@@ -1347,6 +1526,9 @@ class MainWindow(QMainWindow):
 
     def _on_ribbon_action(self, action_id: str) -> None:
         self._update_feature_inspector(action_id)
+        if not self._is_action_licensed(action_id):
+            self._show_purchase_required(feature_for_action(action_id), self._active_main_tab)
+            return
         if not self.is_ribbon_action_enabled(action_id):
             self.status_bar.showMessage("This feature becomes available when its required data or QC result is ready.", 4000)
             return
@@ -1360,6 +1542,10 @@ class MainWindow(QMainWindow):
             self._import_file()
         elif action_id == "export_data":
             self._export_data()
+        elif action_id == "subscription_modules":
+            self.open_subscription_dialog()
+        elif action_id == "logout_account":
+            self._logout_account()
         elif action_id in {"segd_open_file", "segd_open_viewer"}:
             self._open_segd_viewer()
         elif action_id == "segd_open_2d3d":
@@ -1419,9 +1605,11 @@ class MainWindow(QMainWindow):
             elif action_id == "segy_viewer_color":
                 viewer.mode.setCurrentIndex(viewer.mode.findData("color"))
             elif action_id == "segy_viewer_headers":
-                viewer.findChild(QTabWidget).setCurrentIndex(1)
+                if hasattr(viewer, "show_headers_page"):
+                    viewer.show_headers_page()
             elif action_id == "segy_viewer_trace_analysis":
-                viewer.findChild(QTabWidget).setCurrentIndex(2)
+                if hasattr(viewer, "show_trace_analysis_page"):
+                    viewer.show_trace_analysis_page()
         elif action_id == "segy_open_2d3d":
             self._open_visualization()
         elif action_id == "segy_view_raw":
