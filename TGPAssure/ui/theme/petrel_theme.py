@@ -326,3 +326,48 @@ QTabBar#documentTabBar::tab:selected { background:#F3F3F3; border-top:2px solid 
 QStatusBar { background:#E6E6E6; border-top:1px solid #AFAFAF; min-height:20px; }
 QStatusBar QLabel { color:#252525; }
 """
+
+# ---------------------------------------------------------------------------
+# Global form-control visibility override
+# Keep checked radio buttons visible on white/gray dialogs across the software.
+# ---------------------------------------------------------------------------
+STYLESHEET += r"""
+QRadioButton {
+    spacing: 6px;
+    background: transparent;
+    color: #252525;
+}
+QRadioButton::indicator {
+    width: 14px;
+    height: 14px;
+    border-radius: 7px;
+    border: 1px solid #4F5963;
+    background: #FFFFFF;
+}
+QRadioButton::indicator:unchecked:hover {
+    border: 1px solid #0B5F8A;
+    background: #F3FAFF;
+}
+QRadioButton::indicator:checked {
+    border: 2px solid #0B5F8A;
+    background: qradialgradient(cx:0.5, cy:0.5, radius:0.65, fx:0.5, fy:0.5,
+                                stop:0 #0B5F8A, stop:0.43 #0B5F8A,
+                                stop:0.46 #FFFFFF, stop:1 #FFFFFF);
+}
+QRadioButton::indicator:checked:hover {
+    border: 2px solid #064F75;
+    background: qradialgradient(cx:0.5, cy:0.5, radius:0.65, fx:0.5, fy:0.5,
+                                stop:0 #064F75, stop:0.43 #064F75,
+                                stop:0.46 #FFFFFF, stop:1 #FFFFFF);
+}
+QRadioButton::indicator:disabled {
+    border: 1px solid #A8AEB5;
+    background: #E6E8EB;
+}
+QRadioButton::indicator:checked:disabled {
+    border: 2px solid #8D99A3;
+    background: qradialgradient(cx:0.5, cy:0.5, radius:0.65, fx:0.5, fy:0.5,
+                                stop:0 #8D99A3, stop:0.43 #8D99A3,
+                                stop:0.46 #E6E8EB, stop:1 #E6E8EB);
+}
+"""

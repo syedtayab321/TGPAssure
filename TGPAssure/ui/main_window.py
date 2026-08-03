@@ -321,6 +321,8 @@ class MainWindow(QMainWindow):
         self._busy_tasks: dict[str, dict[str, Any]] = {}
         self._busy_task_order: list[str] = []
         self._displayed_busy_task_id: str | None = None
+        self._dashboard_fullscreen_active = False
+        self._dashboard_fullscreen_state: dict[str, Any] = {}
         self._ribbon_label_sets = {
             "home": ("Home", "Home", "Home"),
             "seismic": ("Seismic", "Seismic", "Seismic"),
@@ -588,6 +590,21 @@ class MainWindow(QMainWindow):
         reset_layout_action = QAction("&Reset Layout", self)
         reset_layout_action.triggered.connect(self._reset_layout)
         view_menu.addAction(reset_layout_action)
+
+        view_menu.addSeparator()
+
+        fullscreen_action = QAction("Full Screen View", self)
+        fullscreen_action.setShortcut(QKeySequence("F11"))
+        fullscreen_action.triggered.connect(self.enter_dashboard_fullscreen)
+        view_menu.addAction(fullscreen_action)
+
+        normal_screen_action = QAction("Back to Normal Screen", self)
+        normal_screen_action.setShortcut(QKeySequence("F5"))
+        normal_screen_action.triggered.connect(self.exit_dashboard_fullscreen)
+        view_menu.addAction(normal_screen_action)
+
+        self._view_fullscreen_action = fullscreen_action
+        self._view_normal_screen_action = normal_screen_action
         
         help_menu = menu_bar.addMenu("&Help")
         about_action = QAction("&About", self)
@@ -767,7 +784,20 @@ class MainWindow(QMainWindow):
             self.ribbon_tab_bar.setTabToolTip(tab_index, full_label)
 
         self._refresh_license_top_tabs()
-        self.status_bar.setStyleSheet(f"QStatusBar{{font-size:{status_font}px;}} QStatusBar QLabel{{font-size:{status_font}px;}}")
+        self.status_bar.setStyleSheet(
+            f"QStatusBar{{font-size:{status_font}px;}} "
+            f"QStatusBar QLabel{{font-size:{status_font}px;}} "
+            f"QStatusBar QPushButton#statusFullScreenButton, QStatusBar QPushButton#statusNormalScreenButton{{"
+            f"font-size:{status_font}px; padding:2px 8px; min-height:18px; border-radius:3px;"
+            f"border:1px solid #AEB7C2; background:#F6F8FA; color:#102A43;"
+            f"}} "
+            f"QStatusBar QPushButton#statusFullScreenButton:hover, QStatusBar QPushButton#statusNormalScreenButton:hover{{"
+            f"background:#E8EEF5; border-color:#6B8FB8;"
+            f"}} "
+            f"QStatusBar QPushButton#statusNormalScreenButton:enabled{{"
+            f"background:#FFF1CC; border-color:#D69E2E; color:#102A43; font-weight:600;"
+            f"}}"
+        )
         document_tab_font = self.tab_widget.tabBar().font()
         document_tab_font.setPointSize(8 if mode == "compact" else 9)
         self.tab_widget.tabBar().setFont(document_tab_font)
@@ -3245,6 +3275,23 @@ class MainWindow(QMainWindow):
         self.job_progress_bar.setRange(0, 100)
         self.job_progress_bar.setValue(0)
         self.status_bar.addWidget(self.job_progress_bar)
+
+        self.fullscreen_view_btn = QPushButton('Full Screen View')
+        self.fullscreen_view_btn.setObjectName('statusFullScreenButton')
+        self.fullscreen_view_btn.setToolTip('Show the active dashboard in full screen (F11)')
+        self.fullscreen_view_btn.setCursor(Qt.PointingHandCursor)
+        self.fullscreen_view_btn.clicked.connect(self.enter_dashboard_fullscreen)
+        self.status_bar.addPermanentWidget(self.fullscreen_view_btn)
+
+        self.normal_screen_btn = QPushButton('Back to Normal')
+        self.normal_screen_btn.setObjectName('statusNormalScreenButton')
+        self.normal_screen_btn.setToolTip('Return from full screen to the normal dashboard layout (F5)')
+        self.normal_screen_btn.setCursor(Qt.PointingHandCursor)
+        self.normal_screen_btn.clicked.connect(self.exit_dashboard_fullscreen)
+        self.normal_screen_btn.setEnabled(False)
+        self.status_bar.addPermanentWidget(self.normal_screen_btn)
+
+        self._sync_fullscreen_controls()
         
         self.coord_label = QLabel('X: 0  Y: 0')
         self.status_bar.addPermanentWidget(self.coord_label)
@@ -3287,10 +3334,104 @@ class MainWindow(QMainWindow):
             ('Ctrl+W', self._close_active_tab),
             ('Ctrl+Tab', self._next_tab),
             ('Ctrl+Shift+Tab', self._prev_tab),
+            ('F11', self.enter_dashboard_fullscreen),
+            ('F5', self.exit_dashboard_fullscreen),
         ):
             shortcut = QShortcut(QKeySequence(sequence), self)
             shortcut.activated.connect(handler)
             self._shortcuts.append(shortcut)
+
+    def _sync_fullscreen_controls(self) -> None:
+        """Keep the bottom full-screen controls correct on every dashboard."""
+        active = bool(getattr(self, "_dashboard_fullscreen_active", False))
+        if hasattr(self, "fullscreen_view_btn"):
+            self.fullscreen_view_btn.setEnabled(not active)
+            self.fullscreen_view_btn.setVisible(not active)
+        if hasattr(self, "normal_screen_btn"):
+            self.normal_screen_btn.setEnabled(active)
+            self.normal_screen_btn.setVisible(True)
+        if hasattr(self, "_view_fullscreen_action"):
+            self._view_fullscreen_action.setEnabled(not active)
+        if hasattr(self, "_view_normal_screen_action"):
+            self._view_normal_screen_action.setEnabled(active)
+
+    def enter_dashboard_fullscreen(self) -> None:
+        """Show the active document/dashboard with minimum chrome.
+
+        The feature is application-wide because every dashboard is hosted in the
+        same central document tab area. F11 enters the full-screen dashboard view;
+        F5 restores the normal workstation layout.
+        """
+        if getattr(self, "_dashboard_fullscreen_active", False):
+            return
+
+        state: dict[str, Any] = {
+            "window_state": self.windowState(),
+            "geometry": self.saveGeometry(),
+            "title_bar_visible": self.title_bar.isVisible() if hasattr(self, "title_bar") else True,
+            "ribbon_visible": self.ribbon_dock.isVisible() if hasattr(self, "ribbon_dock") else True,
+            "project_dock_visible": self.project_dock.isVisible() if hasattr(self, "project_dock") else False,
+            "properties_dock_visible": self.properties_dock.isVisible() if hasattr(self, "properties_dock") else False,
+            "output_dock_visible": self.output_dock.isVisible() if hasattr(self, "output_dock") else False,
+            "document_tabs_visible": self.tab_widget.tabBar().isVisible() if hasattr(self, "tab_widget") else True,
+        }
+        self._dashboard_fullscreen_state = state
+        self._dashboard_fullscreen_active = True
+
+        if hasattr(self, "title_bar"):
+            self.title_bar.hide()
+        if hasattr(self, "ribbon_dock"):
+            self.ribbon_dock.hide()
+        for dock_name in ("project_dock", "properties_dock", "output_dock"):
+            dock = getattr(self, dock_name, None)
+            if dock is not None:
+                dock.hide()
+        if hasattr(self, "tab_widget"):
+            self.tab_widget.tabBar().hide()
+
+        self.showFullScreen()
+        self._sync_fullscreen_controls()
+        if hasattr(self, "status_bar"):
+            self.status_bar.showMessage("Full Screen View active — press F5 or click Back to Normal", 3500)
+
+    def exit_dashboard_fullscreen(self) -> None:
+        """Restore the normal workstation layout from full-screen dashboard view."""
+        if not getattr(self, "_dashboard_fullscreen_active", False):
+            return
+
+        state = getattr(self, "_dashboard_fullscreen_state", {}) or {}
+        self._dashboard_fullscreen_active = False
+
+        if hasattr(self, "title_bar"):
+            self.title_bar.setVisible(bool(state.get("title_bar_visible", True)))
+        if hasattr(self, "ribbon_dock"):
+            self.ribbon_dock.setVisible(bool(state.get("ribbon_visible", True)))
+        for key, dock_name in (
+            ("project_dock_visible", "project_dock"),
+            ("properties_dock_visible", "properties_dock"),
+            ("output_dock_visible", "output_dock"),
+        ):
+            dock = getattr(self, dock_name, None)
+            if dock is not None:
+                dock.setVisible(bool(state.get(key, False)))
+        if hasattr(self, "tab_widget"):
+            self.tab_widget.tabBar().setVisible(bool(state.get("document_tabs_visible", True)))
+
+        saved_geometry = state.get("geometry")
+        if saved_geometry is not None:
+            self.restoreGeometry(saved_geometry)
+
+        previous_state = state.get("window_state", Qt.WindowNoState)
+        if previous_state & Qt.WindowMaximized:
+            self.showMaximized()
+        else:
+            self.showNormal()
+            self.setWindowState(Qt.WindowNoState)
+
+        self._sync_fullscreen_controls()
+        if hasattr(self, "status_bar"):
+            self.status_bar.showMessage("Normal dashboard layout restored", 2500)
+
 
     def _new_project(self):
         from ui.dialogs.project_setup_dialog import ProjectSetupDialog

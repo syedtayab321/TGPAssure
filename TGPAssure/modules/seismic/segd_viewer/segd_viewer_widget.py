@@ -13,6 +13,8 @@ from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QDoubleSpinBox,
+    QDialog,
+    QDialogButtonBox,
     QFileDialog,
     QFormLayout,
     QFrame,
@@ -22,10 +24,13 @@ from PySide6.QtWidgets import (
     QLabel,
     QListWidget,
     QListWidgetItem,
+    QLineEdit,
     QMessageBox,
     QMenu,
     QProgressBar,
     QPushButton,
+    QButtonGroup,
+    QRadioButton,
     QSpinBox,
     QSplitter,
     QStackedWidget,
@@ -194,9 +199,14 @@ class RenderWorker(QRunnable):
         if self.params.gain_mode == "fixed":
             work *= np.float32(10.0 ** (self.params.fixed_gain_db / 20.0))
         elif self.params.gain_mode == "trace_balance":
-            rms = np.sqrt(np.mean(work * work, axis=1, keepdims=True, dtype=np.float64)).astype(np.float32)
-            rms[rms <= 1e-12] = 1.0
-            work /= rms
+            # Match the legacy 408 viewer default: every trace is normalised
+            # independently to its own peak before the display gain/clip is
+            # applied.  This prevents the first high-amplitude traces from
+            # flooding the section and keeps weak traces visible.
+            peak = np.max(np.abs(work), axis=1, keepdims=True).astype(np.float32)
+            peak[peak <= 1e-12] = 1.0
+            work = work / peak
+            work *= np.float32(10.0 ** (self.params.fixed_gain_db / 20.0))
         elif self.params.gain_mode == "agc":
             interval = max(float(self.reader.get_sample_interval()), 1e-9)
             window = max(3, int(round(self.params.agc_window_ms / interval)))
@@ -228,8 +238,13 @@ class RenderWorker(QRunnable):
                 pass
 
         absolute = np.abs(work)
-        percentile = min(100.0, max(0.1, self.params.clip_percentile))
-        clip = float(np.percentile(absolute, percentile)) if absolute.size else 1.0
+        if self.params.clip_percentile <= 4.0:
+            # Legacy "Trace Clip (0.5 - 4)" style control.  The entered value
+            # is an amplitude-deflection clip, not a percentile.
+            clip = float(max(0.05, self.params.clip_percentile))
+        else:
+            percentile = min(100.0, max(0.1, self.params.clip_percentile))
+            clip = float(np.percentile(absolute, percentile)) if absolute.size else 1.0
         if not np.isfinite(clip) or clip <= 1e-20:
             clip = float(np.max(absolute)) if absolute.size else 1.0
         if not np.isfinite(clip) or clip <= 1e-20:
@@ -580,32 +595,153 @@ class TraceStatusLegend(QGroupBox):
             layout.addWidget(item, row, col)
 
 
-class TraceAttributesPanel(QGroupBox):
+
+class ErrorStatusPanel(QGroupBox):
+    """Legacy right-side error-status legend."""
+
     def __init__(self, parent: Optional[QWidget] = None) -> None:
-        super().__init__("Live Trace Attributes", parent)
+        super().__init__("Error Status", parent)
+        self.setStyleSheet(
+            "QGroupBox{font-weight:700;color:#202020;border:1px solid #404040;margin-top:8px;background:#FFFFFF;}"
+            "QGroupBox::title{subcontrol-origin:margin;left:7px;padding:0 2px;}"
+            "QLabel{background:transparent;color:#202020;font-size:8pt;}"
+        )
+        layout = QGridLayout(self)
+        layout.setContentsMargins(5, 9, 5, 5)
+        layout.setHorizontalSpacing(4)
+        layout.setVerticalSpacing(2)
+        entries = [
+            ("Normal", STATUS_COLORS["Normal"]),
+            ("Aux.", STATUS_COLORS["Auxiliary"]),
+            ("Resistance", STATUS_COLORS["Resistance"]),
+            ("Capacitance", STATUS_COLORS["Capacitance"]),
+            ("Leakage", STATUS_COLORS["Leakage"]),
+            ("Tilt", STATUS_COLORS["Tilt"]),
+            ("Multiple", STATUS_COLORS["Multiple"]),
+        ]
+        for row, (name, color) in enumerate(entries):
+            label = QLabel(name, self)
+            chip = QLabel(self)
+            chip.setFixedSize(13, 13)
+            chip.setStyleSheet(
+                f"background:rgb({color.red()},{color.green()},{color.blue()});"
+                "border:1px solid #D0D0D0;"
+            )
+            layout.addWidget(label, row, 0)
+            layout.addWidget(chip, row, 1, Qt.AlignmentFlag.AlignRight)
+
+
+class FileHeaderPanel(QGroupBox):
+    """Legacy file-header card shown beside the seismic view."""
+
+    def __init__(self, parent: Optional[QWidget] = None) -> None:
+        super().__init__("File Header", parent)
+        self.setStyleSheet(
+            "QGroupBox{font-weight:700;color:#202020;border:1px solid #404040;margin-top:8px;background:#FFFFFF;}"
+            "QGroupBox::title{subcontrol-origin:margin;left:7px;padding:0 2px;}"
+            "QLabel{background:transparent;color:#202020;font-size:8pt;}"
+        )
         form = QFormLayout(self)
-        form.setContentsMargins(8, 6, 8, 6)
-        form.setVerticalSpacing(3)
+        form.setContentsMargins(4, 9, 4, 5)
+        form.setVerticalSpacing(0)
+        form.setHorizontalSpacing(5)
         self._labels: dict[str, QLabel] = {}
         rows = [
-            ("trace", "Trace"),
-            ("channel_set", "Channel Set"),
+            ("file", "File"), ("date", "Date"), ("time", "Time"), ("record", "Record"),
+            ("tape", "Tape #"), ("label", "Label"), ("sr", "SR (mS)"), ("length", "Length"),
+            ("tot_trc", "Tot Trc"), ("tot_aux", "Tot Aux"), ("tot_seis", "Tot Seis"),
+            ("src_ln", "Src Ln"), ("src_pt", "Src Pt"), ("src_x", "Src X"), ("src_y", "Src Y"),
+            ("src_z", "Src Z"), ("first_ln", "First Ln"), ("first_pt", "First Pt"),
+            ("blast_id", "Blast ID"), ("itb", "ITB"), ("tb_time", "TB Time"), ("uh_time", "UH Time"),
+            ("filter", "Filter"), ("max_aux", "Max Aux"), ("max_seis", "Max Seis"),
+        ]
+        for key, caption in rows:
+            label = QLabel("", self)
+            label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+            self._labels[key] = label
+            form.addRow(caption, label)
+        self.clear_values()
+
+    def clear_values(self) -> None:
+        for label in self._labels.values():
+            label.setText("0")
+        for key in ("file", "date", "time", "record", "label"):
+            self._labels[key].setText("")
+
+    def set_reader(self, reader: SegdReader) -> None:
+        summary = reader.metadata_summary()
+        self._labels["file"].setText(str(summary.get("file_number", "")))
+        date = getattr(reader.general_header_1, "date", "")
+        time = getattr(reader.general_header_1, "time", "")
+        self._labels["date"].setText(str(date))
+        self._labels["time"].setText(str(time))
+        self._labels["record"].setText("Normal")
+        self._labels["label"].setText("")
+        self._labels["sr"].setText(f"{float(summary.get('sample_interval_ms', 0.0)):g}")
+        self._labels["length"].setText(str(int(summary.get("sample_count", 0)) * int(round(float(summary.get("sample_interval_ms", 0.0)) or 1))))
+        self._labels["tot_trc"].setText(str(summary.get("trace_count", 0)))
+        self._labels["tot_aux"].setText(str(summary.get("aux_trace_count", 0)))
+        self._labels["tot_seis"].setText(str(summary.get("seismic_trace_count", 0)))
+        try:
+            self.set_trace(reader, 0)
+        except Exception:
+            pass
+
+    def set_trace(self, reader: SegdReader, trace_index: int) -> None:
+        try:
+            info = reader.get_trace_info(max(0, min(trace_index, reader.get_trace_count() - 1)))
+        except Exception:
+            return
+        def fmt(value: Any) -> str:
+            if value is None:
+                return "0"
+            try:
+                number = float(value)
+                if not np.isfinite(number):
+                    return "0"
+                return f"{number:g}"
+            except Exception:
+                return str(value)
+        self._labels["src_ln"].setText(fmt(getattr(info, "receiver_line", 0)))
+        self._labels["src_pt"].setText(fmt(getattr(info, "receiver_point", 0)))
+        self._labels["src_x"].setText(fmt(getattr(info, "receiver_x", 0)))
+        self._labels["src_y"].setText(fmt(getattr(info, "receiver_y", 0)))
+        self._labels["src_z"].setText(fmt(getattr(info, "receiver_elevation", 0)))
+        self._labels["first_ln"].setText(fmt(getattr(info, "receiver_line", 0)))
+        self._labels["first_pt"].setText(fmt(getattr(info, "receiver_point", 0)))
+
+class TraceAttributesPanel(QGroupBox):
+    def __init__(self, parent: Optional[QWidget] = None) -> None:
+        super().__init__("Trace Attributes", parent)
+        form = QFormLayout(self)
+        form.setContentsMargins(4, 4, 4, 4)
+        form.setVerticalSpacing(1)
+        self._labels: dict[str, QLabel] = {}
+        self.setStyleSheet(
+            "QGroupBox{font-weight:700;color:#202020;border:1px solid #C8C8C8;margin-top:8px;background:#EFEFEF;}"
+            "QGroupBox::title{subcontrol-origin:margin;left:7px;padding:0 2px;}"
+            "QLabel{background:transparent;font-size:8pt;}"
+        )
+        rows = [
+            ("channel_set", "Chan"),
             ("line", "Line"),
             ("point", "Point"),
-            ("receiver_index", "Receiver Index"),
             ("x", "X"),
             ("y", "Y"),
             ("z", "Z"),
             ("channel_type", "Type"),
             ("sensor", "Sensor"),
-            ("resistance", "Resistance"),
-            ("capacitance", "Capacitance"),
-            ("leakage", "Leakage"),
+            ("resistance", "Res"),
+            ("capacitance", "Cap"),
             ("tilt", "Tilt"),
+            ("leakage", "Lkg"),
+            ("receiver_index", "Cont"),
+            ("trace", "Cont"),
+            ("status", "Interp"),
             ("sample", "Sample"),
             ("time", "Time"),
-            ("amplitude", "Amplitude"),
-            ("status", "Status"),
+            ("amplitude", "Amp"),
         ]
         for key, caption in rows:
             value = QLabel("—")
@@ -723,6 +859,20 @@ class SegdImageView(QWidget):
         self._measurement: Optional[tuple[int, int, int, int]] = None
         self._pan_start: Optional[QPointF] = None
         self._pan_view_start: Optional[QRectF] = None
+        self._trace_statuses: list[str] = []
+
+    def set_trace_statuses(self, statuses: list[str]) -> None:
+        self._trace_statuses = list(statuses or [])
+        self.update()
+
+    def _status_for_trace(self, trace_index: int) -> str:
+        local = int(trace_index) - self._trace_start
+        if 0 <= local < len(self._trace_statuses):
+            return self._trace_statuses[local]
+        return "Normal"
+
+    def _status_color_for_trace(self, trace_index: int) -> QColor:
+        return QColor(STATUS_COLORS.get(self._status_for_trace(trace_index), STATUS_COLORS["Normal"]))
 
     def set_data_extent(self, total_traces: int, total_samples: int) -> None:
         self._total_traces = max(1, int(total_traces))
@@ -847,8 +997,10 @@ class SegdImageView(QWidget):
         painter.setPen(shadow)
         painter.drawLine(QPointF(self._cursor.x(), plot.top()), QPointF(self._cursor.x(), plot.bottom()))
         painter.drawLine(QPointF(plot.left(), self._cursor.y()), QPointF(plot.right(), self._cursor.y()))
-        pen = QPen(QColor(0, 225, 255))
-        pen.setWidthF(1.6)
+        data_point = self._widget_to_data(self._cursor)
+        trace_color = self._status_color_for_trace(data_point[0]) if data_point is not None else QColor(0, 225, 255)
+        pen = QPen(trace_color)
+        pen.setWidthF(1.8)
         pen.setStyle(Qt.DashLine)
         painter.setPen(pen)
         painter.drawLine(QPointF(self._cursor.x(), plot.top()), QPointF(self._cursor.x(), plot.bottom()))
@@ -1016,15 +1168,26 @@ class SegdImageView(QWidget):
         data_point = self._widget_to_data(QPointF(event.pos()))
         menu = QMenu(self)
         inspect_action = menu.addAction("Inspect Trace Waveform")
+        zoom_trace_action = menu.addAction("Zoom to Trace")
+        normal_view_action = menu.addAction("Back to Normal View")
         copy_trace_action = menu.addAction("Copy Trace Details")
         menu.addSeparator()
         copy_view_action = menu.addAction("Copy Current View Image")
         fit_action = menu.addAction("Fit to Window")
         inspect_action.setEnabled(data_point is not None)
+        zoom_trace_action.setEnabled(data_point is not None)
+        normal_view_action.setEnabled(True)
         copy_trace_action.setEnabled(data_point is not None)
         chosen = menu.exec(event.globalPos())
         if chosen is inspect_action and data_point is not None:
             self.trace_inspect_requested.emit(data_point[0], data_point[1])
+        elif chosen is zoom_trace_action and data_point is not None:
+            trace = data_point[0]
+            sample_count = max(1, self._sample_end - self._sample_start)
+            self.data_window_changed.emit(trace, trace + 1, self._sample_start, self._sample_start + sample_count)
+        elif chosen is normal_view_action:
+            self._view_rect = QRectF(0.0, 0.0, 1.0, 1.0)
+            self.data_window_changed.emit(0, self._total_traces, 0, self._total_samples)
         elif chosen is copy_trace_action and data_point is not None:
             self.copy_trace_requested.emit(data_point[0], data_point[1])
         elif chosen is copy_view_action:
@@ -1108,21 +1271,96 @@ class SegdViewerWidget(QWidget):
         self.info_label = QLabel("")
         self.position_label = QLabel("")
         self.position_label.setMinimumWidth(300)
-        self.position_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        self.position_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         self.header_render_button = QPushButton("Render")
         self.header_render_button.clicked.connect(self.render_current_view)
-        open_button = QPushButton("Open SEG-D")
-        open_button.clicked.connect(self._choose_file)
         header_layout.addWidget(self.file_label)
         header_layout.addWidget(self.info_label)
         header_layout.addStretch(1)
         header_layout.addWidget(self.position_label)
         header_layout.addWidget(self.header_render_button)
-        header_layout.addWidget(open_button)
-        root.addWidget(header)
+        # Keep these labels for internal status updates, but do not show the
+        # modern summary strip.  The legacy SEG-D view uses the right File Header
+        # card and left Trace Attributes panel instead.
+        self._legacy_summary_header = header
+        header.hide()
 
-        splitter = QSplitter(Qt.Horizontal, self)
+        # Build configuration widgets once.  They are controlled from the legacy
+        # Configure dialog instead of occupying the screen permanently.
+        self.trace_attributes = TraceAttributesPanel(self)
+        self.view_controls = self._create_view_controls_tab()
+        self.gain_controls = self._create_gain_controls_tab()
+        self.status_legend = ErrorStatusPanel(self)
+        self.file_header_panel = FileHeaderPanel(self)
+        self.header_viewer = HeaderViewer(self)
+        self.tools_page = self._create_tools_tab()
+        for hidden_panel in (self.view_controls, self.gain_controls, self.header_viewer, self.tools_page):
+            hidden_panel.hide()
 
+        body = QHBoxLayout()
+        body.setContentsMargins(0, 0, 0, 0)
+        body.setSpacing(0)
+
+        left_panel = QFrame(self)
+        left_panel.setObjectName("segdLegacyLeftPanel")
+        left_panel.setFixedWidth(118)
+        left_panel.setStyleSheet(
+            "QFrame#segdLegacyLeftPanel{background:#EEEEEE;border-right:1px solid #C6C6C6;}"
+            "QPushButton{min-height:21px;border:1px solid #8F8F8F;background:#F4F4F4;color:#202020;font-size:8pt;padding:0 2px;}"
+            "QPushButton#legacyOpenButton{background:#F6C343;color:#151515;font-weight:700;}"
+            "QPushButton#legacyConfigureButton{background:#2D9CDB;color:#FFFFFF;font-weight:700;}"
+            "QPushButton#legacyToolsButton{background:#27AE60;color:#FFFFFF;font-weight:700;}"
+            "QPushButton#legacyExportButton{background:#DCEBFF;color:#173B53;font-weight:700;}"
+            "QPushButton#legacyNavButton{background:#FFFFFF;color:#202020;}"
+            "QPushButton:hover{background:#FFFFFF;color:#111111;}"
+        )
+        left_layout = QVBoxLayout(left_panel)
+        left_layout.setContentsMargins(5, 4, 5, 4)
+        left_layout.setSpacing(3)
+        open_button = QPushButton("Open")
+        open_button.setObjectName("legacyOpenButton")
+        open_button.clicked.connect(self._choose_file)
+        config_button = QPushButton("Configure")
+        config_button.setObjectName("legacyConfigureButton")
+        config_button.clicked.connect(self._open_configuration_dialog)
+        tools_button = QPushButton("Tools")
+        tools_button.setObjectName("legacyToolsButton")
+        tools_button.clicked.connect(self._open_tools_dialog)
+        left_layout.addWidget(open_button)
+        left_layout.addWidget(config_button)
+        left_layout.addWidget(tools_button)
+        left_layout.addWidget(self.trace_attributes, 1)
+        left_layout.addStretch(1)
+        export_row = QHBoxLayout()
+        print_button = QPushButton("Print")
+        print_button.setObjectName("legacyExportButton")
+        bmp_button = QPushButton("BMP")
+        bmp_button.setObjectName("legacyExportButton")
+        print_button.clicked.connect(self._print_current_view)
+        bmp_button.clicked.connect(self.export_image)
+        export_row.addWidget(print_button)
+        export_row.addWidget(bmp_button)
+        left_layout.addLayout(export_row)
+        nav_row = QHBoxLayout()
+        prev_button = QPushButton("<Prev")
+        prev_button.setObjectName("legacyNavButton")
+        next_button = QPushButton("Next>")
+        next_button.setObjectName("legacyNavButton")
+        prev_button.clicked.connect(lambda: self._step_trace_window(-1))
+        next_button.clicked.connect(lambda: self._step_trace_window(1))
+        nav_row.addWidget(prev_button)
+        nav_row.addWidget(next_button)
+        left_layout.addLayout(nav_row)
+        nav_row2 = QHBoxLayout()
+        first_button = QPushButton("<<First")
+        first_button.setObjectName("legacyNavButton")
+        last_button = QPushButton("Last>>")
+        last_button.setObjectName("legacyNavButton")
+        first_button.clicked.connect(lambda: self._jump_trace_window(False))
+        last_button.clicked.connect(lambda: self._jump_trace_window(True))
+        nav_row2.addWidget(first_button)
+        nav_row2.addWidget(last_button)
+        left_layout.addLayout(nav_row2)
         center = QFrame(self)
         center.setObjectName("segdCanvasFrame")
         center_grid = QGridLayout(center)
@@ -1144,88 +1382,26 @@ class SegdViewerWidget(QWidget):
         self.canvas.view_resized.connect(self._on_view_resized)
         self.canvas.data_window_changed.connect(self._on_canvas_window_changed)
         center_layout.addWidget(self.canvas, 1)
-        hint = QLabel("Mouse wheel: zoom | Ctrl+wheel: horizontal | Shift+wheel: vertical | Right-click: trace waveform")
-        hint.setStyleSheet("color:#506475;font-size:10px;padding:2px 6px;background:#F3F6F8;")
-        center_layout.addWidget(hint)
+        self.hint_label = QLabel("Mouse wheel: zoom | Ctrl+wheel: horizontal | Shift+wheel: vertical | Right-click: trace waveform")
+        self.hint_label.setStyleSheet("color:#0A37FF;font-size:8pt;padding:1px 5px;background:#F4F4F4;")
+        center_layout.addWidget(self.hint_label)
         center_grid.addWidget(center_content, 0, 0)
 
         right_panel = QFrame(self)
-        right_panel.setObjectName("segdControlPanel")
-        right_panel.setStyleSheet(
-            "QFrame#segdControlPanel{background:#f6f8fa;border-left:1px solid #d4dde5;font-size:8pt;}"
-            "QListWidget#segdSideNav{background:#102A3D;color:#eaf2f7;border:0;padding:4px;font-size:8pt;}"
-            "QListWidget#segdSideNav::item{padding:6px 6px;margin:1px;border-radius:5px;}"
-            "QListWidget#segdSideNav::item:selected{background:#0A86C7;color:white;font-weight:800;}"
-            "QListWidget#segdSideNav::item:hover{background:#254b63;}"
-            "QGroupBox{font-weight:800;border:1px solid #d7e0e7;border-radius:5px;margin-top:7px;padding-top:8px;background:white;font-size:8pt;}"
-            "QGroupBox::title{subcontrol-origin:margin;left:8px;padding:0 4px;color:#173B53;}"
-            "QTreeWidget{background:#FFFFFF;alternate-background-color:#F5F8FA;border:1px solid #D4DEE8;font-size:8pt;}"
-            "QHeaderView::section{background:#173B53;color:white;padding:4px;border:0;font-weight:800;}"
-            "QTabBar::tab{background:#EAF1F6;color:#335064;border:1px solid #D4DEE8;padding:5px 7px;font-weight:800;}"
-            "QTabBar::tab:selected{background:#FFFFFF;color:#0A6EA8;border-bottom-color:#FFFFFF;}"
-            "QTabWidget#segdToolsTabs::pane{border:1px solid #D4DEE8;background:#FFFFFF;top:-1px;}"
-            "QTabWidget#segdToolsTabs QTabBar::tab{background:#EAF1F6;color:#335064;border:1px solid #D4DEE8;padding:4px 8px;font-size:8pt;}"
-            "QTabWidget#segdToolsTabs QTabBar::tab:selected{background:#FFFFFF;color:#0A6EA8;border-bottom-color:#FFFFFF;font-weight:900;}"
-            "QPushButton#segdToolAction{min-height:30px;max-height:34px;text-align:left;padding:4px 8px 4px 10px;background:#FFFFFF;border:1px solid #C9D8E3;border-left:4px solid #0A86C7;border-radius:5px;color:#102A3D;font-size:8pt;font-weight:800;}"
-            "QPushButton#segdToolAction:hover{background:#EFF8FC;border-color:#62B0D9;border-left-color:#0A6EA8;}"
-            "QPushButton#segdToolAction:pressed{background:#DDEFF7;}"
-        )
+        right_panel.setObjectName("segdLegacyRightPanel")
+        right_panel.setFixedWidth(138)
+        right_panel.setStyleSheet("QFrame#segdLegacyRightPanel{background:#EEEEEE;border-left:1px solid #C6C6C6;}")
         right_layout = QVBoxLayout(right_panel)
-        right_layout.setContentsMargins(0, 0, 0, 0)
-        right_layout.setSpacing(0)
+        right_layout.setContentsMargins(5, 4, 5, 4)
+        right_layout.setSpacing(4)
+        right_layout.addWidget(self.status_legend)
+        right_layout.addWidget(self.file_header_panel, 1)
 
-        controls = QWidget(right_panel)
-        controls_layout = QHBoxLayout(controls)
-        controls_layout.setContentsMargins(0, 0, 0, 0)
-        controls_layout.setSpacing(0)
-        self.side_nav = QListWidget(controls)
-        self.side_nav.setObjectName("segdSideNav")
-        self.side_nav.setFixedWidth(92)
-        self.control_stack = QStackedWidget(controls)
+        body.addWidget(left_panel)
+        body.addWidget(center, 1)
+        body.addWidget(right_panel)
+        root.addLayout(body, 1)
 
-        self.trace_attributes = TraceAttributesPanel(self.control_stack)
-        view_controls = self._create_view_controls_tab()
-        gain_controls = self._create_gain_controls_tab()
-        self.status_legend = TraceStatusLegend(self.control_stack)
-        self.header_viewer = HeaderViewer(self.control_stack)
-        tools_page = self._create_tools_tab()
-
-        for label, page in (
-            ("Trace Info", self.trace_attributes),
-            ("View", view_controls),
-            ("Gain/Color", gain_controls),
-            ("QC Legend", self.status_legend),
-            ("Headers", self.header_viewer),
-            ("Tools", tools_page),
-        ):
-            self.side_nav.addItem(QListWidgetItem(label))
-            self.control_stack.addWidget(page)
-        self.side_nav.currentRowChanged.connect(self.control_stack.setCurrentIndex)
-        self.side_nav.setCurrentRow(0)
-        controls_layout.addWidget(self.side_nav)
-        controls_layout.addWidget(self.control_stack, 1)
-        right_layout.addWidget(controls, 1)
-
-        footer = QFrame(right_panel)
-        footer.setStyleSheet("background:#edf2f6;border-top:1px solid #d4dde5;")
-        button_layout = QHBoxLayout(footer)
-        button_layout.setContentsMargins(8, 6, 8, 6)
-        self.render_button = QPushButton("Render View")
-        self.render_button.setMinimumHeight(32)
-        self.render_button.clicked.connect(self.render_current_view)
-        self.fit_button = QPushButton("Fit to Window")
-        self.fit_button.setMinimumHeight(32)
-        self.fit_button.clicked.connect(self.zoom_to_fit)
-        button_layout.addWidget(self.render_button)
-        button_layout.addWidget(self.fit_button)
-        right_layout.addWidget(footer)
-
-        splitter.addWidget(center)
-        splitter.addWidget(right_panel)
-        splitter.setSizes([1080, 360])
-        splitter.setStretchFactor(0, 1)
-        splitter.setStretchFactor(1, 0)
-        root.addWidget(splitter, 1)
         self.busy_overlay = BusyOverlay(self)
         self.busy_overlay.setGeometry(self.rect())
 
@@ -1268,10 +1444,10 @@ class SegdViewerWidget(QWidget):
         self.sample_end_spin.editingFinished.connect(self._on_control_changed)
 
         self.wiggle_scale_spin = QDoubleSpinBox()
-        self.wiggle_scale_spin.setRange(0.10, 5.00)
+        self.wiggle_scale_spin.setRange(0.10, 8.00)
         self.wiggle_scale_spin.setSingleStep(0.10)
         self.wiggle_scale_spin.setDecimals(2)
-        self.wiggle_scale_spin.setValue(1.35)
+        self.wiggle_scale_spin.setValue(1.00)
         self.wiggle_scale_spin.setSuffix(" x")
         self.wiggle_scale_spin.valueChanged.connect(self._on_control_changed)
 
@@ -1313,15 +1489,16 @@ class SegdViewerWidget(QWidget):
         gain_form = QFormLayout(gain_group)
 
         self.gain_combo = QComboBox()
+        self.gain_combo.addItem("Fixed Gain Display", "fixed")
+        self.gain_combo.addItem("Display Normalised to Peak (by Trace)", "trace_balance")
         self.gain_combo.addItem("AGC", "agc")
-        self.gain_combo.addItem("Trace Balance", "trace_balance")
-        self.gain_combo.addItem("Fixed Gain", "fixed")
         self.gain_combo.addItem("No Gain", "none")
+        self.gain_combo.setCurrentIndex(1)
         self.gain_combo.currentIndexChanged.connect(self._on_control_changed)
 
         self.fixed_gain_spin = QDoubleSpinBox()
         self.fixed_gain_spin.setRange(-60.0, 60.0)
-        self.fixed_gain_spin.setValue(0.0)
+        self.fixed_gain_spin.setValue(18.0)
         self.fixed_gain_spin.setSuffix(" dB")
         self.fixed_gain_spin.valueChanged.connect(self._on_control_changed)
 
@@ -1333,10 +1510,10 @@ class SegdViewerWidget(QWidget):
         self.agc_window_spin.valueChanged.connect(self._on_control_changed)
 
         self.clip_spin = QDoubleSpinBox()
-        self.clip_spin.setRange(80.0, 100.0)
-        self.clip_spin.setDecimals(1)
-        self.clip_spin.setValue(99.0)
-        self.clip_spin.setSuffix(" %")
+        self.clip_spin.setRange(0.50, 4.00)
+        self.clip_spin.setDecimals(2)
+        self.clip_spin.setValue(0.75)
+        self.clip_spin.setSuffix("")
         self.clip_spin.valueChanged.connect(self._on_control_changed)
 
         self.remove_dc_check = QCheckBox("Remove DC bias")
@@ -1346,7 +1523,7 @@ class SegdViewerWidget(QWidget):
         gain_form.addRow("Mode", self.gain_combo)
         gain_form.addRow("Fixed Gain", self.fixed_gain_spin)
         gain_form.addRow("AGC Window", self.agc_window_spin)
-        gain_form.addRow("Clip Percentile", self.clip_spin)
+        gain_form.addRow("Trace Clip (0.5 - 4)", self.clip_spin)
         gain_form.addRow(self.remove_dc_check)
 
         color_group = QGroupBox("Color Gain / Density")
@@ -1452,6 +1629,163 @@ class SegdViewerWidget(QWidget):
 
         return widget
 
+    def _open_configuration_dialog(self) -> None:
+        if self.reader is None:
+            QMessageBox.information(self, "SEG-D Configure", "Open a SEG-D file first.")
+            return
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Configure")
+        dialog.setModal(True)
+        dialog.setStyleSheet(
+            "QDialog{background:#EEEEEE;}"
+            "QGroupBox{border:1px solid #B8B8B8;margin-top:8px;background:#EEEEEE;font-size:8pt;}"
+            "QGroupBox::title{subcontrol-origin:margin;left:8px;padding:0 2px;}"
+            "QLineEdit,QSpinBox,QDoubleSpinBox{background:white;border:1px solid #8F8F8F;min-height:18px;font-size:8pt;}"
+            "QPushButton{min-width:68px;min-height:22px;font-size:8pt;}"
+        )
+        layout = QVBoxLayout(dialog)
+        layout.setContentsMargins(10, 8, 10, 8)
+        options = QGroupBox("Options", dialog)
+        form = QFormLayout(options)
+        form.setHorizontalSpacing(10)
+        form.setVerticalSpacing(4)
+
+        number_spin = QSpinBox(options)
+        number_spin.setRange(1, max(1, self.reader.get_trace_count() * 10))
+        number_spin.setValue(max(1, self.trace_end_spin.value() - self.trace_start_spin.value() + 1))
+        start_time = QDoubleSpinBox(options)
+        start_time.setRange(0.0, max(0.0, (self.reader.get_sample_count() - 1) * self.reader.get_sample_interval()))
+        start_time.setDecimals(0)
+        start_time.setValue((self.sample_start_spin.value() - 1) * self.reader.get_sample_interval())
+        end_time = QDoubleSpinBox(options)
+        end_time.setRange(0.0, max(0.0, (self.reader.get_sample_count() - 1) * self.reader.get_sample_interval()))
+        end_time.setDecimals(0)
+        end_time.setValue((self.sample_end_spin.value() - 1) * self.reader.get_sample_interval())
+        omega_check = QCheckBox("Omega Tape Image Format", options)
+        micro_check = QCheckBox("MicroSeismic Mode", options)
+        form.addRow("Number of Traces to Display", number_spin)
+        form.addRow("Display Start Time", start_time)
+        form.addRow("Display EndTime", end_time)
+        form.addRow(omega_check)
+        form.addRow(micro_check)
+
+        display_group = QGroupBox("Display Mode", options)
+        display_layout = QVBoxLayout(display_group)
+        fixed_radio = QRadioButton("Fixed Gain Display", display_group)
+        peak_radio = QRadioButton("Display Normalised to Peak (by Trace)", display_group)
+        display_layout.addWidget(fixed_radio)
+        display_layout.addWidget(peak_radio)
+        peak_radio.setChecked(str(self.gain_combo.currentData()) == "trace_balance")
+        fixed_radio.setChecked(str(self.gain_combo.currentData()) == "fixed")
+        clip_spin = QDoubleSpinBox(display_group)
+        clip_spin.setRange(0.50, 4.00)
+        clip_spin.setDecimals(2)
+        clip_spin.setSingleStep(0.05)
+        clip_spin.setValue(float(self.clip_spin.value()))
+        gain_spin = QDoubleSpinBox(display_group)
+        gain_spin.setRange(-60.0, 60.0)
+        gain_spin.setDecimals(1)
+        gain_spin.setValue(float(self.fixed_gain_spin.value()))
+        display_form = QFormLayout()
+        display_form.addRow("Trace Clip (0.5 - 4)", clip_spin)
+        display_form.addRow("Initial Gain (db)", gain_spin)
+        display_layout.addLayout(display_form)
+        form.addRow(display_group)
+
+        ignore_tilt = QCheckBox("Ignore Tilt Errors if more than 100", options)
+        by_line = QRadioButton("Display By Line", options)
+        specified = QRadioButton("Display by Specified Number of Traces", options)
+        display_all = QRadioButton("Display All", options)
+        specified.setChecked(True)
+        form.addRow(ignore_tilt)
+        form.addRow(by_line)
+        form.addRow(specified)
+        form.addRow(display_all)
+
+        header_group = QGroupBox("Headers", options)
+        header_form = QFormLayout(header_group)
+        oil_company = QLineEdit("A. Company", header_group)
+        contractor = QLineEdit("Geosource", header_group)
+        crew = QLineEdit("6824", header_group)
+        header_form.addRow("Oil Company", oil_company)
+        header_form.addRow("Contractor", contractor)
+        header_form.addRow("Crew", crew)
+        form.addRow(header_group)
+        layout.addWidget(options)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel, dialog)
+        layout.addWidget(buttons)
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        total_traces = self.reader.get_trace_count()
+        total_samples = self.reader.get_sample_count()
+        interval = max(float(self.reader.get_sample_interval()), 1e-9)
+        count_requested = int(number_spin.value())
+        if display_all.isChecked():
+            count_requested = total_traces
+        count = max(1, min(total_traces, count_requested))
+        trace_start = max(1, min(self.trace_start_spin.value(), total_traces))
+        trace_end = min(total_traces, trace_start + count - 1)
+        if trace_end - trace_start + 1 < count:
+            trace_start = max(1, trace_end - count + 1)
+        sample_start = max(1, min(total_samples, int(round(start_time.value() / interval)) + 1))
+        sample_end = max(sample_start, min(total_samples, int(round(end_time.value() / interval)) + 1))
+        blockers = [QSignalBlocker(self.trace_start_spin), QSignalBlocker(self.trace_end_spin), QSignalBlocker(self.sample_start_spin), QSignalBlocker(self.sample_end_spin)]
+        self.trace_start_spin.setValue(trace_start)
+        self.trace_end_spin.setValue(trace_end)
+        self.sample_start_spin.setValue(sample_start)
+        self.sample_end_spin.setValue(sample_end)
+        del blockers
+        if peak_radio.isChecked():
+            self.gain_combo.setCurrentIndex(max(0, self.gain_combo.findData("trace_balance")))
+        elif fixed_radio.isChecked():
+            self.gain_combo.setCurrentIndex(max(0, self.gain_combo.findData("fixed")))
+        self.clip_spin.setValue(float(clip_spin.value()))
+        self.fixed_gain_spin.setValue(float(gain_spin.value()))
+        self.render_current_view()
+
+    def _open_tools_dialog(self) -> None:
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Tools")
+        dialog.resize(420, 480)
+        layout = QVBoxLayout(dialog)
+        tools = self._create_tools_tab()
+        layout.addWidget(tools, 1)
+        close = QPushButton("Close", dialog)
+        close.clicked.connect(dialog.accept)
+        layout.addWidget(close, 0, Qt.AlignmentFlag.AlignRight)
+        dialog.exec()
+
+    def _nudge_wiggle_scale(self, factor: float) -> None:
+        self.wiggle_scale_spin.setValue(max(self.wiggle_scale_spin.minimum(), min(self.wiggle_scale_spin.maximum(), self.wiggle_scale_spin.value() * float(factor))))
+        self.render_current_view()
+
+    def _step_trace_window(self, direction: int) -> None:
+        if self.reader is None:
+            return
+        total = self.reader.get_trace_count()
+        width = max(1, self.trace_end_spin.value() - self.trace_start_spin.value() + 1)
+        step = width * int(direction)
+        start = max(1, min(total - width + 1, self.trace_start_spin.value() + step))
+        self.trace_start_spin.setValue(start)
+        self.trace_end_spin.setValue(min(total, start + width - 1))
+        self.render_current_view()
+
+    def _jump_trace_window(self, last: bool) -> None:
+        if self.reader is None:
+            return
+        total = self.reader.get_trace_count()
+        width = max(1, self.trace_end_spin.value() - self.trace_start_spin.value() + 1)
+        start = max(1, total - width + 1) if last else 1
+        self.trace_start_spin.setValue(start)
+        self.trace_end_spin.setValue(min(total, start + width - 1))
+        self.render_current_view()
+
+    def _print_current_view(self) -> None:
+        self.export_image()
+
     def _choose_file(self) -> None:
         start_folder = self.file_path.parent if self.file_path else Path.home()
         path, _ = QFileDialog.getOpenFileName(
@@ -1525,7 +1859,7 @@ class SegdViewerWidget(QWidget):
         self.trace_end_spin.setMaximum(trace_count)
         self.trace_start_spin.setValue(1)
         canvas_width, _ = self.canvas.target_render_size()
-        initial_trace_count = max(60, min(240, canvas_width // 4))
+        initial_trace_count = min(trace_count, 300)
         self.trace_end_spin.setValue(min(trace_count, initial_trace_count))
         self.sample_start_spin.setMaximum(sample_count)
         self.sample_end_spin.setMaximum(sample_count)
@@ -1543,6 +1877,7 @@ class SegdViewerWidget(QWidget):
         )
         self.canvas.set_data_extent(trace_count, sample_count)
         self.header_viewer.set_reader(reader)
+        self.file_header_panel.set_reader(reader)
         self.trace_attributes.clear_values()
         self._last_hover_trace = -1
         self._schedule_render(0)
@@ -1586,8 +1921,22 @@ class SegdViewerWidget(QWidget):
     def _show_headers_panel(self, trace_index: Optional[int] = None) -> None:
         if trace_index is not None:
             self.header_viewer.set_trace(trace_index)
-        self.side_nav.setCurrentRow(4)
-        self.control_stack.setCurrentWidget(self.header_viewer)
+            if self.reader is not None:
+                self.file_header_panel.set_trace(self.reader, trace_index)
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Headers")
+        dialog.resize(520, 620)
+        layout = QVBoxLayout(dialog)
+        viewer = HeaderViewer(dialog)
+        if self.reader is not None:
+            viewer.set_reader(self.reader)
+            if trace_index is not None:
+                viewer.set_trace(trace_index)
+        layout.addWidget(viewer, 1)
+        close = QPushButton("Close", dialog)
+        close.clicked.connect(dialog.accept)
+        layout.addWidget(close, 0, Qt.AlignmentFlag.AlignRight)
+        dialog.exec()
 
     def set_display_mode(self, mode: str) -> None:
         index = self.display_combo.findData(mode)
@@ -1616,10 +1965,8 @@ class SegdViewerWidget(QWidget):
     def set_interaction_mode(self, mode: str) -> None:
         self.canvas.set_mode(mode)
         if mode == "pick":
-            self.side_nav.setCurrentRow(5)
             self.position_label.setText("Pick mode: click one trace/sample point. An action menu opens after the pick.")
         elif mode == "measure":
-            self.side_nav.setCurrentRow(5)
             self.position_label.setText("Measure mode: click the start point, then click the end point to calculate Δtrace and Δtime.")
         else:
             self.position_label.setText("Pan mode: drag to pan, mouse wheel to zoom, right-click for trace options.")
@@ -2051,6 +2398,7 @@ class SegdViewerWidget(QWidget):
             self.reader.get_sample_interval(),
             reset_view=True,
         )
+        self.canvas.set_trace_statuses(self._trace_statuses)
         record_length = (self._sample_end - 1) * self.reader.get_sample_interval()
         self.position_label.setText(
             f"Trace {self._trace_start + 1}-{self._trace_end} | "
@@ -2134,6 +2482,7 @@ class SegdViewerWidget(QWidget):
             f"Picked Trace {trace + 1} | Sample {sample + 1} | Time {time_ms:.2f} ms | Amplitude {amplitude:.6g}"
         )
         self.header_viewer.set_trace(trace)
+        self.file_header_panel.set_trace(self.reader, trace)
         self.trace_attributes.set_trace(self.reader, trace, sample, time_ms, amplitude, status)
         dialog = SegdPickActionsDialog(
             trace=trace,
@@ -2157,23 +2506,36 @@ class SegdViewerWidget(QWidget):
         amplitude = self._amplitude_at(trace, sample)
         time_ms = sample * self.reader.get_sample_interval()
         status = self._trace_status(trace)
-        self.position_label.setText(
+        hover_text = (
             f"Trace {trace + 1}   Sample {sample + 1}   Time {time_ms:.2f} ms   "
             f"Amplitude {amplitude:.6g}   Status {status}"
         )
+        self.position_label.setText(hover_text)
+        if hasattr(self, "hint_label"):
+            color = STATUS_COLORS.get(status, STATUS_COLORS["Normal"])
+            self.hint_label.setText(hover_text)
+            self.hint_label.setStyleSheet(
+                f"color:rgb({color.red()},{color.green()},{color.blue()});"
+                "font-size:8pt;padding:1px 5px;background:#F4F4F4;font-weight:700;"
+            )
         self.trace_attributes.set_trace(self.reader, trace, sample, time_ms, amplitude, status)
         if trace != self._last_hover_trace:
             self._last_hover_trace = trace
             self.header_viewer.set_trace(trace)
+            self.file_header_panel.set_trace(self.reader, trace)
 
     def _on_hover_cleared(self) -> None:
         if self.reader is None:
             self.position_label.clear()
             return
-        self.position_label.setText(
+        text = (
             f"Trace {self._trace_start + 1}-{self._trace_end} | "
             f"Sample {self._sample_start + 1}-{self._sample_end}"
         )
+        self.position_label.setText(text)
+        if hasattr(self, "hint_label"):
+            self.hint_label.setText("Mouse wheel: zoom | Ctrl+wheel: horizontal | Shift+wheel: vertical | Right-click: trace waveform")
+            self.hint_label.setStyleSheet("color:#0A37FF;font-size:8pt;padding:1px 5px;background:#F4F4F4;")
 
     def _on_trace_inspect_requested(self, trace: int, sample: int) -> None:
         if self.reader is None:
