@@ -713,6 +713,21 @@ class FiltersDialog(QDialog):
         self.progress.setValue(100); self.viewer.render_current_view(); self.accept()
 
 
+
+
+def _compact_field(text: str = "", width: int = 48) -> QLineEdit:
+    edit = _field(text, width)
+    edit.setFixedHeight(20)
+    edit.setStyleSheet("QLineEdit{min-height:18px;max-height:20px;font-size:8pt;padding:0 2px;}")
+    return edit
+
+
+def _compact_button(text: str, role: str = "gray", width: int = 54) -> QPushButton:
+    btn = _button(text, role, width)
+    btn.setFixedHeight(23)
+    btn.setStyleSheet(btn.styleSheet() + "QPushButton{min-height:20px;max-height:23px;font-size:8pt;padding:1px 5px;}")
+    return btn
+
 class FilterPanelsDialog(QDialog):
     """Legacy Filter Panels tool with screen-safe layout and live preview."""
 
@@ -721,35 +736,38 @@ class FilterPanelsDialog(QDialog):
         self.viewer = viewer
         self.folder = ""
         self.setWindowTitle("Filter Panels")
-        self.setStyleSheet(TOOL_STYLE)
+        self.setStyleSheet(TOOL_STYLE + """
+QGroupBox{margin-top:5px;padding-top:4px;}
+QGroupBox::title{left:6px;}
+QLabel,QRadioButton,QCheckBox{font-size:8pt;}
+QListWidget{font-size:8pt;}
+""")
 
+        # Compact screen-fit layout: no forced scrolling for the left control panel.
         root = QHBoxLayout(self)
-        root.setContentsMargins(8, 8, 8, 8)
-        root.setSpacing(8)
+        root.setContentsMargins(6, 6, 6, 6)
+        root.setSpacing(7)
 
-        left_widget = QWidget()
+        left_widget = QFrame()
+        left_widget.setObjectName("toolCard")
+        left_widget.setFixedWidth(292)
         left = QVBoxLayout(left_widget)
-        left.setContentsMargins(4, 4, 4, 4)
-        left.setSpacing(5)
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QFrame.NoFrame)
-        scroll.setWidget(left_widget)
-        scroll.setMaximumWidth(310)
-        root.addWidget(scroll, 0)
+        left.setContentsMargins(6, 4, 6, 4)
+        left.setSpacing(2)
+        root.addWidget(left_widget, 0)
 
-        select = _button("Select Folder", "blue", 150)
+        select = _compact_button("Select Folder", "blue", 165)
         select.clicked.connect(self._choose_folder)
         left.addWidget(select)
 
         rng = QGroupBox("Specify Range")
         rg = QGridLayout(rng)
-        rg.setContentsMargins(6, 8, 6, 6)
-        rg.setVerticalSpacing(4)
-        self.trace_from = _field("40", 55)
-        self.trace_to = _field("200", 55)
-        self.time_from = _field("1000", 65)
-        self.time_to = _field("2000", 65)
+        rg.setContentsMargins(5, 6, 5, 4)
+        rg.setVerticalSpacing(1)
+        self.trace_from = _compact_field("40", 48)
+        self.trace_to = _compact_field("200", 48)
+        self.time_from = _compact_field("1000", 56)
+        self.time_to = _compact_field("2000", 56)
         for i, (lab, e) in enumerate((("Trace From", self.trace_from), ("Trace To", self.trace_to), ("Time From (mS)", self.time_from), ("Time To (mS)", self.time_to))):
             rg.addWidget(QLabel(lab), i, 0)
             rg.addWidget(e, i, 1)
@@ -757,11 +775,11 @@ class FilterPanelsDialog(QDialog):
 
         gain = QGroupBox("Gains")
         gg = QGridLayout(gain)
-        gg.setContentsMargins(6, 8, 6, 6)
-        self.initial_gain = _field("24", 55)
-        self.trace_clip = _field(".7", 55)
+        gg.setContentsMargins(5, 6, 5, 4)
+        self.initial_gain = _compact_field("24", 48)
+        self.trace_clip = _compact_field(".7", 48)
         self.agc_check = QCheckBox("AGC Window")
-        self.agc_window = _field(".5", 55)
+        self.agc_window = _compact_field(".5", 48)
         gg.addWidget(QLabel("Initial Gain dB"), 0, 0)
         gg.addWidget(self.initial_gain, 0, 1)
         gg.addWidget(QLabel("Trace Clip"), 1, 0)
@@ -769,22 +787,22 @@ class FilterPanelsDialog(QDialog):
         gg.addWidget(self.agc_check, 2, 0)
         gg.addWidget(self.agc_window, 2, 1)
         for i, (txt, fn) in enumerate((("Gain +", lambda: self._change_gain(3)), ("Gain -", lambda: self._change_gain(-3)), ("Set", self._apply_preview))):
-            b = _button(txt, "orange", 58)
+            b = _compact_button(txt, "orange", 52)
             b.clicked.connect(fn)
             gg.addWidget(b, 3, i)
         left.addWidget(gain)
 
         filters_box = QGroupBox("Specify Filters to Try on Each File")
         fl = QGridLayout(filters_box)
-        fl.setContentsMargins(6, 8, 6, 6)
-        fl.setVerticalSpacing(3)
+        fl.setContentsMargins(5, 6, 5, 4)
+        fl.setVerticalSpacing(1)
         self.filter_checks = []
         defaults = [(1, 8, 12, 60, 70, True), (2, 9, 13, 65, 75, True), (3, 10, 14, 70, 80, True), (4, 11, 15, 75, 85, False), (5, 12, 16, 80, 95, False), (6, 13, 17, 85, 100, False)]
         for row, (idx, a, b, c, d, on) in enumerate(defaults):
-            chk = QCheckBox(f"BP Filter {idx}")
+            chk = QCheckBox(f"BP Filter {idx}"); chk.setFixedHeight(20)
             chk.setChecked(on)
-            edits = [_field(str(x), 34) for x in (a, b, c, d)]
-            test = _button("Test", "green", 44)
+            edits = [_compact_field(str(x), 30) for x in (a, b, c, d)]
+            test = _compact_button("Test", "green", 39)
             test.clicked.connect(lambda _=False, ed=edits: self._test_filter(ed))
             fl.addWidget(chk, row, 0)
             for col, ed in enumerate(edits, start=1):
@@ -794,26 +812,24 @@ class FilterPanelsDialog(QDialog):
         left.addWidget(filters_box)
 
         self.file_list = QListWidget()
-        self.file_list.setMaximumHeight(110)
+        self.file_list.setMaximumHeight(50); self.file_list.setMinimumHeight(34)
         self.file_list.currentRowChanged.connect(self._apply_preview)
         left.addWidget(self.file_list)
 
-        self.header_line = _field("Sweep Tests ...", 210)
-        self.info_line = _field("Crew 123", 210)
-        left.addWidget(QLabel("Header Line"))
-        left.addWidget(self.header_line)
-        left.addWidget(QLabel("Info Line"))
-        left.addWidget(self.info_line)
-        self.generate_bmp = QCheckBox("Generate BMP Files")
+        self.header_line = _compact_field("Sweep Tests ...", 182)
+        self.info_line = _compact_field("Crew 123", 182)
+        header_row = QHBoxLayout(); header_row.setSpacing(4); header_row.addWidget(QLabel("Header")); header_row.addWidget(self.header_line, 1); left.addLayout(header_row)
+        info_row = QHBoxLayout(); info_row.setSpacing(4); info_row.addWidget(QLabel("Info")); info_row.addWidget(self.info_line, 1); left.addLayout(info_row)
+        self.generate_bmp = QCheckBox("Generate BMP Files"); self.generate_bmp.setFixedHeight(20)
         left.addWidget(self.generate_bmp)
 
         btnrow = QHBoxLayout()
         for txt, fn, role in (("Go", self._go, "green"), ("Save", self._save_cfg, "blue"), ("Load", self._load_cfg, "purple"), ("Cancel", self.reject, "red")):
-            b = _button(txt, role, 58)
+            b = _compact_button(txt, role, 50)
             b.clicked.connect(fn)
             btnrow.addWidget(b)
         left.addLayout(btnrow)
-        left.addStretch(1)
+        left.addStretch(0)
 
         right = QVBoxLayout()
         root.addLayout(right, 1)
@@ -842,8 +858,8 @@ class FilterPanelsDialog(QDialog):
         self.gradient_fill = QCheckBox("Gradient Fill")
         og.addWidget(self.gradient_fill, 5, 0)
         og.addWidget(QLabel("Max"), 1, 1)
-        self.max_edit = _field("100", 55)
-        self.max2_edit = _field("100", 55)
+        self.max_edit = _compact_field("100", 50)
+        self.max2_edit = _compact_field("100", 50)
         og.addWidget(self.max_edit, 1, 2)
         og.addWidget(self.max2_edit, 1, 3)
         self.norm_trace = QRadioButton("Normalise Peak Trace")
@@ -852,10 +868,10 @@ class FilterPanelsDialog(QDialog):
         og.addWidget(self.norm_trace, 2, 2, 1, 2)
         og.addWidget(self.norm_panel, 3, 2, 1, 2)
         og.addWidget(QLabel("Floor (-dB)"), 4, 2)
-        self.floor_edit = _field("40", 55)
+        self.floor_edit = _compact_field("40", 50)
         og.addWidget(self.floor_edit, 4, 3)
         right.addWidget(opts)
-        _center_later(self, 980, 610)
+        _center_later(self, 1040, 620)
 
     def _choose_folder(self) -> None:
         folder = QFileDialog.getExistingDirectory(self, "Select Folder", str(self.viewer.file_path.parent))
