@@ -593,12 +593,12 @@ class MainWindow(QMainWindow):
 
         view_menu.addSeparator()
 
-        fullscreen_action = QAction("Full Screen View", self)
+        fullscreen_action = QAction("Full Screen View (F11)", self)
         fullscreen_action.setShortcut(QKeySequence("F11"))
         fullscreen_action.triggered.connect(self.enter_dashboard_fullscreen)
         view_menu.addAction(fullscreen_action)
 
-        normal_screen_action = QAction("Back to Normal Screen", self)
+        normal_screen_action = QAction("Back to Normal Screen (F5)", self)
         normal_screen_action.setShortcut(QKeySequence("F5"))
         normal_screen_action.triggered.connect(self.exit_dashboard_fullscreen)
         view_menu.addAction(normal_screen_action)
@@ -787,16 +787,16 @@ class MainWindow(QMainWindow):
         self.status_bar.setStyleSheet(
             f"QStatusBar{{font-size:{status_font}px;}} "
             f"QStatusBar QLabel{{font-size:{status_font}px;}} "
-            f"QStatusBar QPushButton#statusFullScreenButton, QStatusBar QPushButton#statusNormalScreenButton{{"
-            f"font-size:{status_font}px; padding:2px 8px; min-height:18px; border-radius:3px;"
-            f"border:1px solid #AEB7C2; background:#F6F8FA; color:#102A43;"
+            f"QStatusBar QPushButton#statusFullScreenButton{{"
+            f"font-size:{status_font}px; padding:2px 10px; min-height:19px; border-radius:4px;"
+            f"border:1px solid #1E7AC2; background:#E2F1FF; color:#084B7A; font-weight:700;"
             f"}} "
-            f"QStatusBar QPushButton#statusFullScreenButton:hover, QStatusBar QPushButton#statusNormalScreenButton:hover{{"
-            f"background:#E8EEF5; border-color:#6B8FB8;"
+            f"QStatusBar QPushButton#statusFullScreenButton:hover{{background:#FFFFFF; border-color:#0B5E9D;}} "
+            f"QStatusBar QPushButton#statusNormalScreenButton{{"
+            f"font-size:{status_font}px; padding:2px 10px; min-height:19px; border-radius:4px;"
+            f"border:1px solid #D69E2E; background:#FFF1CC; color:#7A4D00; font-weight:700;"
             f"}} "
-            f"QStatusBar QPushButton#statusNormalScreenButton:enabled{{"
-            f"background:#FFF1CC; border-color:#D69E2E; color:#102A43; font-weight:600;"
-            f"}}"
+            f"QStatusBar QPushButton#statusNormalScreenButton:hover{{background:#FFFFFF; border-color:#B7791F;}}"
         )
         document_tab_font = self.tab_widget.tabBar().font()
         document_tab_font.setPointSize(8 if mode == "compact" else 9)
@@ -3276,14 +3276,14 @@ class MainWindow(QMainWindow):
         self.job_progress_bar.setValue(0)
         self.status_bar.addWidget(self.job_progress_bar)
 
-        self.fullscreen_view_btn = QPushButton('Full Screen View')
+        self.fullscreen_view_btn = QPushButton('Full Screen View  F11')
         self.fullscreen_view_btn.setObjectName('statusFullScreenButton')
         self.fullscreen_view_btn.setToolTip('Show the active dashboard in full screen (F11)')
         self.fullscreen_view_btn.setCursor(Qt.PointingHandCursor)
         self.fullscreen_view_btn.clicked.connect(self.enter_dashboard_fullscreen)
         self.status_bar.addPermanentWidget(self.fullscreen_view_btn)
 
-        self.normal_screen_btn = QPushButton('Back to Normal')
+        self.normal_screen_btn = QPushButton('Back to Normal  F5')
         self.normal_screen_btn.setObjectName('statusNormalScreenButton')
         self.normal_screen_btn.setToolTip('Return from full screen to the normal dashboard layout (F5)')
         self.normal_screen_btn.setCursor(Qt.PointingHandCursor)

@@ -26,8 +26,12 @@ from PySide6.QtWidgets import (
     QProgressBar,
     QPushButton,
     QRadioButton,
+    QScrollArea,
     QSlider,
     QSpinBox,
+    QTableWidget,
+    QTableWidgetItem,
+    QHeaderView,
     QVBoxLayout,
     QWidget,
 )
@@ -55,23 +59,31 @@ QRadioButton,QCheckBox{font-size:8.5pt;color:#111;background:transparent;border:
 
 
 def _fit_center(dialog: QDialog, max_w: int = 1040, max_h: int = 610) -> None:
-    """Resize and center legacy dialogs so they never overflow the visible screen."""
+    """Resize and center legacy dialogs on the active screen without overflow."""
     screen = QApplication.primaryScreen()
-    if dialog.parentWidget() is not None:
+    parent = dialog.parentWidget()
+    if parent is not None:
         try:
-            pt = dialog.parentWidget().mapToGlobal(QPoint(0, 0))
-            screen = QApplication.screenAt(pt) or screen
+            center = parent.mapToGlobal(parent.rect().center())
+            screen = QApplication.screenAt(center) or screen
         except Exception:
             pass
     if screen is None:
         dialog.resize(max_w, max_h)
         return
     geom = screen.availableGeometry()
-    w = min(max_w, max(760, int(geom.width() * 0.88)))
-    h = min(max_h, max(480, int(geom.height() * 0.78)))
-    dialog.setMaximumSize(max(760, int(geom.width() * 0.96)), max(480, int(geom.height() * 0.90)))
+    w = min(max_w, max(520, int(geom.width() * 0.88)))
+    h = min(max_h, max(360, int(geom.height() * 0.80)))
+    w = min(w, max(420, geom.width() - 48))
+    h = min(h, max(320, geom.height() - 56))
+    dialog.setMaximumSize(max(420, geom.width() - 32), max(320, geom.height() - 40))
     dialog.resize(w, h)
     dialog.move(geom.x() + (geom.width() - w) // 2, geom.y() + (geom.height() - h) // 2)
+
+
+def _center_later(dialog: QDialog, max_w: int, max_h: int) -> None:
+    _fit_center(dialog, max_w, max_h)
+    QTimer.singleShot(0, lambda: _fit_center(dialog, max_w, max_h))
 
 
 def _button(text: str, role: str = "gray", width: int | None = None) -> QPushButton:
@@ -384,8 +396,7 @@ class SpreadViewDialog(QDialog):
         self._timer = QTimer(self)
         self._timer.timeout.connect(self._run_next_step)
         self._build_ui()
-        _fit_center(self, 1010, 600)
-        QTimer.singleShot(0, lambda: _fit_center(self, 1010, 600))
+        _center_later(self, 1010, 600)
         self._set_mode("Errors")
 
     def _load_rows(self) -> list[dict[str, Any]]:
@@ -596,7 +607,7 @@ class FileSplitterDialog(QDialog):
         root.addWidget(QLabel("Overall Progress")); self.overall_progress = QProgressBar(); root.addWidget(self.overall_progress)
         self.status = QLabel(""); root.addWidget(self.status)
         self.select_btn.clicked.connect(self._select_file); self.close_btn.clicked.connect(self.reject)
-        _fit_center(self, 450, 430)
+        _center_later(self, 450, 430)
 
     def _select_file(self) -> None:
         path, _ = QFileDialog.getOpenFileName(self, "Select SEG-D File", str(self.viewer.file_path.parent), "SEG-D (*.segd *.seg *.dat *.bin);;All files (*.*)")
@@ -624,7 +635,7 @@ class FixRadioSimDialog(QDialog):
         root.addWidget(QLabel("End Time (mS)"),2,0); root.addWidget(self.end_time,2,1)
         root.addWidget(QLabel("Output File Prefix"),3,0); root.addWidget(self.prefix,3,1)
         root.addWidget(self.delete_check,4,0,1,2); self.progress = QProgressBar(); root.addWidget(self.progress,5,0,1,3); self.status = QLabel(""); root.addWidget(self.status,6,0,1,3)
-        select_btn.clicked.connect(self._process); close_btn.clicked.connect(self.reject); _fit_center(self, 420, 320)
+        select_btn.clicked.connect(self._process); close_btn.clicked.connect(self.reject); _center_later(self, 420, 320)
 
     def _process(self) -> None:
         paths, _ = QFileDialog.getOpenFileNames(self, "Select File(s)", str(self.viewer.file_path.parent), "All files (*.*)")
@@ -648,7 +659,7 @@ class RecordSumDiffDialog(QDialog):
         for w in (self.sum_radio,self.diff_radio,self.norm_check): ov.addWidget(w)
         root.addWidget(op,2,1,2,1); self.read1 = _field(width=220, readonly=True); self.read2 = _field(width=220, readonly=True); self.operation_field = _field(width=220, readonly=True)
         root.addWidget(QLabel("Read File"),4,0); root.addWidget(self.read1,4,1); root.addWidget(QLabel("Read File"),5,0); root.addWidget(self.read2,5,1); root.addWidget(QLabel("Operation"),6,0); root.addWidget(self.operation_field,6,1)
-        s1.clicked.connect(lambda: self._choose(1)); s2.clicked.connect(lambda: self._choose(2)); go.clicked.connect(self._process); cancel.clicked.connect(self.reject); _fit_center(self, 480, 380)
+        s1.clicked.connect(lambda: self._choose(1)); s2.clicked.connect(lambda: self._choose(2)); go.clicked.connect(self._process); cancel.clicked.connect(self.reject); _center_later(self, 480, 380)
 
     def _choose(self, which: int) -> None:
         path, _ = QFileDialog.getOpenFileName(self, "Select File", str(self.viewer.file_path.parent), "SEG-D (*.segd *.seg *.dat *.bin);;All files (*.*)")
@@ -682,7 +693,7 @@ class FiltersDialog(QDialog):
             self.rows[name]=(chk,edits)
         self.progress = QProgressBar(); root.addSpacing(20); root.addWidget(self.progress)
         buttons = QHBoxLayout(); buttons.addStretch(1); ok = _button("OK","green",100); cancel = _button("Cancel","red",100); buttons.addWidget(ok); buttons.addWidget(cancel); root.addLayout(buttons)
-        ok.clicked.connect(self._apply); cancel.clicked.connect(self.reject); _fit_center(self, 520, 310)
+        ok.clicked.connect(self._apply); cancel.clicked.connect(self.reject); _center_later(self, 520, 310)
 
     def _apply(self) -> None:
         selected = None
@@ -703,129 +714,419 @@ class FiltersDialog(QDialog):
 
 
 class FilterPanelsDialog(QDialog):
+    """Legacy Filter Panels tool with screen-safe layout and live preview."""
+
     def __init__(self, viewer: Any) -> None:
-        super().__init__(viewer); self.viewer = viewer; self.folder = ""; self.setWindowTitle("Filter Panels"); self.setStyleSheet(TOOL_STYLE)
-        root = QHBoxLayout(self); root.setContentsMargins(8,8,8,8); root.setSpacing(8)
-        left = QVBoxLayout(); root.addLayout(left, 0)
-        select = _button("Select Folder", "blue", 150); select.clicked.connect(self._choose_folder); left.addWidget(select)
-        rng = QGroupBox("Specify Range"); rg = QGridLayout(rng); self.trace_from=_field("40",55); self.trace_to=_field("200",55); self.time_from=_field("1000",65); self.time_to=_field("2000",65)
-        for i,(lab,e) in enumerate((("Trace From",self.trace_from),("Trace To",self.trace_to),("Time From (mS)",self.time_from),("Time To (mS)",self.time_to))): rg.addWidget(QLabel(lab),i,0); rg.addWidget(e,i,1)
+        super().__init__(viewer)
+        self.viewer = viewer
+        self.folder = ""
+        self.setWindowTitle("Filter Panels")
+        self.setStyleSheet(TOOL_STYLE)
+
+        root = QHBoxLayout(self)
+        root.setContentsMargins(8, 8, 8, 8)
+        root.setSpacing(8)
+
+        left_widget = QWidget()
+        left = QVBoxLayout(left_widget)
+        left.setContentsMargins(4, 4, 4, 4)
+        left.setSpacing(5)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setWidget(left_widget)
+        scroll.setMaximumWidth(310)
+        root.addWidget(scroll, 0)
+
+        select = _button("Select Folder", "blue", 150)
+        select.clicked.connect(self._choose_folder)
+        left.addWidget(select)
+
+        rng = QGroupBox("Specify Range")
+        rg = QGridLayout(rng)
+        rg.setContentsMargins(6, 8, 6, 6)
+        rg.setVerticalSpacing(4)
+        self.trace_from = _field("40", 55)
+        self.trace_to = _field("200", 55)
+        self.time_from = _field("1000", 65)
+        self.time_to = _field("2000", 65)
+        for i, (lab, e) in enumerate((("Trace From", self.trace_from), ("Trace To", self.trace_to), ("Time From (mS)", self.time_from), ("Time To (mS)", self.time_to))):
+            rg.addWidget(QLabel(lab), i, 0)
+            rg.addWidget(e, i, 1)
         left.addWidget(rng)
-        gain = QGroupBox("Gains"); gg = QGridLayout(gain); self.initial_gain=_field("24",55); self.trace_clip=_field(".7",55); self.agc_check=QCheckBox("AGC Window"); self.agc_window=_field(".5",55)
-        gg.addWidget(QLabel("Initial Gain dB"),0,0); gg.addWidget(self.initial_gain,0,1); gg.addWidget(QLabel("Trace Clip"),1,0); gg.addWidget(self.trace_clip,1,1); gg.addWidget(self.agc_check,2,0); gg.addWidget(self.agc_window,2,1)
-        for i,(txt,fn) in enumerate((("Gain +",lambda:self._change_gain(3)),("Gain -",lambda:self._change_gain(-3)),("Set",self._apply_preview))): b=_button(txt,"orange",58); b.clicked.connect(fn); gg.addWidget(b,3,i)
+
+        gain = QGroupBox("Gains")
+        gg = QGridLayout(gain)
+        gg.setContentsMargins(6, 8, 6, 6)
+        self.initial_gain = _field("24", 55)
+        self.trace_clip = _field(".7", 55)
+        self.agc_check = QCheckBox("AGC Window")
+        self.agc_window = _field(".5", 55)
+        gg.addWidget(QLabel("Initial Gain dB"), 0, 0)
+        gg.addWidget(self.initial_gain, 0, 1)
+        gg.addWidget(QLabel("Trace Clip"), 1, 0)
+        gg.addWidget(self.trace_clip, 1, 1)
+        gg.addWidget(self.agc_check, 2, 0)
+        gg.addWidget(self.agc_window, 2, 1)
+        for i, (txt, fn) in enumerate((("Gain +", lambda: self._change_gain(3)), ("Gain -", lambda: self._change_gain(-3)), ("Set", self._apply_preview))):
+            b = _button(txt, "orange", 58)
+            b.clicked.connect(fn)
+            gg.addWidget(b, 3, i)
         left.addWidget(gain)
-        filters_box = QGroupBox("Specify Filters to Try on Each File"); fl = QGridLayout(filters_box); self.filter_checks=[]
-        defaults=[(1,8,12,60,70,True),(2,9,13,65,75,True),(3,10,14,70,80,True),(4,11,15,75,85,False),(5,12,16,80,95,False),(6,13,17,85,100,False)]
-        for row,(idx,a,b,c,d,on) in enumerate(defaults):
-            chk=QCheckBox(f"BP Filter {idx}"); chk.setChecked(on); edits=[_field(str(x),35) for x in (a,b,c,d)]; test=_button("Test","green",44); test.clicked.connect(lambda _=False, ed=edits: self._test_filter(ed))
-            fl.addWidget(chk,row,0); [fl.addWidget(ed,row,i+1) for i,ed in enumerate(edits)]; fl.addWidget(test,row,5); self.filter_checks.append((chk,*edits))
+
+        filters_box = QGroupBox("Specify Filters to Try on Each File")
+        fl = QGridLayout(filters_box)
+        fl.setContentsMargins(6, 8, 6, 6)
+        fl.setVerticalSpacing(3)
+        self.filter_checks = []
+        defaults = [(1, 8, 12, 60, 70, True), (2, 9, 13, 65, 75, True), (3, 10, 14, 70, 80, True), (4, 11, 15, 75, 85, False), (5, 12, 16, 80, 95, False), (6, 13, 17, 85, 100, False)]
+        for row, (idx, a, b, c, d, on) in enumerate(defaults):
+            chk = QCheckBox(f"BP Filter {idx}")
+            chk.setChecked(on)
+            edits = [_field(str(x), 34) for x in (a, b, c, d)]
+            test = _button("Test", "green", 44)
+            test.clicked.connect(lambda _=False, ed=edits: self._test_filter(ed))
+            fl.addWidget(chk, row, 0)
+            for col, ed in enumerate(edits, start=1):
+                fl.addWidget(ed, row, col)
+            fl.addWidget(test, row, 5)
+            self.filter_checks.append((chk, *edits))
         left.addWidget(filters_box)
-        self.file_list=QListWidget(); self.file_list.setMaximumWidth(240); self.file_list.currentRowChanged.connect(self._apply_preview); left.addWidget(self.file_list,1)
-        self.header_line=_field("Sweep Tests ...",210); self.info_line=_field("Crew 123",210); left.addWidget(QLabel("Header Line")); left.addWidget(self.header_line); left.addWidget(QLabel("Info Line")); left.addWidget(self.info_line); self.generate_bmp=QCheckBox("Generate BMP Files"); left.addWidget(self.generate_bmp)
-        btnrow=QHBoxLayout();
-        for txt,fn,role in (("Go",self._go,"green"),("Save",self._save_cfg,"blue"),("Load",self._load_cfg,"purple"),("Cancel",self.reject,"red")):
-            b=_button(txt,role,60); b.clicked.connect(fn); btnrow.addWidget(b)
+
+        self.file_list = QListWidget()
+        self.file_list.setMaximumHeight(110)
+        self.file_list.currentRowChanged.connect(self._apply_preview)
+        left.addWidget(self.file_list)
+
+        self.header_line = _field("Sweep Tests ...", 210)
+        self.info_line = _field("Crew 123", 210)
+        left.addWidget(QLabel("Header Line"))
+        left.addWidget(self.header_line)
+        left.addWidget(QLabel("Info Line"))
+        left.addWidget(self.info_line)
+        self.generate_bmp = QCheckBox("Generate BMP Files")
+        left.addWidget(self.generate_bmp)
+
+        btnrow = QHBoxLayout()
+        for txt, fn, role in (("Go", self._go, "green"), ("Save", self._save_cfg, "blue"), ("Load", self._load_cfg, "purple"), ("Cancel", self.reject, "red")):
+            b = _button(txt, role, 58)
+            b.clicked.connect(fn)
+            btnrow.addWidget(b)
         left.addLayout(btnrow)
-        right=QVBoxLayout(); root.addLayout(right,1); self.preview=pg.PlotWidget(); self.preview.setBackground("#FFFFFF"); self.preview.showGrid(x=True,y=True,alpha=0.2); right.addWidget(self.preview,1)
-        opts=QGroupBox(""); og=QGridLayout(opts); self.display_trace=QRadioButton("Display Traces"); self.display_fft=QRadioButton("Display FFT"); self.display_energy=QRadioButton("Display Energy Distribution"); self.display_trace.setChecked(True)
-        for i,w in enumerate((self.display_trace,self.display_fft,self.display_energy)): og.addWidget(w,0,i)
-        self.wiggle=QRadioButton("Wiggle"); self.va_plus=QRadioButton("VA+"); self.va_minus=QRadioButton("VA-"); self.va_both=QRadioButton("VA Both"); self.wiggle.setChecked(True)
-        for i,w in enumerate((self.wiggle,self.va_plus,self.va_minus,self.va_both)): og.addWidget(w,1+i,0)
-        self.gradient_fill=QCheckBox("Gradient Fill"); og.addWidget(self.gradient_fill,5,0); og.addWidget(QLabel("Max"),1,1); self.max_edit=_field("100",55); self.max2_edit=_field("100",55); og.addWidget(self.max_edit,1,2); og.addWidget(self.max2_edit,1,3)
-        self.norm_trace=QRadioButton("Normalise Peak Trace"); self.norm_panel=QRadioButton("Normalise Peak Panel"); self.norm_trace.setChecked(True); og.addWidget(self.norm_trace,2,2,1,2); og.addWidget(self.norm_panel,3,2,1,2); og.addWidget(QLabel("Floor (-dB)"),4,2); self.floor_edit=_field("40",55); og.addWidget(self.floor_edit,4,3)
+        left.addStretch(1)
+
+        right = QVBoxLayout()
+        root.addLayout(right, 1)
+        self.preview = pg.PlotWidget()
+        self.preview.setBackground("#FFFFFF")
+        self.preview.showGrid(x=True, y=True, alpha=0.2)
+        right.addWidget(self.preview, 1)
+
+        opts = QGroupBox("")
+        og = QGridLayout(opts)
+        self.display_trace = QRadioButton("Display Traces")
+        self.display_fft = QRadioButton("Display FFT")
+        self.display_energy = QRadioButton("Display Energy Distribution")
+        self.display_trace.setChecked(True)
+        for i, w in enumerate((self.display_trace, self.display_fft, self.display_energy)):
+            og.addWidget(w, 0, i)
+            w.toggled.connect(self._apply_preview)
+        self.wiggle = QRadioButton("Wiggle")
+        self.va_plus = QRadioButton("VA+")
+        self.va_minus = QRadioButton("VA-")
+        self.va_both = QRadioButton("VA Both")
+        self.wiggle.setChecked(True)
+        for i, w in enumerate((self.wiggle, self.va_plus, self.va_minus, self.va_both)):
+            og.addWidget(w, 1 + i, 0)
+            w.toggled.connect(self._apply_preview)
+        self.gradient_fill = QCheckBox("Gradient Fill")
+        og.addWidget(self.gradient_fill, 5, 0)
+        og.addWidget(QLabel("Max"), 1, 1)
+        self.max_edit = _field("100", 55)
+        self.max2_edit = _field("100", 55)
+        og.addWidget(self.max_edit, 1, 2)
+        og.addWidget(self.max2_edit, 1, 3)
+        self.norm_trace = QRadioButton("Normalise Peak Trace")
+        self.norm_panel = QRadioButton("Normalise Peak Panel")
+        self.norm_trace.setChecked(True)
+        og.addWidget(self.norm_trace, 2, 2, 1, 2)
+        og.addWidget(self.norm_panel, 3, 2, 1, 2)
+        og.addWidget(QLabel("Floor (-dB)"), 4, 2)
+        self.floor_edit = _field("40", 55)
+        og.addWidget(self.floor_edit, 4, 3)
         right.addWidget(opts)
-        _fit_center(self, 1160, 680)
+        _center_later(self, 980, 610)
 
     def _choose_folder(self) -> None:
-        folder = QFileDialog.getExistingDirectory(self,"Select Folder",str(self.viewer.file_path.parent))
-        if not folder: return
-        self.folder=folder; self.file_list.clear()
+        folder = QFileDialog.getExistingDirectory(self, "Select Folder", str(self.viewer.file_path.parent))
+        if not folder:
+            return
+        self.folder = folder
+        self.file_list.clear()
         for p in sorted(Path(folder).glob("*")):
-            if p.is_file() and p.suffix.lower() in {".segd",".seg",".dat",".bin"}: self.file_list.addItem(str(p))
-        if self.file_list.count(): self.file_list.setCurrentRow(0)
+            if p.is_file() and p.suffix.lower() in {".segd", ".seg", ".dat", ".bin"}:
+                self.file_list.addItem(str(p))
+        if self.file_list.count():
+            self.file_list.setCurrentRow(0)
 
     def _preview_file(self) -> Path:
-        item=self.file_list.currentItem(); return Path(item.text()) if item else self.viewer.file_path
+        item = self.file_list.currentItem()
+        return Path(item.text()) if item else self.viewer.file_path
+
     def _change_gain(self, delta: float) -> None:
-        self.initial_gain.setText(str(int(float(self.initial_gain.text() or 24)+delta))); self._apply_preview()
-    def _read_window(self, low: float | None=None, high: float | None=None) -> tuple[np.ndarray,float]:
-        path=self._preview_file(); reader=self.viewer.reader if path==self.viewer.file_path else SegdReader(path)
-        t0=max(0,int(float(self.trace_from.text() or 1))-1); t1=min(reader.get_trace_count(),int(float(self.trace_to.text() or reader.get_trace_count())))
-        si=max(0,int(float(self.time_from.text() or 0)/max(reader.get_sample_interval(),1e-12))); ei=min(reader.get_sample_count(),int(float(self.time_to.text() or reader.get_sample_count())/max(reader.get_sample_interval(),1e-12)))
-        data=reader.read_channel_data((t0,t1),0,(si,ei)).astype(float)
+        self.initial_gain.setText(str(int(float(self.initial_gain.text() or 24) + delta)))
+        self._apply_preview()
+
+    def _read_window(self, low: float | None = None, high: float | None = None) -> tuple[np.ndarray, float]:
+        path = self._preview_file()
+        reader = self.viewer.reader if path == self.viewer.file_path else SegdReader(path)
+        t0 = max(0, int(float(self.trace_from.text() or 1)) - 1)
+        t1 = min(reader.get_trace_count(), int(float(self.trace_to.text() or reader.get_trace_count())))
+        si = max(0, int(float(self.time_from.text() or 0) / max(reader.get_sample_interval(), 1e-12)))
+        ei = min(reader.get_sample_count(), int(float(self.time_to.text() or reader.get_sample_count()) / max(reader.get_sample_interval(), 1e-12)))
+        if t1 <= t0 or ei <= si:
+            return np.array([]), float(reader.get_sample_interval())
+        data = reader.read_channel_data((t0, t1), 0, (si, ei)).astype(float)
+        data = np.nan_to_num(data)
         if (low or high) and data.size:
             try:
                 from scipy.signal import butter, sosfiltfilt
-                fs=1000.0/max(float(reader.get_sample_interval()),1e-12); ny=fs*0.5
-                if low and high and 0<low<high<ny: sos=butter(4,[low/ny,high/ny],btype='bandpass',output='sos')
-                elif low and 0<low<ny: sos=butter(4,low/ny,btype='highpass',output='sos')
-                elif high and 0<high<ny: sos=butter(4,high/ny,btype='lowpass',output='sos')
-                else: sos=None
-                if sos is not None: data=sosfiltfilt(sos,data,axis=1)
-            except Exception: pass
-        data*=10.0**(float(self.initial_gain.text() or 24)/20.0); return data,float(reader.get_sample_interval())
-    def _apply_preview(self,*args) -> None:
-        data,dt=self._read_window(); self.preview.clear()
-        if data.size==0: return
+                fs = 1000.0 / max(float(reader.get_sample_interval()), 1e-12)
+                ny = fs * 0.5
+                if low and high and 0 < low < high < ny:
+                    sos = butter(4, [low / ny, high / ny], btype='bandpass', output='sos')
+                elif low and 0 < low < ny:
+                    sos = butter(4, low / ny, btype='highpass', output='sos')
+                elif high and 0 < high < ny:
+                    sos = butter(4, high / ny, btype='lowpass', output='sos')
+                else:
+                    sos = None
+                if sos is not None:
+                    data = sosfiltfilt(sos, data, axis=1)
+            except Exception:
+                pass
+        data *= 10.0 ** (float(self.initial_gain.text() or 24) / 20.0)
+        return data, float(reader.get_sample_interval())
+
+    def _apply_preview(self, *args) -> None:
+        data, dt = self._read_window()
+        self._draw_preview(data, dt)
+
+    def _draw_preview(self, data: np.ndarray, dt: float) -> None:
+        self.preview.clear()
+        if data.size == 0:
+            return
         if self.display_fft.isChecked():
-            tr=np.mean(data,axis=0); spec=np.abs(np.fft.rfft(tr*np.hanning(tr.size))); freq=np.fft.rfftfreq(tr.size,d=dt/1000.0); self.preview.plot(freq,20*np.log10(np.maximum(spec,1e-12)),pen=pg.mkPen('#0A6BC7',width=2))
+            tr = np.mean(data, axis=0)
+            spec = np.abs(np.fft.rfft(tr * np.hanning(tr.size)))
+            freq = np.fft.rfftfreq(tr.size, d=dt / 1000.0)
+            self.preview.plot(freq, 20 * np.log10(np.maximum(spec, 1e-12)), pen=pg.mkPen('#0A6BC7', width=2))
+            self.preview.setLabel('bottom', 'Frequency', units='Hz')
+            self.preview.setLabel('left', 'Level', units='dB')
         elif self.display_energy.isChecked():
-            img=pg.ImageItem(data**2); img.setLookupTable(_spectral_lut()); self.preview.addItem(img)
+            img = pg.ImageItem(data ** 2)
+            img.setLookupTable(_spectral_lut())
+            self.preview.addItem(img)
+            self.preview.setLabel('bottom', 'Sample')
+            self.preview.setLabel('left', 'Trace')
         else:
-            ns=data.shape[1]; t=np.arange(ns)*dt; step=max(1,int(np.ceil(data.shape[0]/16))); scale=max(np.max(np.abs(data)),1e-9)
-            for i,tr in enumerate(data[::step]): self.preview.plot(t,tr+i*scale*1.4,pen=pg.mkPen('#000',width=1))
+            ns = data.shape[1]
+            t = np.arange(ns) * dt
+            step = max(1, int(np.ceil(data.shape[0] / 16)))
+            scale = max(np.nanpercentile(np.abs(data), 98), 1e-9)
+            for i, tr in enumerate(data[::step]):
+                if self.norm_trace.isChecked():
+                    tr = tr / max(np.max(np.abs(tr)), 1e-12) * scale
+                self.preview.plot(t, tr + i * scale * 1.35, pen=pg.mkPen('#000000', width=1))
+            self.preview.setLabel('bottom', 'Time', units='ms')
+            self.preview.setLabel('left', 'Trace panel')
+
     def _test_filter(self, edits: list[QLineEdit]) -> None:
-        low=float(edits[1].text() or edits[0].text() or 0); high=float(edits[2].text() or edits[3].text() or 0); data,dt=self._read_window(low,high); self._apply_preview()
+        low = float(edits[1].text() or edits[0].text() or 0)
+        high = float(edits[2].text() or edits[3].text() or 0)
+        data, dt = self._read_window(low, high)
+        self._draw_preview(data, dt)
+
     def _go(self) -> None:
-        if not self.folder: self._choose_folder()
+        if not self.folder:
+            self._choose_folder()
+        if not self.folder:
+            return
         for i in range(self.file_list.count()):
-            self.file_list.setCurrentRow(i); self._apply_preview(); QApplication.processEvents()
-            if self.generate_bmp.isChecked(): self.preview.grab().save(str(Path(self.file_list.item(i).text()).with_suffix('.bmp')))
-        QMessageBox.information(self,"Filter Panels","Batch test finished.")
+            self.file_list.setCurrentRow(i)
+            self._apply_preview()
+            QApplication.processEvents()
+            if self.generate_bmp.isChecked():
+                self.preview.grab().save(str(Path(self.file_list.item(i).text()).with_suffix('.bmp')))
+        QMessageBox.information(self, "Filter Panels", "Batch test finished.")
+
     def _save_cfg(self) -> None:
-        path,_=QFileDialog.getSaveFileName(self,"Save Filter Panel Setup","filter_panels.json","JSON (*.json)")
-        if path: Path(path).write_text(json.dumps({'trace_from':self.trace_from.text(),'trace_to':self.trace_to.text(),'time_from':self.time_from.text(),'time_to':self.time_to.text(),'initial_gain':self.initial_gain.text()},indent=2),encoding='utf-8')
+        path, _ = QFileDialog.getSaveFileName(self, "Save Filter Panel Setup", "filter_panels.json", "JSON (*.json)")
+        if path:
+            cfg = {'trace_from': self.trace_from.text(), 'trace_to': self.trace_to.text(), 'time_from': self.time_from.text(), 'time_to': self.time_to.text(), 'initial_gain': self.initial_gain.text(), 'trace_clip': self.trace_clip.text(), 'agc_window': self.agc_window.text()}
+            Path(path).write_text(json.dumps(cfg, indent=2), encoding='utf-8')
+
     def _load_cfg(self) -> None:
-        path,_=QFileDialog.getOpenFileName(self,"Load Filter Panel Setup","","JSON (*.json)")
-        if not path: return
-        cfg=json.loads(Path(path).read_text(encoding='utf-8'))
-        for name in ('trace_from','trace_to','time_from','time_to','initial_gain'):
-            getattr(self,name).setText(str(cfg.get(name,getattr(self,name).text())))
+        path, _ = QFileDialog.getOpenFileName(self, "Load Filter Panel Setup", "", "JSON (*.json)")
+        if not path:
+            return
+        cfg = json.loads(Path(path).read_text(encoding='utf-8'))
+        for name in ('trace_from', 'trace_to', 'time_from', 'time_to', 'initial_gain', 'trace_clip', 'agc_window'):
+            getattr(self, name).setText(str(cfg.get(name, getattr(self, name).text())))
         self._apply_preview()
 
 
 class TraceAnalysisOptionsDialog(QDialog):
     def __init__(self, viewer: Any) -> None:
-        super().__init__(viewer); self.viewer=viewer; self.setWindowTitle("Trace Analysis"); self.setStyleSheet(TOOL_STYLE)
-        root=QVBoxLayout(self)
-        a=QGroupBox("Analyse"); av=QVBoxLayout(a); self.a_rms=QRadioButton("RMS"); self.a_avg=QRadioButton("Average"); self.a_pos=QRadioButton("Positive Peak"); self.a_abs=QRadioButton("Absolute Peak"); self.a_fft=QRadioButton("Fundamental Peak (FFT Peak)"); self.a_elev=QRadioButton("Elevation"); self.a_rms.setChecked(True)
-        for w in (self.a_rms,self.a_avg,self.a_pos,self.a_abs,self.a_fft,self.a_elev): av.addWidget(w)
-        root.addWidget(a); n=QGroupBox("Normalisation"); nv=QVBoxLayout(n); self.n_peak=QRadioButton("Normalised to Peak"); self.n_avg=QRadioButton("Normalised to Average"); self.n_raw=QRadioButton("Raw Values"); self.n_raw.setChecked(True); self.debiased=QCheckBox("Debiased (Ignore highest and lowest 10%)"); self.ignore_aux=QCheckBox("Ignore Aux Traces"); self.ignore_aux.setChecked(True)
-        for w in (self.n_peak,self.n_avg,self.n_raw,self.debiased,self.ignore_aux): nv.addWidget(w)
-        root.addWidget(n); d=QGroupBox("Display"); dv=QVBoxLayout(d); self.d_raw=QRadioButton("Raw Results"); self.d_peak=QRadioButton("% Deviation From Peak"); self.d_avgd=QRadioButton("% Deviation From Average"); self.d_raw.setChecked(True); self.debias_display=QCheckBox("Debias"); self.ignore_aux_display=QCheckBox("Ignore Aux"); self.out_list=QRadioButton("Display as List"); self.out_graph=QRadioButton("Display Graphically"); self.out_list.setChecked(True)
-        for w in (self.d_raw,self.d_peak,self.d_avgd,self.debias_display,self.ignore_aux_display,self.out_list,self.out_graph): dv.addWidget(w)
-        root.addWidget(d); btns=QHBoxLayout(); btns.addStretch(1); go=_button("Go","green",90); cancel=_button("Cancel","red",90); go.clicked.connect(self._go); cancel.clicked.connect(self.reject); btns.addWidget(go); btns.addWidget(cancel); root.addLayout(btns); _fit_center(self, 400, 530)
+        super().__init__(viewer)
+        self.viewer = viewer
+        self.setWindowTitle("Trace Analysis")
+        self.setStyleSheet(TOOL_STYLE)
+        root = QVBoxLayout(self)
+        root.setContentsMargins(10, 10, 10, 10)
+        root.setSpacing(6)
+
+        a = QGroupBox("Analyse")
+        av = QVBoxLayout(a)
+        self.a_rms = QRadioButton("RMS")
+        self.a_avg = QRadioButton("Average")
+        self.a_pos = QRadioButton("Positive Peak")
+        self.a_abs = QRadioButton("Absolute Peak")
+        self.a_fft = QRadioButton("Fundamental Peak (FFT Peak)")
+        self.a_elev = QRadioButton("Elevation")
+        self.a_rms.setChecked(True)
+        for w in (self.a_rms, self.a_avg, self.a_pos, self.a_abs, self.a_fft, self.a_elev):
+            av.addWidget(w)
+        root.addWidget(a)
+
+        n = QGroupBox("Normalisation")
+        nv = QVBoxLayout(n)
+        self.n_peak = QRadioButton("Normalised to Peak")
+        self.n_avg = QRadioButton("Normalised to Average")
+        self.n_raw = QRadioButton("Raw Values")
+        self.n_raw.setChecked(True)
+        self.debiased = QCheckBox("Debiased (Ignore highest and lowest 10%)")
+        self.ignore_aux = QCheckBox("Ignore Aux Traces")
+        self.ignore_aux.setChecked(True)
+        for w in (self.n_peak, self.n_avg, self.n_raw, self.debiased, self.ignore_aux):
+            nv.addWidget(w)
+        root.addWidget(n)
+
+        d = QGroupBox("Display")
+        dv = QVBoxLayout(d)
+        self.d_raw = QRadioButton("Raw Results")
+        self.d_peak = QRadioButton("% Deviation From Peak")
+        self.d_avgd = QRadioButton("% Deviation From Average")
+        self.d_raw.setChecked(True)
+        self.debias_display = QCheckBox("Debias")
+        self.ignore_aux_display = QCheckBox("Ignore Aux")
+        self.ignore_aux_display.setChecked(True)
+        self.out_list = QRadioButton("Display as List")
+        self.out_graph = QRadioButton("Display Graphically")
+        self.out_list.setChecked(True)
+        for w in (self.d_raw, self.d_peak, self.d_avgd, self.debias_display, self.ignore_aux_display, self.out_list, self.out_graph):
+            dv.addWidget(w)
+        root.addWidget(d)
+
+        btns = QHBoxLayout()
+        btns.addStretch(1)
+        go = _button("Go", "green", 90)
+        cancel = _button("Cancel", "red", 90)
+        go.clicked.connect(self._go)
+        cancel.clicked.connect(self.reject)
+        btns.addWidget(go)
+        btns.addWidget(cancel)
+        root.addLayout(btns)
+        _center_later(self, 420, 540)
+
+    def _active_data_and_trace_numbers(self) -> tuple[np.ndarray, np.ndarray]:
+        data = getattr(self.viewer, "_raw_data", np.array([]))
+        if not isinstance(data, np.ndarray) or data.size == 0:
+            return np.array([]), np.array([], dtype=int)
+        data = np.nan_to_num(data.astype(float))
+        start = int(getattr(self.viewer, "_trace_start", 0))
+        trace_numbers = np.arange(start + 1, start + data.shape[0] + 1)
+        if (self.ignore_aux.isChecked() or self.ignore_aux_display.isChecked()) and getattr(self.viewer, "reader", None) is not None:
+            keep = []
+            for local_i, trace_no in enumerate(trace_numbers):
+                try:
+                    ti = self.viewer.reader.get_trace_info(int(trace_no - 1))
+                    keep.append(int(getattr(ti, "channel_type", 1) or 1) == 1)
+                except Exception:
+                    keep.append(True)
+            mask = np.asarray(keep, dtype=bool)
+            data = data[mask]
+            trace_numbers = trace_numbers[mask]
+        return data, trace_numbers
+
     def _go(self) -> None:
-        data=getattr(self.viewer,"_raw_data",np.array([]))
-        if not isinstance(data,np.ndarray) or data.size==0: QMessageBox.information(self,"Trace Analysis","Render traces first."); return
-        data=data.astype(float)
-        if self.a_rms.isChecked(): metric=np.sqrt(np.mean(data**2,axis=1)); title="RMS"
-        elif self.a_avg.isChecked(): metric=np.mean(data,axis=1); title="Average"
-        elif self.a_pos.isChecked(): metric=np.max(data,axis=1); title="Positive Peak"
-        elif self.a_abs.isChecked(): metric=np.max(np.abs(data),axis=1); title="Absolute Peak"
+        data, trace_numbers = self._active_data_and_trace_numbers()
+        if data.size == 0:
+            QMessageBox.information(self, "Trace Analysis", "Render traces first.")
+            return
+        if self.a_rms.isChecked():
+            metric = np.sqrt(np.mean(data ** 2, axis=1)); title = "RMS"
+        elif self.a_avg.isChecked():
+            metric = np.mean(data, axis=1); title = "Average"
+        elif self.a_pos.isChecked():
+            metric = np.max(data, axis=1); title = "Positive Peak"
+        elif self.a_abs.isChecked():
+            metric = np.max(np.abs(data), axis=1); title = "Absolute Peak"
         elif self.a_fft.isChecked():
-            dt=max(float(self.viewer.reader.get_sample_interval()),1e-12)/1000.0; vals=[]
+            dt = max(float(self.viewer.reader.get_sample_interval()), 1e-12) / 1000.0
+            vals = []
             for tr in data:
-                spec=np.abs(np.fft.rfft(tr-np.mean(tr))); freq=np.fft.rfftfreq(tr.size,d=dt); vals.append(float(freq[np.argmax(spec[1:])+1]) if spec.size>1 else 0.0)
-            metric=np.array(vals); title="FFT Peak Hz"
-        else: metric=np.arange(1,data.shape[0]+1,dtype=float); title="Elevation/Index"
-        if self.debiased.isChecked() and metric.size>10:
-            lo,hi=np.percentile(metric,[10,90]); metric=np.clip(metric,lo,hi)
-        if self.n_peak.isChecked(): metric=metric/max(float(np.max(np.abs(metric))),1e-12)
-        elif self.n_avg.isChecked(): metric=metric/max(float(np.mean(np.abs(metric))),1e-12)
-        plot=pg.PlotWidget(); plot.setBackground('#FFF'); plot.showGrid(x=True,y=True,alpha=0.2); plot.plot(np.arange(1,len(metric)+1),metric,pen=pg.mkPen('#0A6BC7',width=2))
-        dlg=QDialog(self); dlg.setWindowTitle(f"Trace Analysis - {title}"); dlg.setStyleSheet(TOOL_STYLE); lay=QVBoxLayout(dlg); lay.addWidget(plot); lay.addWidget(QLabel(f"Count {len(metric):,} | Mean {_format_number(np.mean(metric),5)} | Peak {_format_number(np.max(metric),5)}")); close=_button("Close","red",90); close.clicked.connect(dlg.accept); lay.addWidget(close,0,Qt.AlignmentFlag.AlignRight); _fit_center(dlg,760,520); dlg.exec(); self.accept()
+                spec = np.abs(np.fft.rfft(tr - np.mean(tr)))
+                freq = np.fft.rfftfreq(tr.size, d=dt)
+                vals.append(float(freq[np.argmax(spec[1:]) + 1]) if spec.size > 1 else 0.0)
+            metric = np.array(vals); title = "FFT Peak Hz"
+        else:
+            metric = trace_numbers.astype(float); title = "Elevation/Index"
+
+        if (self.debiased.isChecked() or self.debias_display.isChecked()) and metric.size > 10:
+            lo, hi = np.percentile(metric, [10, 90])
+            metric = np.clip(metric, lo, hi)
+        if self.n_peak.isChecked():
+            metric = metric / max(float(np.max(np.abs(metric))), 1e-12)
+        elif self.n_avg.isChecked():
+            metric = metric / max(float(np.mean(np.abs(metric))), 1e-12)
+        if self.d_peak.isChecked():
+            metric = 100.0 * (metric / max(float(np.max(np.abs(metric))), 1e-12))
+            title = "% Deviation From Peak - " + title
+        elif self.d_avgd.isChecked():
+            metric = 100.0 * (metric / max(float(np.mean(np.abs(metric))), 1e-12))
+            title = "% Deviation From Average - " + title
+
+        dlg = QDialog(self)
+        dlg.setWindowTitle(f"Trace Analysis - {title}")
+        dlg.setStyleSheet(TOOL_STYLE)
+        lay = QVBoxLayout(dlg)
+        summary = QLabel(f"Count {len(metric):,}  |  Mean {_format_number(np.mean(metric), 5)}  |  Median {_format_number(np.median(metric), 5)}  |  Peak {_format_number(np.max(metric), 5)}")
+        summary.setObjectName("status")
+        lay.addWidget(summary)
+        if self.out_graph.isChecked():
+            plot = pg.PlotWidget()
+            plot.setBackground('#FFFFFF')
+            plot.showGrid(x=True, y=True, alpha=0.2)
+            plot.setLabel('bottom', 'Trace')
+            plot.setLabel('left', title)
+            plot.plot(trace_numbers, metric, pen=pg.mkPen('#0A6BC7', width=2))
+            lay.addWidget(plot, 1)
+        else:
+            table = QTableWidget(len(metric), 2)
+            table.setHorizontalHeaderLabels(["Trace", title])
+            table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+            table.verticalHeader().setVisible(False)
+            for r, (trace_no, value) in enumerate(zip(trace_numbers, metric)):
+                table.setItem(r, 0, QTableWidgetItem(str(int(trace_no))))
+                table.setItem(r, 1, QTableWidgetItem(_format_number(float(value), 6)))
+            lay.addWidget(table, 1)
+        close = _button("Close", "red", 90)
+        close.clicked.connect(dlg.accept)
+        lay.addWidget(close, 0, Qt.AlignmentFlag.AlignRight)
+        _center_later(dlg, 780, 540)
+        dlg.exec()
+        self.accept()
 
 
 class DsdBinFilesDialog(QDialog):
@@ -836,7 +1137,7 @@ class DsdBinFilesDialog(QDialog):
         self.blocks=[]
         for name in ("Ref","BP","Mass","Force"):
             row=QHBoxLayout(); lab=QLabel(name); lab.setFixedWidth(45); row.addWidget(lab); box=QPlainTextEdit(); box.setMinimumHeight(90); row.addWidget(box,1); self.blocks.append((name,box)); root.addLayout(row)
-        root.addWidget(QLabel("Time")); self.time_bar=QProgressBar(); root.addWidget(self.time_bar); openb.clicked.connect(self._open); process.clicked.connect(self._process); cancel.clicked.connect(self.reject); _fit_center(self,1040,680)
+        root.addWidget(QLabel("Time")); self.time_bar=QProgressBar(); root.addWidget(self.time_bar); openb.clicked.connect(self._open); process.clicked.connect(self._process); cancel.clicked.connect(self.reject); _center_later(self, 980, 610)
     def _open(self) -> None:
         path,_=QFileDialog.getOpenFileName(self,"Open DSD / Binary File",str(self.viewer.file_path.parent),"Binary files (*.bin *.dsd *.dat);;All files (*.*)")
         if path: self.path=path; self.file_name.setText(Path(path).name); self.current_filename.setText(path)
@@ -885,7 +1186,7 @@ def radio_sims(viewer: Any) -> None:
     close = _button("Close", "red", 90)
     close.clicked.connect(dlg.accept)
     root.addWidget(close, 0, Qt.AlignmentFlag.AlignRight)
-    _fit_center(dlg, 760, 500)
+    _center_later(dlg, 760, 500)
     dlg.exec()
 
 
@@ -919,7 +1220,7 @@ def multi_vib_sim(viewer: Any) -> None:
     close = _button("Close", "red", 90)
     close.clicked.connect(dlg.accept)
     root.addWidget(close, 0, Qt.AlignmentFlag.AlignRight)
-    _fit_center(dlg, 760, 520)
+    _center_later(dlg, 760, 520)
     dlg.exec()
 
 def spread_view(viewer: Any) -> None:

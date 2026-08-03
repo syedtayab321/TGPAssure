@@ -2,21 +2,56 @@ from __future__ import annotations
 
 from typing import Callable, Optional
 
-from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QDialog, QFrame, QGridLayout, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
+from PySide6.QtCore import QPoint, Qt, QTimer
+from PySide6.QtWidgets import QApplication, QDialog, QFrame, QGridLayout, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
+
+
+def _center_dialog(dialog: QDialog, width: int = 520, height: int = 260) -> None:
+    screen = QApplication.primaryScreen()
+    parent = dialog.parentWidget()
+    if parent is not None:
+        try:
+            screen = QApplication.screenAt(parent.mapToGlobal(parent.rect().center())) or screen
+        except Exception:
+            pass
+    if screen is None:
+        dialog.resize(width, height)
+        return
+    geom = screen.availableGeometry()
+    w = min(width, max(420, geom.width() - 48))
+    h = min(height, max(220, geom.height() - 48))
+    dialog.resize(w, h)
+    dialog.move(geom.x() + (geom.width() - w) // 2, geom.y() + (geom.height() - h) // 2)
+
+def _tool_button(text: str, role: str = "gray") -> QPushButton:
+    colors = {
+        "blue": ("#DDEEFF", "#4B87C3", "#0E4F8C"),
+        "green": ("#E2F7E8", "#65B47A", "#17682E"),
+        "orange": ("#FFF0D2", "#CE9330", "#815300"),
+        "red": ("#FBE4E4", "#D47C7C", "#8C1F1F"),
+        "purple": ("#EFE5FF", "#9272CE", "#4F2F88"),
+        "gray": ("#F3F3F3", "#8D8D8D", "#1B1B1B"),
+    }
+    bg, border, fg = colors.get(role, colors["gray"])
+    button = QPushButton(text)
+    button.setStyleSheet(
+        f"QPushButton{{background:{bg};border:1px solid {border};color:{fg};font-weight:800;border-radius:5px;padding:6px 10px;}}"
+        "QPushButton:hover{background:#FFFFFF;}"
+    )
+    return button
 
 
 class _ActionDialog(QDialog):
     def _apply_base_style(self) -> None:
         self.setStyleSheet(
-            "QDialog{background:#F3F7FA;color:#102A3D;}"
-            "QFrame#header{background:#102A3D;border-radius:9px;}"
-            "QLabel#title{color:white;font-size:14pt;font-weight:900;background:transparent;}"
-            "QLabel#subtitle{color:#CFE7F5;background:transparent;}"
-            "QFrame#card{background:white;border:1px solid #D4DEE8;border-radius:8px;}"
+            "QDialog{background:#EAF0F5;color:#102A3D;font-family:Arial,Segoe UI,sans-serif;font-size:8.5pt;}"
+            "QFrame#header{background:#102A3D;border-radius:7px;}"
+            "QLabel#title{color:white;font-size:12pt;font-weight:900;background:transparent;}"
+            "QLabel#subtitle{color:#CFE7F5;background:transparent;font-size:8.5pt;}"
+            "QFrame#card{background:white;border:1px solid #C4D0DA;border-radius:6px;}"
             "QLabel#caption{color:#607080;font-size:8pt;font-weight:800;background:transparent;}"
-            "QLabel#value{color:#102A3D;font-size:10pt;font-weight:800;background:transparent;}"
-            "QPushButton{background:#FFFFFF;border:1px solid #BFD0DC;border-radius:5px;padding:7px 10px;font-weight:800;}"
+            "QLabel#value{color:#102A3D;font-size:9pt;font-weight:800;background:transparent;}"
+            "QPushButton{background:#FFFFFF;border:1px solid #BFD0DC;border-radius:5px;padding:5px 8px;font-weight:800;font-size:8.5pt;}"
             "QPushButton:hover{background:#EFF8FC;border-color:#0A86C7;}"
             "QPushButton#primary{background:#0A86C7;color:white;border-color:#0A86C7;}"
         )
@@ -90,12 +125,12 @@ class SegdPickActionsDialog(_ActionDialog):
         ]))
 
         row = QHBoxLayout()
-        inspect = QPushButton("Inspect Waveform")
+        inspect = _tool_button("Inspect Waveform", "blue")
         inspect.setObjectName("primary")
-        headers = QPushButton("Show Headers")
-        copy = QPushButton("Copy Details")
-        clear = QPushButton("Clear Pick")
-        close = QPushButton("Close")
+        headers = _tool_button("Show Headers", "purple")
+        copy = _tool_button("Copy Details", "green")
+        clear = _tool_button("Clear Pick", "orange")
+        close = _tool_button("Close", "red")
         inspect.clicked.connect(self._inspect)
         headers.clicked.connect(self._headers)
         copy.clicked.connect(self._copy)
@@ -104,6 +139,8 @@ class SegdPickActionsDialog(_ActionDialog):
         for button in (inspect, headers, copy, clear, close):
             row.addWidget(button)
         root.addLayout(row)
+        _center_dialog(self, 560, 265)
+        QTimer.singleShot(0, lambda: _center_dialog(self, 560, 265))
 
     def _inspect(self) -> None:
         self._on_inspect()
@@ -152,10 +189,10 @@ class SegdMeasureActionsDialog(_ActionDialog):
         ]))
 
         row = QHBoxLayout()
-        copy = QPushButton("Copy Measurement")
+        copy = _tool_button("Copy Measurement", "green")
         copy.setObjectName("primary")
-        clear = QPushButton("Clear Measurement")
-        close = QPushButton("Close")
+        clear = _tool_button("Clear Measurement", "orange")
+        close = _tool_button("Close", "red")
         copy.clicked.connect(self._copy)
         clear.clicked.connect(self._clear)
         close.clicked.connect(self.accept)
@@ -163,6 +200,8 @@ class SegdMeasureActionsDialog(_ActionDialog):
         row.addWidget(clear)
         row.addWidget(close)
         root.addLayout(row)
+        _center_dialog(self, 560, 245)
+        QTimer.singleShot(0, lambda: _center_dialog(self, 560, 245))
 
     def _copy(self) -> None:
         self._on_copy()
