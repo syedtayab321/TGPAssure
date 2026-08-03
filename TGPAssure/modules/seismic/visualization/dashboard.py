@@ -66,6 +66,7 @@ from modules.seismic.visualization.exporters import (
 from modules.seismic.visualization.models import (
     GainSettings,
     InterpretationObject,
+    InterpretationPoint,
     QcTraceFlag,
     SectionData,
     SectionRequest,
@@ -217,6 +218,10 @@ class SeismicVisualizationDashboard(QWidget):
         self._geometry_cache: dict[str, np.ndarray] | None = None
         self._pick_color = "#00E5FF"
         self._closing = False
+        self._volume_reload_timer = QTimer(self)
+        self._volume_reload_timer.setSingleShot(True)
+        self._volume_reload_timer.setInterval(550)
+        self._volume_reload_timer.timeout.connect(self._reload_volume_from_controls)
         self.setObjectName("seismicVisualizationDashboard")
         self.setProperty("module_id", "visualization")
 
@@ -546,8 +551,15 @@ class SeismicVisualizationDashboard(QWidget):
         page = QWidget()
         layout = QVBoxLayout(page)
         layout.setContentsMargins(6, 6, 6, 6)
-        layout.setSpacing(10)
+        layout.setSpacing(8)
 
+        tabs = QTabWidget(page)
+        tabs.setObjectName("seismicToolTabs")
+        tabs.setDocumentMode(True)
+
+        dataset_page = QWidget()
+        dataset_layout = QVBoxLayout(dataset_page)
+        dataset_layout.setContentsMargins(8, 8, 8, 8)
         status_group = QGroupBox("Dataset")
         status_layout = QVBoxLayout(status_group)
         self.volume_kind_label = QLabel("No seismic file open")
@@ -557,8 +569,17 @@ class SeismicVisualizationDashboard(QWidget):
         self.volume_status_label.setProperty("muted", True)
         status_layout.addWidget(self.volume_kind_label)
         status_layout.addWidget(self.volume_status_label)
-        layout.addWidget(status_group)
+        dataset_layout.addWidget(status_group)
+        dataset_help = QLabel("3D volume/cutain is prepared automatically when limits are changed or when a 3D/slice view is requested.")
+        dataset_help.setProperty("muted", True)
+        dataset_help.setWordWrap(True)
+        dataset_layout.addWidget(dataset_help)
+        dataset_layout.addStretch(1)
+        tabs.addTab(dataset_page, "Dataset")
 
+        limits_page = QWidget()
+        limits_layout = QVBoxLayout(limits_page)
+        limits_layout.setContentsMargins(8, 8, 8, 8)
         limits_group = QGroupBox("Performance Limits")
         limits_form = QFormLayout(limits_group)
         self.max_inline_spin = QSpinBox()
@@ -573,11 +594,17 @@ class SeismicVisualizationDashboard(QWidget):
         limits_form.addRow("Maximum inlines", self.max_inline_spin)
         limits_form.addRow("Maximum crosslines", self.max_crossline_spin)
         limits_form.addRow("Maximum samples", self.max_volume_samples_spin)
-        layout.addWidget(limits_group)
+        limits_layout.addWidget(limits_group)
+        limits_note = QLabel("Changing these values now refreshes the 3D dataset automatically after a short debounce. No manual Load button is required.")
+        limits_note.setProperty("muted", True)
+        limits_note.setWordWrap(True)
+        limits_layout.addWidget(limits_note)
+        limits_layout.addStretch(1)
+        tabs.addTab(limits_page, "Performance Limits")
 
-        self.load_volume_button = self._button("Load 3D Volume", "success")
-        layout.addWidget(self.load_volume_button)
-
+        render_page = QWidget()
+        render_layout = QVBoxLayout(render_page)
+        render_layout.setContentsMargins(8, 8, 8, 8)
         render_group = QGroupBox("Rendering")
         render_form = QFormLayout(render_group)
         self.opacity_slider = QSlider(Qt.Horizontal)
@@ -610,16 +637,28 @@ class SeismicVisualizationDashboard(QWidget):
         render_form.addRow("Robust amplitude clip", self.volume_clip_spin)
         render_form.addRow("Transparency threshold", self.volume_threshold_spin)
         render_form.addRow(self.show_volume_button)
-        layout.addWidget(render_group)
-        layout.addStretch(1)
+        render_layout.addWidget(render_group)
+        render_layout.addStretch(1)
+        tabs.addTab(render_page, "Rendering")
+
+        self.load_volume_button = self._button("Load 3D Volume", "success")
+        self.load_volume_button.setVisible(False)
+        layout.addWidget(tabs, 1)
         return page
 
     def _build_slice_controls(self) -> QWidget:
         page = QWidget()
         layout = QVBoxLayout(page)
         layout.setContentsMargins(6, 6, 6, 6)
-        layout.setSpacing(10)
+        layout.setSpacing(8)
 
+        tabs = QTabWidget(page)
+        tabs.setObjectName("seismicToolTabs")
+        tabs.setDocumentMode(True)
+
+        extraction_page = QWidget()
+        extraction_layout = QVBoxLayout(extraction_page)
+        extraction_layout.setContentsMargins(8, 8, 8, 8)
         group = QGroupBox("Slice Extraction")
         form = QFormLayout(group)
         self.volume_mode_combo = QComboBox()
@@ -632,13 +671,18 @@ class SeismicVisualizationDashboard(QWidget):
         self.slice_slider.setRange(0, 0)
         self.slice_slider.setEnabled(False)
         self.slice_value_label = QLabel("Volume")
-        self.slice_value_label.setAlignment(Qt.AlignCenter)
+        self.slice_value_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.slice_value_label.setProperty("valueBadge", True)
         form.addRow("Slice type", self.volume_mode_combo)
         form.addRow("Position", self.slice_slider)
         form.addRow("Current", self.slice_value_label)
-        layout.addWidget(group)
+        extraction_layout.addWidget(group)
+        extraction_layout.addStretch(1)
+        tabs.addTab(extraction_page, "Slice Extraction")
 
+        quick_page = QWidget()
+        quick_layout = QVBoxLayout(quick_page)
+        quick_layout.setContentsMargins(8, 8, 8, 8)
         buttons_group = QGroupBox("Quick Views")
         buttons_layout = QVBoxLayout(buttons_group)
         self.inline_button = self._button("Show Inline Slice", "primary")
@@ -649,8 +693,11 @@ class SeismicVisualizationDashboard(QWidget):
         buttons_layout.addWidget(self.crossline_button)
         buttons_layout.addWidget(self.time_slice_button)
         buttons_layout.addWidget(self.orthogonal_button)
-        layout.addWidget(buttons_group)
-        layout.addStretch(1)
+        quick_layout.addWidget(buttons_group)
+        quick_layout.addStretch(1)
+        tabs.addTab(quick_page, "Quick View")
+
+        layout.addWidget(tabs, 1)
         return page
 
     def _build_well_controls(self) -> QWidget:
@@ -997,6 +1044,8 @@ class SeismicVisualizationDashboard(QWidget):
         self.fit_button.clicked.connect(self.view_2d.fit_view)
         self.detect_qc_button.clicked.connect(self.detect_bad_traces)
         self.load_volume_button.clicked.connect(self.load_3d_volume)
+        for control in (self.max_inline_spin, self.max_crossline_spin, self.max_volume_samples_spin):
+            control.valueChanged.connect(self._schedule_volume_reload)
         self.apply_volume_attribute_button.clicked.connect(self.apply_3d_attribute)
         self.show_volume_button.clicked.connect(self.show_volume)
         self.volume_mode_combo.currentIndexChanged.connect(self._update_3d_mode)
@@ -1008,7 +1057,7 @@ class SeismicVisualizationDashboard(QWidget):
         self.crossline_button.clicked.connect(self.show_crossline_slice)
         self.time_slice_button.clicked.connect(self.show_time_slice)
         self.orthogonal_button.clicked.connect(self.show_orthogonal_slices)
-        self.camera_button.clicked.connect(self.view_3d.reset_camera)
+        self.camera_button.clicked.connect(self.reset_3d_camera)
         self.add_well_button.clicked.connect(self.add_well_path)
         self.save_session_button.clicked.connect(self.save_session)
         self.load_session_button.clicked.connect(self.load_session)
@@ -1479,6 +1528,27 @@ class SeismicVisualizationDashboard(QWidget):
         )
         self.tabs.setCurrentIndex(self.TAB_QC)
         self._show_status(self.qc_summary_label.text())
+
+    def _schedule_volume_reload(self, *_args) -> None:
+        if self.data_source is None:
+            return
+        self.raw_volume = None
+        self.volume = None
+        self.volume_status_label.setText("Volume limits changed — refreshing automatically…")
+        self._volume_reload_timer.start()
+
+    def _reload_volume_from_controls(self) -> None:
+        if self.data_source is None:
+            return
+        if self.tabs.currentIndex() != self.TAB_3D:
+            return
+        self.load_3d_volume()
+
+    def reset_3d_camera(self) -> None:
+        self.tabs.setCurrentIndex(self.TAB_3D)
+        self.tools_3d_tabs.setCurrentIndex(2)
+        self.view_3d.reset_camera()
+        self._show_status("3D camera reset to default inline/crossline/time view")
 
     def load_3d_volume(self) -> None:
         self.tabs.setCurrentIndex(self.TAB_3D)
@@ -1955,10 +2025,57 @@ class SeismicVisualizationDashboard(QWidget):
         except Exception as exc:
             QMessageBox.critical(self, "GeoTIFF Export", str(exc))
 
+    def _section_footprint_interpretation(self) -> InterpretationObject | None:
+        section = self.view_2d.section
+        if section is None:
+            return None
+        x = np.asarray(section.x_coordinates, dtype=float).ravel()
+        y = np.asarray(section.y_coordinates, dtype=float).ravel()
+        if x.size == 0 or y.size == 0:
+            return None
+        n = min(x.size, y.size)
+        x = x[:n]
+        y = y[:n]
+        valid = np.isfinite(x) & np.isfinite(y) & (np.abs(x) <= 180.0) & (np.abs(y) <= 90.0)
+        if np.count_nonzero(valid) < 2:
+            return None
+        indices = np.flatnonzero(valid)
+        if indices.size > 120:
+            indices = np.unique(np.linspace(indices[0], indices[-1], 120).astype(int))
+            indices = indices[valid[indices]]
+        points = [
+            InterpretationPoint(
+                trace_index=int(section.trace_indices[min(int(index), section.trace_indices.size - 1)]) if section.trace_indices.size else int(index),
+                sample_index=0,
+                time_ms=0.0,
+                x=float(x[index]),
+                y=float(y[index]),
+            )
+            for index in indices
+        ]
+        return InterpretationObject(
+            object_id="section-footprint",
+            name="Seismic section footprint",
+            kind="horizon",
+            points=points,
+            visible=True,
+            color="#00A7C8",
+            metadata={"source": "fallback_section_coordinates"},
+        )
+
     def export_kml(self) -> None:
-        if not self.interpretations:
-            QMessageBox.information(self, "Export", "Create a horizon or fault interpretation first.")
-            return
+        export_items = list(self.interpretations)
+        if not export_items:
+            fallback = self._section_footprint_interpretation()
+            if fallback is not None:
+                export_items = [fallback]
+            else:
+                QMessageBox.information(
+                    self,
+                    "KML / KMZ Export",
+                    "Create a horizon/fault interpretation first, or load a section with valid longitude/latitude coordinates so TGPAssure can export a section footprint.",
+                )
+                return
         default = self._default_output_path("interpretations", ".kmz")
         file_path, selected_filter = QFileDialog.getSaveFileName(
             self,
@@ -1971,13 +2088,13 @@ class SeismicVisualizationDashboard(QWidget):
         try:
             if "KML" in selected_filter and "KMZ" not in selected_filter:
                 output = export_kml(
-                    self.interpretations,
+                    export_items,
                     file_path,
                     self._current_path.stem if self._current_path else "TGPAssure",
                 )
             else:
                 output = export_kmz(
-                    self.interpretations,
+                    export_items,
                     file_path,
                     self._current_path.stem if self._current_path else "TGPAssure",
                 )

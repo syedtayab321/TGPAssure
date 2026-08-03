@@ -5,6 +5,9 @@ from pathlib import Path
 from statistics import mean
 from typing import Iterable
 
+import numpy as np
+import pyqtgraph as pg
+
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
@@ -80,6 +83,7 @@ QProgressBar::chunk { border-radius:5px; }
 QTabWidget#miniTabs::pane { border:1px solid #D5E1EA; border-radius:6px; background:#FFFFFF; }
 QTabWidget#miniTabs QTabBar::tab { background:#EAF0F4; color:#3D5668; border:1px solid #D4DFE7; border-bottom:0; min-height:21px; padding:3px 8px; font-size:7.8pt; font-weight:800; }
 QTabWidget#miniTabs QTabBar::tab:selected { background:#FFFFFF; color:#0B658F; }
+QFrame#rxChartCard { background:#FFFFFF; border:1px solid #D6E2EB; border-radius:8px; }
 """
 
 
@@ -328,6 +332,16 @@ class ReceiverQcDashboard(QWidget):
         tabs = QTabWidget()
         tabs.setObjectName("miniTabs")
 
+        status_page = QWidget()
+        status_layout = QVBoxLayout(status_page)
+        status_layout.setContentsMargins(8, 8, 8, 8)
+        self.status_plot = pg.PlotWidget(background="w")
+        self.status_plot.showGrid(x=False, y=True, alpha=0.18)
+        self.status_plot.setLabel("left", "Receiver count")
+        self.status_plot.setTitle("Run QC to display PASS / WARN / FAIL distribution")
+        status_layout.addWidget(self.status_plot, 1)
+        tabs.addTab(status_page, "Vertical Status Graph")
+
         cat_page = QWidget()
         cat_layout = QVBoxLayout(cat_page)
         cat_layout.setContentsMargins(10, 10, 10, 10)
@@ -338,16 +352,23 @@ class ReceiverQcDashboard(QWidget):
         self.category_empty.setObjectName("sectionHint")
         self.category_empty.setWordWrap(True)
         self.category_layout.addWidget(self.category_empty)
+        self.category_plot = pg.PlotWidget(background="w")
+        self.category_plot.showGrid(x=False, y=True, alpha=0.18)
+        self.category_plot.setLabel("left", "Finding count")
         cat_layout.addWidget(self.category_group)
-        cat_layout.addStretch(1)
-        tabs.addTab(cat_page, "Findings")
+        cat_layout.addWidget(self.category_plot, 1)
+        tabs.addTab(cat_page, "Finding Categories")
 
         stats_page = QWidget()
         stats_layout = QVBoxLayout(stats_page)
         stats_layout.setContentsMargins(10, 10, 10, 10)
+        self.numeric_plot = pg.PlotWidget(background="w")
+        self.numeric_plot.showGrid(x=False, y=True, alpha=0.18)
+        self.numeric_plot.setLabel("left", "Mean value")
         self.numeric_table = QTableWidget(0, 5)
         self.numeric_table.setHorizontalHeaderLabels(["Measurement", "Valid", "Min", "Mean", "Max"])
         self._prep_table(self.numeric_table)
+        stats_layout.addWidget(self.numeric_plot, 1)
         stats_layout.addWidget(self.numeric_table, 1)
         tabs.addTab(stats_page, "Measurement Ranges")
         layout.addWidget(tabs, 1)
@@ -415,17 +436,30 @@ class ReceiverQcDashboard(QWidget):
         path, _ = QFileDialog.getOpenFileName(self, "Open SMT / geophone tester file", str(Path.home()), "SMT/CSV/TXT (*.csv *.txt *.tsv *.dat *.log);;All files (*.*)")
         if not path:
             return
+        main_window = self.window()
+        task_id = f"receiver:file:{Path(path).name}"
+        if hasattr(main_window, "begin_busy_task"):
+            main_window.begin_busy_task(task_id, "Opening Receiver QC File", f"Reading {Path(path).name}", 10)
         try:
             self.records = SmtReader().read(path)
+            if hasattr(main_window, "update_busy_task"):
+                main_window.update_busy_task(task_id, 55, "Populating receiver tables and statistics")
             self._path = Path(path)
             self.results = []
             self.file_badge.setText(self._path.name)
             self._populate_records()
             self._populate_statistics()
             self._update_dashboard_state()
+            if hasattr(main_window, "update_busy_task"):
+                main_window.update_busy_task(task_id, 82, "Running Receiver QC")
             self.run_qc()
+            if hasattr(main_window, "update_busy_task"):
+                main_window.update_busy_task(task_id, 100, "Receiver QC file is ready")
         except Exception as exc:
             QMessageBox.critical(self, "Receiver SMT Import", str(exc))
+        finally:
+            if hasattr(main_window, "end_busy_task"):
+                main_window.end_busy_task(task_id)
 
     def _limits(self) -> ReceiverQcLimits:
         return ReceiverQcLimits(
@@ -444,8 +478,8 @@ class ReceiverQcDashboard(QWidget):
         self._populate_statistics()
         self._update_dashboard_state()
         if len(self.results) > 0:
-            self.pages.setCurrentIndex(0)
-            self.nav_buttons[0].setChecked(True)
+            self.pages.setCurrentIndex(2)
+            self.nav_buttons[2].setChecked(True)
 
     def _status_item(self, status: str) -> QTableWidgetItem:
         item = QTableWidgetItem(status)
@@ -530,6 +564,54 @@ class ReceiverQcDashboard(QWidget):
                 rows.append((title, 0, "—", "—", "—"))
         return rows
 
+    def _refresh_graphs(self) -> None:
+        if not hasattr(self, "status_plot"):
+            return
+        for plot in (self.status_plot, self.category_plot, self.numeric_plot):
+            plot.clear()
+        summary = ReceiverQcEngine.summarize(self.results) if self.results else {
+            "total": len(self.records), "pass": 0, "warn": 0, "fail": 0, "score": 0.0,
+            "duplicates": self._duplicate_count(), "categories": {},
+        }
+        status_names = ["PASS", "WARN", "FAIL"]
+        status_values = np.asarray([summary.get("pass", 0), summary.get("warn", 0), summary.get("fail", 0)], dtype=float)
+        status_colors = [pg.mkBrush("#15945C"), pg.mkBrush("#D97706"), pg.mkBrush("#C2414A")]
+        self.status_plot.addItem(pg.BarGraphItem(x=np.arange(3), height=status_values, width=0.62, brushes=status_colors, pen=pg.mkPen("#FFFFFF")))
+        self.status_plot.getAxis("bottom").setTicks([[(float(i), label) for i, label in enumerate(status_names)]])
+        self.status_plot.setYRange(0, max(1.0, float(np.max(status_values)) * 1.18), padding=0)
+        self.status_plot.setTitle(f"Receiver QC vertical status graph — score {float(summary.get('score', 0.0)):.1f}%")
+
+        categories = dict(summary.get("categories", {}) or {})
+        if categories:
+            labels = [str(k).title() for k, _ in sorted(categories.items(), key=lambda kv: int(kv[1]), reverse=True)]
+            values = np.asarray([int(categories[k]) for k, _ in sorted(categories.items(), key=lambda kv: int(kv[1]), reverse=True)], dtype=float)
+            self.category_plot.addItem(pg.BarGraphItem(x=np.arange(len(values)), height=values, width=0.62, brush=pg.mkBrush("#0A86C7"), pen=pg.mkPen("#FFFFFF")))
+            self.category_plot.getAxis("bottom").setTicks([[(float(i), label[:12]) for i, label in enumerate(labels)]])
+            self.category_plot.setYRange(0, max(1.0, float(np.max(values)) * 1.18), padding=0)
+            self.category_plot.setTitle("Failure category counts")
+        else:
+            self.category_plot.setTitle("No categorized findings yet")
+
+        numeric = self._numeric_summary_rows()
+        labels, means = [], []
+        for title, valid, _min_v, mean_v, _max_v in numeric:
+            try:
+                value = float(mean_v)
+            except Exception:
+                continue
+            if int(valid) > 0 and np.isfinite(value):
+                labels.append(title)
+                means.append(value)
+        if means:
+            means_array = np.asarray(means, dtype=float)
+            display = np.log10(np.maximum(np.abs(means_array), 1e-12))
+            self.numeric_plot.addItem(pg.BarGraphItem(x=np.arange(len(display)), height=display, width=0.62, brush=pg.mkBrush("#7857B6"), pen=pg.mkPen("#FFFFFF")))
+            self.numeric_plot.getAxis("bottom").setTicks([[(float(i), label[:10]) for i, label in enumerate(labels)]])
+            self.numeric_plot.setLabel("left", "log10(|mean|)")
+            self.numeric_plot.setTitle("Measurement mean levels by receiver-test channel")
+        else:
+            self.numeric_plot.setTitle("No numeric receiver measurements available")
+
     def _populate_statistics(self) -> None:
         summary = ReceiverQcEngine.summarize(self.results) if self.results else {
             "total": len(self.records), "pass": 0, "warn": 0, "fail": 0, "score": 0.0, "duplicates": self._duplicate_count(), "categories": {}
@@ -555,6 +637,7 @@ class ReceiverQcDashboard(QWidget):
         self.stats_table.resizeColumnsToContents()
         self._populate_numeric_table()
         self._populate_category_bars(summary)
+        self._refresh_graphs()
 
     def _populate_numeric_table(self) -> None:
         rows = self._numeric_summary_rows()
@@ -618,7 +701,8 @@ class ReceiverQcDashboard(QWidget):
         if not self.results:
             QMessageBox.information(self, "Receiver QC", "Run QC before export.")
             return
-        path, _ = QFileDialog.getSaveFileName(self, "Export Receiver QC", "receiver_smt_qc.csv", "CSV (*.csv)")
+        suggested = (self._path.with_name(self._path.stem + "_receiver_smt_qc.csv") if self._path else Path.home() / "receiver_smt_qc.csv")
+        path, _ = QFileDialog.getSaveFileName(self, "Export Receiver QC", str(suggested), "CSV (*.csv)")
         if not path:
             return
         with open(path, "w", newline="", encoding="utf-8") as handle:

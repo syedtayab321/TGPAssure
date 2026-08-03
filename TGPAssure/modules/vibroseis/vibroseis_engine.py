@@ -171,6 +171,25 @@ class VibroseisEngine:
 
     @staticmethod
     def _aligned_pair(reference: np.ndarray, measured: np.ndarray, lag: int) -> tuple[np.ndarray, np.ndarray]:
+        """Return the best overlapping samples after correlation lag alignment.
+
+        Field telemetry often has a few header/trigger samples, dropped rows, or
+        a wrong column mapped by the operator.  Older code raised an exception
+        when the correlation peak sat near the array edge.  For presentation and
+        field QC this function now falls back to the largest safe overlap instead
+        of aborting the whole Source Signal QC button.
+        """
+        reference = np.asarray(reference, dtype=np.float64).reshape(-1)
+        measured = np.asarray(measured, dtype=np.float64).reshape(-1)
+        if reference.size == 0 or measured.size == 0:
+            return reference[:0], measured[:0]
+        lag = int(lag)
+        max_positive = max(0, measured.size - 8)
+        max_negative = -max(0, reference.size - 8)
+        if lag > max_positive:
+            lag = max_positive
+        if lag < max_negative:
+            lag = max_negative
         if lag > 0:
             m = measured[lag:]
             r = reference[: m.size]
@@ -181,6 +200,12 @@ class VibroseisEngine:
             n = min(reference.size, measured.size)
             r, m = reference[:n], measured[:n]
         n = min(r.size, m.size)
+        if n < 8:
+            # Last-resort safe comparison: same-length leading samples.  This
+            # keeps the QC dialog usable and exposes low correlation/poor mapping
+            # as metrics instead of a crash-style error dialog.
+            n = min(reference.size, measured.size)
+            return reference[:n], measured[:n]
         return r[:n], m[:n]
 
     def signal_qc(
@@ -214,7 +239,11 @@ class VibroseisEngine:
         peak_corr = float(corr_norm[peak_i])
         r, m = self._aligned_pair(ref, mea, lag)
         if r.size < 8:
-            raise ValueError("Signals have insufficient overlap after lag alignment.")
+            n = min(ref.size, mea.size)
+            if n < 8:
+                raise ValueError("At least 8 overlapping samples are required after signal preparation.")
+            r, m = ref[:n], mea[:n]
+            lag = 0
 
         rms_r = float(np.sqrt(np.mean(r * r)))
         rms_m = float(np.sqrt(np.mean(m * m)))

@@ -1279,8 +1279,13 @@ class GeodeticDashboard(QWidget):
         self.output_text_check.setChecked(True)
         self.output_xls_check = QCheckBox("XLSX")
         self.output_xls_check.setChecked(True)
+        self.select_all_fields_check = QCheckBox("All fields")
+        self.select_all_fields_check.setChecked(True)
+        self.select_all_fields_check.setToolTip("Tick/untick all examiner field checkboxes in every record-family tab.")
+        self.select_all_fields_check.toggled.connect(self._set_all_field_checks)
         action_layout.addWidget(self.output_text_check)
         action_layout.addWidget(self.output_xls_check)
+        action_layout.addWidget(self.select_all_fields_check)
 
         text_btn = QPushButton("Text Results")
         text_btn.setObjectName("geoExportButton")
@@ -1383,8 +1388,20 @@ class GeodeticDashboard(QWidget):
             page_layout.addWidget(scroll, 1)
             self.record_tabs.addTab(page, compact_tab_title(schema))
 
+        try:
+            self.record_tabs.tabBar().setExpanding(False)
+            self.record_tabs.tabBar().setUsesScrollButtons(True)
+        except Exception:
+            pass
         layout.addWidget(self.record_tabs, 1)
         return widget
+
+    def _set_all_field_checks(self, checked: bool) -> None:
+        for check in getattr(self, "_field_checks", {}).values():
+            check.blockSignals(True)
+            check.setChecked(bool(checked))
+            check.blockSignals(False)
+        self._refresh_text_preview()
 
     def _build_text_results_tab(self) -> QWidget:
         widget = QWidget()

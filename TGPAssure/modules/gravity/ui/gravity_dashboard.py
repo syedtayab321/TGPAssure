@@ -617,12 +617,37 @@ class GravityDashboard(QWidget):
         host = QWidget()
         l = QVBoxLayout(host)
         l.setContentsMargins(8, 8, 8, 8)
+        tabs = QTabWidget(host)
+        tabs.setDocumentMode(True)
+        table_page = QWidget()
+        table_layout = QVBoxLayout(table_page)
+        table_layout.setContentsMargins(4, 4, 4, 4)
         self.qc_table = self._configure_table(QTableWidget(0, 5), 190)
         self.qc_table.setHorizontalHeaderLabels(["Stage", "Status", "Message", "Duration ms", "Metrics"])
         self.qc_table.setColumnWidth(0, 170)
         self.qc_table.setColumnWidth(1, 90)
         self.qc_table.setColumnWidth(3, 90)
-        l.addWidget(self.qc_table, 1)
+        table_layout.addWidget(self.qc_table, 1)
+        tabs.addTab(table_page, "Stage Results")
+
+        chart_page = QWidget()
+        chart_layout = QVBoxLayout(chart_page)
+        chart_layout.setContentsMargins(4, 4, 4, 4)
+        chart_layout.setSpacing(5)
+        if pg is not None:
+            self.gravity_qc_status_plot = pg.PlotWidget(background="w")
+            self.gravity_qc_status_plot.showGrid(x=False, y=True, alpha=0.18)
+            self.gravity_qc_status_plot.setLabel("left", "Stage count")
+            self.gravity_qc_status_plot.setTitle("Run Gravity QC to show status graph")
+            self.gravity_qc_duration_plot = pg.PlotWidget(background="w")
+            self.gravity_qc_duration_plot.showGrid(x=False, y=True, alpha=0.18)
+            self.gravity_qc_duration_plot.setLabel("left", "Duration (ms)")
+            chart_layout.addWidget(self.gravity_qc_status_plot, 1)
+            chart_layout.addWidget(self.gravity_qc_duration_plot, 1)
+        else:
+            chart_layout.addWidget(QLabel("pyqtgraph is unavailable; QC tables remain active."), 1)
+        tabs.addTab(chart_page, "QC Graphs")
+        l.addWidget(tabs, 1)
         return host
 
     def _processing_tab(self):
@@ -885,6 +910,40 @@ class GravityDashboard(QWidget):
             return ""
         return "" if not np.isfinite(number) else f"{number:.{decimals}f}"
 
+    def _refresh_qc_graphs(self, stages: list[dict[str, Any]]) -> None:
+        if pg is None or not hasattr(self, "gravity_qc_status_plot"):
+            return
+        self.gravity_qc_status_plot.clear()
+        self.gravity_qc_duration_plot.clear()
+        if not stages:
+            self.gravity_qc_status_plot.setTitle("Run Gravity QC to show status graph")
+            self.gravity_qc_duration_plot.setTitle("Run Gravity QC to show stage durations")
+            return
+        counts: dict[str, int] = {}
+        durations: list[float] = []
+        labels: list[str] = []
+        for stage in stages:
+            status = str(stage.get("status", "unknown")).upper()
+            counts[status] = counts.get(status, 0) + 1
+            durations.append(float(stage.get("duration_ms", 0) or 0))
+            labels.append(str(stage.get("display_name", stage.get("stage_key", "Stage")))[:12])
+        keys = sorted(counts)
+        values = np.asarray([counts[key] for key in keys], dtype=float)
+        brushes = []
+        for key in keys:
+            low = key.lower()
+            brushes.append(pg.mkBrush("#C2414A") if low in {"fail", "failed", "error"} else (pg.mkBrush("#D97706") if "warn" in low else pg.mkBrush("#15945C")))
+        self.gravity_qc_status_plot.addItem(pg.BarGraphItem(x=np.arange(len(values)), height=values, width=0.62, brushes=brushes, pen=pg.mkPen("#FFFFFF")))
+        self.gravity_qc_status_plot.getAxis("bottom").setTicks([[(float(i), key.title()) for i, key in enumerate(keys)]])
+        self.gravity_qc_status_plot.setYRange(0, max(1.0, float(np.max(values)) * 1.18), padding=0)
+        self.gravity_qc_status_plot.setTitle("Gravity QC status summary")
+
+        duration_values = np.asarray(durations, dtype=float)
+        self.gravity_qc_duration_plot.addItem(pg.BarGraphItem(x=np.arange(len(duration_values)), height=duration_values, width=0.62, brush=pg.mkBrush("#0A86C7"), pen=pg.mkPen("#FFFFFF")))
+        self.gravity_qc_duration_plot.getAxis("bottom").setTicks([[(float(i), label) for i, label in enumerate(labels)]])
+        self.gravity_qc_duration_plot.setYRange(0, max(1.0, float(np.max(duration_values)) * 1.18), padding=0)
+        self.gravity_qc_duration_plot.setTitle("Gravity QC duration by stage")
+
     def _refresh_qc(self):
         stages = list(self.latest_result.get("stage_outcomes", [])) if self.latest_result else []
         if not stages:
@@ -904,6 +963,7 @@ class GravityDashboard(QWidget):
                 item.setToolTip(str(v))
                 self.qc_table.setItem(r, c, item)
         self.qc_table.resizeRowsToContents()
+        self._refresh_qc_graphs(stages)
 
     @staticmethod
     def _metric_preview(metrics):

@@ -223,13 +223,18 @@ class Seismic3DView(QWidget):
     def reset_camera(self) -> None:
         self._view_elevation = 24.0
         self._view_azimuth = -55.0
+        if self._volume is not None:
+            self._rerender_last()
+            self._set_status("Camera reset to default view")
+            return
         if self.figure.axes:
             axis = self.figure.axes[0]
             try:
                 axis.view_init(elev=self._view_elevation, azim=self._view_azimuth)
                 self.canvas.draw_idle()
+                self._set_status("Camera reset to default view")
             except Exception:
-                pass
+                self._prepare_axes("3D seismic viewer ready")
 
     def framebuffer(self):
         # QPixmap implements save(), matching QOpenGLWidget.grabFramebuffer() for

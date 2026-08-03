@@ -37,6 +37,11 @@ from PySide6.QtWidgets import (
 from modules.seismic.segd_viewer.header_viewer import HeaderViewer
 from modules.seismic.segd_viewer.segd_reader import SegdReader
 from modules.seismic.segd_viewer.trace_waveform_dialog import TraceWaveformDialog
+from modules.seismic.segd_viewer.segd_interaction_dialogs import (
+    SegdMeasureActionsDialog,
+    SegdPickActionsDialog,
+)
+from modules.seismic.segd_viewer.segd_qc_results_dialog import SegdQcResultsDialog
 
 
 STATUS_COLORS = {
@@ -540,31 +545,39 @@ class BusyOverlay(QFrame):
 class TraceStatusLegend(QGroupBox):
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__("Trace Status", parent)
+        self.setStyleSheet(
+            "QGroupBox{font-weight:900;color:#173B53;}"
+            "QLabel{background:transparent;color:#102A3D;font-size:8pt;}"
+        )
         layout = QGridLayout(self)
-        layout.setContentsMargins(8, 6, 8, 6)
-        layout.setHorizontalSpacing(8)
-        layout.setVerticalSpacing(3)
+        layout.setContentsMargins(8, 8, 8, 8)
+        layout.setHorizontalSpacing(5)
+        layout.setVerticalSpacing(2)
         entries = [
-            "Normal",
-            "Auxiliary",
-            "Resistance",
-            "Capacitance",
-            "Leakage",
-            "Tilt",
-            "Multiple",
-            "Dead",
-            "Edited",
+            "Normal", "Auxiliary", "Resistance",
+            "Capacitance", "Leakage", "Tilt",
+            "Multiple", "Dead", "Edited",
         ]
         for index, name in enumerate(entries):
-            chip = QLabel()
-            chip.setFixedSize(12, 12)
+            item = QFrame(self)
+            item.setObjectName("legendItem")
+            item_layout = QHBoxLayout(item)
+            item_layout.setContentsMargins(2, 1, 2, 1)
+            item_layout.setSpacing(4)
+            chip = QLabel(item)
+            chip.setFixedSize(10, 10)
             color = STATUS_COLORS[name]
-            chip.setStyleSheet(f"background:rgb({color.red()},{color.green()},{color.blue()});border:1px solid #555;")
-            label = QLabel(name)
-            row = index // 2
-            col = (index % 2) * 2
-            layout.addWidget(chip, row, col)
-            layout.addWidget(label, row, col + 1)
+            chip.setStyleSheet(
+                f"background:rgb({color.red()},{color.green()},{color.blue()});"
+                "border:1px solid #475569;border-radius:2px;"
+            )
+            label = QLabel(name, item)
+            label.setMinimumWidth(0)
+            item_layout.addWidget(chip)
+            item_layout.addWidget(label, 1)
+            row = index // 3
+            col = index % 3
+            layout.addWidget(item, row, col)
 
 
 class TraceAttributesPanel(QGroupBox):
@@ -760,13 +773,16 @@ class SegdImageView(QWidget):
 
     def target_render_size(self) -> tuple[int, int]:
         rect = self.plot_rect()
-        dpr = max(1.0, float(self.devicePixelRatioF()))
-        width = max(320, min(5000, int(rect.width() * dpr)))
-        height = max(240, min(5000, int(rect.height() * dpr)))
+        # Render at the canvas logical size and request a fresh render on zoom.
+        # This avoids stretching/down-sampling a previous bitmap, which made
+        # traces look soft or distorted in the packaged viewer.
+        width = max(420, min(6000, int(rect.width())))
+        height = max(280, min(6000, int(rect.height())))
         return width, height
 
     def paintEvent(self, event) -> None:
         painter = QPainter(self)
+        painter.setRenderHint(QPainter.SmoothPixmapTransform, False)
         painter.fillRect(self.rect(), QColor(26, 30, 35))
         plot = self.plot_rect()
         painter.fillRect(plot, Qt.white)
@@ -1093,15 +1109,15 @@ class SegdViewerWidget(QWidget):
         self.position_label = QLabel("")
         self.position_label.setMinimumWidth(300)
         self.position_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-        render_button = QPushButton("Render")
-        render_button.clicked.connect(self.render_current_view)
+        self.header_render_button = QPushButton("Render")
+        self.header_render_button.clicked.connect(self.render_current_view)
         open_button = QPushButton("Open SEG-D")
         open_button.clicked.connect(self._choose_file)
         header_layout.addWidget(self.file_label)
         header_layout.addWidget(self.info_label)
         header_layout.addStretch(1)
         header_layout.addWidget(self.position_label)
-        header_layout.addWidget(render_button)
+        header_layout.addWidget(self.header_render_button)
         header_layout.addWidget(open_button)
         root.addWidget(header)
 
@@ -1137,12 +1153,16 @@ class SegdViewerWidget(QWidget):
         right_panel.setObjectName("segdControlPanel")
         right_panel.setStyleSheet(
             "QFrame#segdControlPanel{background:#f6f8fa;border-left:1px solid #d4dde5;font-size:8pt;}"
-            "QListWidget#segdSideNav{background:#142B3D;color:#eaf2f7;border:0;padding:5px;font-size:8pt;}"
-            "QListWidget#segdSideNav::item{padding:8px 7px;margin:1px;border-radius:5px;}"
+            "QListWidget#segdSideNav{background:#102A3D;color:#eaf2f7;border:0;padding:4px;font-size:8pt;}"
+            "QListWidget#segdSideNav::item{padding:6px 6px;margin:1px;border-radius:5px;}"
             "QListWidget#segdSideNav::item:selected{background:#0A86C7;color:white;font-weight:800;}"
             "QListWidget#segdSideNav::item:hover{background:#254b63;}"
             "QGroupBox{font-weight:800;border:1px solid #d7e0e7;border-radius:5px;margin-top:7px;padding-top:8px;background:white;font-size:8pt;}"
-            "QGroupBox::title{subcontrol-origin:margin;left:8px;padding:0 4px;}"
+            "QGroupBox::title{subcontrol-origin:margin;left:8px;padding:0 4px;color:#173B53;}"
+            "QTreeWidget{background:#FFFFFF;alternate-background-color:#F5F8FA;border:1px solid #D4DEE8;font-size:8pt;}"
+            "QHeaderView::section{background:#173B53;color:white;padding:4px;border:0;font-weight:800;}"
+            "QTabBar::tab{background:#EAF1F6;color:#335064;border:1px solid #D4DEE8;padding:5px 7px;font-weight:800;}"
+            "QTabBar::tab:selected{background:#FFFFFF;color:#0A6EA8;border-bottom-color:#FFFFFF;}"
             "QTabWidget#segdToolsTabs::pane{border:1px solid #D4DEE8;background:#FFFFFF;top:-1px;}"
             "QTabWidget#segdToolsTabs QTabBar::tab{background:#EAF1F6;color:#335064;border:1px solid #D4DEE8;padding:4px 8px;font-size:8pt;}"
             "QTabWidget#segdToolsTabs QTabBar::tab:selected{background:#FFFFFF;color:#0A6EA8;border-bottom-color:#FFFFFF;font-weight:900;}"
@@ -1160,7 +1180,7 @@ class SegdViewerWidget(QWidget):
         controls_layout.setSpacing(0)
         self.side_nav = QListWidget(controls)
         self.side_nav.setObjectName("segdSideNav")
-        self.side_nav.setFixedWidth(104)
+        self.side_nav.setFixedWidth(92)
         self.control_stack = QStackedWidget(controls)
 
         self.trace_attributes = TraceAttributesPanel(self.control_stack)
@@ -1173,10 +1193,10 @@ class SegdViewerWidget(QWidget):
         for label, page in (
             ("Trace Info", self.trace_attributes),
             ("View", view_controls),
-            ("Gain & Color", gain_controls),
+            ("Gain/Color", gain_controls),
             ("QC Legend", self.status_legend),
             ("Headers", self.header_viewer),
-            ("Field Tools", tools_page),
+            ("Tools", tools_page),
         ):
             self.side_nav.addItem(QListWidgetItem(label))
             self.control_stack.addWidget(page)
@@ -1389,6 +1409,12 @@ class SegdViewerWidget(QWidget):
         layout.addWidget(tabs, 1)
 
         pages = [
+            ("Pick/Measure", "Point picking and distance/time measurement actions", [
+                ("Pick Point", "Click one trace/sample point, then choose inspect, headers, copy or clear.", lambda viewer: viewer.set_interaction_mode("pick")),
+                ("Measure", "Click the start point and then the end point to calculate trace/sample/time deltas.", lambda viewer: viewer.set_interaction_mode("measure")),
+                ("Pan", "Return the canvas to normal pan and hover inspection mode.", lambda viewer: viewer.set_interaction_mode("pan")),
+                ("Clear Marks", "Clear current pick and measurement markers.", lambda viewer: viewer.clear_picks()),
+            ]),
             ("Spread", "Receiver and field-spread QC", [
                 ("Spread View", "Graphical receiver spread, sensor QC and time/frequency slices", segd_tools.spread_view),
                 ("Panels", "Inspect receiver/channel panels and channel-set grouping", segd_tools.panels),
@@ -1555,11 +1581,13 @@ class SegdViewerWidget(QWidget):
                 pass
 
     def toggle_headers(self) -> None:
-        parent = self.header_viewer.parentWidget()
-        if parent is not None:
-            parent.setVisible(not parent.isVisible())
-        else:
-            self.header_viewer.setVisible(not self.header_viewer.isVisible())
+        self._show_headers_panel()
+
+    def _show_headers_panel(self, trace_index: Optional[int] = None) -> None:
+        if trace_index is not None:
+            self.header_viewer.set_trace(trace_index)
+        self.side_nav.setCurrentRow(4)
+        self.control_stack.setCurrentWidget(self.header_viewer)
 
     def set_display_mode(self, mode: str) -> None:
         index = self.display_combo.findData(mode)
@@ -1587,6 +1615,14 @@ class SegdViewerWidget(QWidget):
 
     def set_interaction_mode(self, mode: str) -> None:
         self.canvas.set_mode(mode)
+        if mode == "pick":
+            self.side_nav.setCurrentRow(5)
+            self.position_label.setText("Pick mode: click one trace/sample point. An action menu opens after the pick.")
+        elif mode == "measure":
+            self.side_nav.setCurrentRow(5)
+            self.position_label.setText("Measure mode: click the start point, then click the end point to calculate Δtrace and Δtime.")
+        else:
+            self.position_label.setText("Pan mode: drag to pan, mouse wheel to zoom, right-click for trace options.")
 
     def zoom_to_fit(self) -> None:
         self.canvas.fit_to_view()
@@ -1601,8 +1637,12 @@ class SegdViewerWidget(QWidget):
             str(Path.home() / f"{self.file_path.stem}_view.png"),
             "PNG Image (*.png);;Bitmap Image (*.bmp)",
         )
-        if path:
-            self.canvas.grab().save(path)
+        if not path:
+            return
+        output = Path(path)
+        if not output.suffix:
+            output = output.with_suffix(".bmp" if "Bitmap" in _ else ".png")
+        self.canvas.grab().save(str(output))
 
     def run_qc(self, qc_type: str = "full") -> None:
         if self.reader is None:
@@ -1631,94 +1671,257 @@ class SegdViewerWidget(QWidget):
             return
 
         started = perf_counter()
-        self.loading_progress.emit(12, "Checking SEG-D headers and record dimensions")
-        QApplication.processEvents()
         findings: list[dict[str, Any]] = []
         stages: list[dict[str, Any]] = []
-        trace_count = self.reader.get_trace_count()
-        sample_count = self.reader.get_sample_count()
-        seismic_count = self.reader.get_seismic_trace_count()
-        aux_count = self.reader.get_aux_trace_count()
+
+        def add_finding(stage_key: str, code: str, severity: str, category: str, title: str, description: str, action: str = "Review the acquisition notes and original SEG-D export.", observed: Any = None, unit: str = "") -> None:
+            item: dict[str, Any] = {
+                "stage_key": stage_key,
+                "code": code,
+                "severity": severity,
+                "category": category,
+                "title": title,
+                "description": description,
+                "suggested_action": action,
+            }
+            if observed is not None:
+                item["observed_value"] = observed
+            if unit:
+                item["unit"] = unit
+            findings.append(item)
+
+        def stage_result(score: float, stage_findings: int = 0, hard_fail: bool = False) -> str:
+            if hard_fail or score < 60:
+                return "fail"
+            if stage_findings or score < 90:
+                return "warn"
+            return "pass"
+
+        def add_stage(stage_key: str, stage_name: str, score: float, metrics: dict[str, Any], message: str, stage_findings: int = 0, hard_fail: bool = False) -> None:
+            result = stage_result(score, stage_findings, hard_fail)
+            stages.append({
+                "stage_key": stage_key,
+                "stage_name": stage_name,
+                "status": "completed",
+                "result": result,
+                "score": float(max(0.0, min(100.0, score))),
+                "metrics": metrics,
+                "message": message,
+            })
+
+        self.loading_progress.emit(10, "Reading SEG-D record, header and trace dimensions")
+        QApplication.processEvents()
+        trace_count = int(self.reader.get_trace_count())
+        sample_count = int(self.reader.get_sample_count())
+        seismic_count = int(self.reader.get_seismic_trace_count())
+        aux_count = int(self.reader.get_aux_trace_count())
+        channel_count = int(self.reader.get_channel_count())
+        sample_interval = float(self.reader.get_sample_interval())
+        format_code = int(self.reader.get_format_code())
+        revision = str(self.reader.get_revision())
 
         header_findings = 0
+        header_score = 100.0
         if trace_count <= 0:
-            header_findings += 1
-            findings.append({
-                "stage_key": "header_integrity", "code": "SEGD-NO-TRACES", "severity": "error",
-                "category": "header", "title": "No traces detected",
-                "description": "The SEG-D record did not expose any physical traces.",
-                "suggested_action": "Verify file completeness, format code, and acquisition export settings.",
-            })
+            header_findings += 1; header_score -= 65
+            add_finding("header_integrity", "SEGD-NO-TRACES", "error", "header", "No traces detected", "The SEG-D file did not expose any physical traces.", "Verify file completeness and SEG-D format/export settings.")
         if sample_count <= 0:
-            header_findings += 1
-            findings.append({
-                "stage_key": "header_integrity", "code": "SEGD-NO-SAMPLES", "severity": "error",
-                "category": "header", "title": "No samples detected",
-                "description": "Trace headers did not provide a valid sample count.",
-                "suggested_action": "Review channel-set descriptors and trace header extensions.",
-            })
-        if self.reader.get_format_code() != 8058:
-            header_findings += 1
-            findings.append({
-                "stage_key": "header_integrity", "code": "SEGD-FORMAT", "severity": "warning",
-                "category": "header", "title": "Unexpected format code",
-                "description": f"Format code {self.reader.get_format_code()} was detected; this viewer is optimized for 8058.",
-            })
-        stages.append({
-            "stage_key": "header_integrity",
-            "stage_name": "Header Integrity",
-            "status": "completed",
-            "result": "pass" if header_findings == 0 else "fail",
-            "score": 100.0 if header_findings == 0 else 35.0,
-            "metrics": {
-                "trace_count": trace_count, "seismic_trace_count": seismic_count,
-                "aux_trace_count": aux_count, "sample_count": sample_count,
-                "sample_interval_ms": self.reader.get_sample_interval(),
-                "format_code": self.reader.get_format_code(),
+            header_findings += 1; header_score -= 45
+            add_finding("header_integrity", "SEGD-NO-SAMPLES", "error", "header", "No samples detected", "Trace/channel descriptors do not provide a valid sample count.", "Review channel-set descriptors and acquisition export settings.")
+        if sample_interval <= 0:
+            header_findings += 1; header_score -= 25
+            add_finding("header_integrity", "SEGD-BAD-SAMPLE-INTERVAL", "error", "header", "Invalid sample interval", "The SEG-D sample interval is not positive.", "Confirm the channel-set descriptor and trace header sample-rate fields.", sample_interval, "ms")
+        if format_code != 8058:
+            header_findings += 1; header_score -= 10
+            add_finding("header_integrity", "SEGD-FORMAT", "warning", "header", "Non-optimized SEG-D format code", f"Format code {format_code} was detected; this viewer is optimized for 8058.", "Review the format code before final client delivery.", format_code)
+        add_stage(
+            "header_integrity", "Header Integrity", header_score,
+            {
+                "format_code": format_code,
+                "revision": revision,
+                "physical_traces": trace_count,
+                "seismic_traces": seismic_count,
+                "auxiliary_traces": aux_count,
+                "channel_sets": channel_count,
+                "samples_per_trace": sample_count,
+                "sample_interval_ms": sample_interval,
             },
-            "message": "Header structure and record dimensions checked.",
-        })
+            "Record-level SEG-D header values, trace count and sample interval checked.",
+            header_findings,
+            hard_fail=trace_count <= 0 or sample_count <= 0 or sample_interval <= 0,
+        )
 
-        self.loading_progress.emit(48, "Checking trace quality and acquisition attributes")
+        self.loading_progress.emit(28, "Auditing trace headers and channel-set consistency")
         QApplication.processEvents()
-        zero_trace_count = 0
-        flagged_counts = {"Resistance": 0, "Capacitance": 0, "Leakage": 0, "Tilt": 0, "Multiple": 0}
-        if qc_type in {"full", "trace"} and self._raw_data.size:
-            zero_trace_count = int(np.sum(np.all(self._raw_data == 0, axis=1)))
-            if zero_trace_count:
-                findings.append({
-                    "stage_key": "trace_quality", "code": "SEGD-ZERO-TRACE", "severity": "warning",
-                    "category": "trace", "title": "Zero-amplitude traces detected",
-                    "description": f"{zero_trace_count} trace(s) in the current displayed window contain only zero samples.",
-                    "observed_value": zero_trace_count, "unit": "traces",
-                    "suggested_action": "Inspect acquisition status, dead channels, and trace edit flags.",
-                })
-            for status in self._trace_statuses:
-                if status in flagged_counts:
-                    flagged_counts[status] += 1
-        trace_result = "pass" if zero_trace_count == 0 and not any(flagged_counts.values()) else "warn"
-        stages.append({
-            "stage_key": "trace_quality",
-            "stage_name": "Trace Quality",
-            "status": "completed",
-            "result": trace_result,
-            "score": 100.0 if trace_result == "pass" else 70.0,
-            "metrics": {"zero_trace_count": zero_trace_count, **flagged_counts},
-            "message": "Current displayed trace window checked for dead and acquisition-QC flagged channels.",
-        })
+        trace_infos = []
+        max_scan = min(trace_count, 2500)
+        header_decode_errors = 0
+        for i in range(max_scan):
+            try:
+                trace_infos.append(self.reader.get_trace_info(i))
+            except Exception:
+                header_decode_errors += 1
+        sample_counts = [int(getattr(info, "sample_count", 0) or 0) for info in trace_infos]
+        intervals = [float(getattr(info, "sample_interval_ms", 0.0) or 0.0) for info in trace_infos]
+        channel_sets = [int(getattr(info, "channel_set", 0) or 0) for info in trace_infos]
+        trace_numbers = [int(getattr(info, "trace_number", 0) or 0) for info in trace_infos]
+        bad_samples = sum(1 for value in sample_counts if value <= 0 or (sample_count > 0 and value != sample_count))
+        bad_intervals = sum(1 for value in intervals if value <= 0 or (sample_interval > 0 and abs(value - sample_interval) > max(0.001, sample_interval * 0.01)))
+        duplicate_trace_numbers = max(0, len(trace_numbers) - len(set(trace_numbers))) if trace_numbers else 0
+        trace_header_findings = 0
+        trace_header_score = 100.0
+        if header_decode_errors:
+            trace_header_findings += 1; trace_header_score -= min(35, 5 + header_decode_errors)
+            add_finding("trace_headers", "SEGD-TRACE-DECODE", "warning", "trace header", "Trace header decode errors", f"{header_decode_errors} trace header(s) could not be decoded during QC scan.", "Check trace-header extensions and manufacturer-specific fields.", header_decode_errors)
+        if bad_samples:
+            trace_header_findings += 1; trace_header_score -= min(35, 5 + bad_samples * 0.5)
+            add_finding("trace_headers", "SEGD-SAMPLE-COUNT-MISMATCH", "warning", "trace header", "Inconsistent trace sample counts", f"{bad_samples} scanned trace(s) have missing or inconsistent sample counts.", "Confirm trace length consistency and re-export if required.", bad_samples)
+        if bad_intervals:
+            trace_header_findings += 1; trace_header_score -= min(35, 5 + bad_intervals * 0.5)
+            add_finding("trace_headers", "SEGD-SAMPLE-INTERVAL-MISMATCH", "warning", "trace header", "Inconsistent trace sample intervals", f"{bad_intervals} scanned trace(s) have missing or inconsistent sample intervals.", "Verify sample-rate/header encoding before processing.", bad_intervals)
+        if duplicate_trace_numbers:
+            trace_header_findings += 1; trace_header_score -= min(18, 3 + duplicate_trace_numbers * 0.2)
+            add_finding("trace_headers", "SEGD-DUPLICATE-TRACE-NUMBER", "info", "trace header", "Duplicate trace numbers in scanned window", f"{duplicate_trace_numbers} duplicate trace-number value(s) were found in the scanned trace headers.", "Review whether duplicates are expected within channel sets.", duplicate_trace_numbers)
+        add_stage(
+            "trace_headers", "Trace Header Consistency", trace_header_score,
+            {
+                "scanned_traces": max_scan,
+                "decoded_trace_headers": len(trace_infos),
+                "decode_errors": header_decode_errors,
+                "unique_channel_sets": len(set(channel_sets)) if channel_sets else 0,
+                "inconsistent_sample_counts": bad_samples,
+                "inconsistent_sample_intervals": bad_intervals,
+                "duplicate_trace_numbers": duplicate_trace_numbers,
+            },
+            "Trace headers, channel sets, sample counts and trace-number sequence checked.",
+            trace_header_findings,
+        )
 
+        self.loading_progress.emit(48, "Checking receiver/channel QC flags")
+        QApplication.processEvents()
+        flag_counts: dict[str, int] = {"Resistance": 0, "Capacitance": 0, "Leakage": 0, "Tilt": 0, "Multiple": 0, "Edited": 0, "Auxiliary": 0, "Dead": 0}
+        status_source = list(self._trace_statuses)
+        if len(status_source) < trace_count:
+            # Rebuild a status snapshot from trace headers where possible so QC does not depend only on the displayed window.
+            for info in trace_infos:
+                if getattr(info, "channel_type", 1) != 1:
+                    status_source.append("Auxiliary")
+                elif getattr(info, "trace_edit", 0) != 0:
+                    status_source.append("Edited")
+                else:
+                    flags = tuple(getattr(info, "qc_flags", ()) or ())
+                    if "Resistance" in flags:
+                        status_source.append("Resistance")
+                    elif "Capacitance" in flags:
+                        status_source.append("Capacitance")
+                    elif "Leakage" in flags:
+                        status_source.append("Leakage")
+                    elif "Tilt" in flags:
+                        status_source.append("Tilt")
+                    elif len(flags) > 1:
+                        status_source.append("Multiple")
+                    else:
+                        status_source.append("Normal")
+        for status in status_source:
+            if status in flag_counts:
+                flag_counts[status] += 1
+        flagged_total = int(sum(v for k, v in flag_counts.items() if k not in {"Auxiliary"}))
+        receiver_score = max(0.0, 100.0 - min(70.0, flagged_total * 3.0) - min(20.0, aux_count * 0.2))
+        receiver_findings = 0
+        if flagged_total:
+            receiver_findings += 1
+            add_finding("receiver_flags", "SEGD-RECEIVER-QC-FLAGS", "warning", "receiver", f"{flagged_total} receiver/channel QC flag(s)", "Receiver health attributes include resistance, capacitance, leakage, tilt, edited or dead-channel flags.", "Inspect flagged channels before accepting the spread for processing.", flagged_total, "traces")
+        add_stage(
+            "receiver_flags", "Receiver / Channel QC Flags", receiver_score,
+            {**flag_counts, "flagged_total": flagged_total, "auxiliary_trace_count": aux_count},
+            "Receiver resistance, capacitance, leakage, tilt, edited and auxiliary-channel flags summarized.",
+            receiver_findings,
+        )
+
+        self.loading_progress.emit(68, "Analysing amplitude window statistics")
+        QApplication.processEvents()
+        data = np.asarray(self._raw_data, dtype=float) if getattr(self, "_raw_data", np.asarray([])).size else np.asarray([])
+        amp_metrics: dict[str, Any]
+        amplitude_score = 100.0
+        amplitude_findings = 0
+        if data.size:
+            finite = data[np.isfinite(data)]
+            zero_trace_count = int(np.sum(np.all(np.nan_to_num(data) == 0, axis=1))) if data.ndim == 2 else 0
+            nan_count = int(data.size - finite.size)
+            if finite.size:
+                abs_finite = np.abs(finite)
+                peak = float(np.nanmax(abs_finite))
+                rms = float(np.sqrt(np.nanmean(finite * finite)))
+                p50 = float(np.nanpercentile(abs_finite, 50))
+                p95 = float(np.nanpercentile(abs_finite, 95))
+                p99 = float(np.nanpercentile(abs_finite, 99))
+                clip_limit = p99 if p99 > 0 else peak
+                clipped_ratio = float(np.count_nonzero(abs_finite >= max(clip_limit, 1e-12)) / max(1, finite.size))
+            else:
+                peak = rms = p50 = p95 = p99 = clipped_ratio = 0.0
+            if zero_trace_count:
+                amplitude_findings += 1; amplitude_score -= min(45, 8 + zero_trace_count * 2)
+                add_finding("amplitude_window", "SEGD-ZERO-TRACE", "warning", "amplitude", "Zero-amplitude traces detected", f"{zero_trace_count} trace(s) in the displayed/full render window contain only zero samples.", "Inspect acquisition status, dead channels and edit flags.", zero_trace_count, "traces")
+            if nan_count:
+                amplitude_findings += 1; amplitude_score -= min(30, 5 + nan_count * 0.001)
+                add_finding("amplitude_window", "SEGD-NON-FINITE-SAMPLES", "warning", "amplitude", "Non-finite sample values", f"{nan_count} non-finite sample value(s) were detected in the QC window.", "Review the SEG-D decode and trace sample format.", nan_count, "samples")
+            if clipped_ratio > 0.025:
+                amplitude_findings += 1; amplitude_score -= min(25, clipped_ratio * 300)
+                add_finding("amplitude_window", "SEGD-AMPLITUDE-CLIPPING", "warning", "amplitude", "Possible amplitude clipping/outliers", f"{100*clipped_ratio:.2f}% of finite samples sit at the upper 99th-percentile envelope.", "Review gain, clipping and field electronics before final processing.", f"{100*clipped_ratio:.2f}", "%")
+            amp_metrics = {
+                "window_trace_count": int(data.shape[0]) if data.ndim == 2 else 0,
+                "window_sample_count": int(data.shape[1]) if data.ndim == 2 else 0,
+                "finite_sample_count": int(finite.size),
+                "non_finite_sample_count": nan_count,
+                "zero_trace_count": zero_trace_count,
+                "rms_amplitude": rms,
+                "peak_abs_amplitude": peak,
+                "median_abs_amplitude": p50,
+                "p95_abs_amplitude": p95,
+                "p99_abs_amplitude": p99,
+                "clipped_ratio_pct": 100.0 * clipped_ratio,
+            }
+        else:
+            amplitude_score = 72.0
+            amplitude_findings = 1
+            amp_metrics = {"window_trace_count": 0, "window_sample_count": 0, "finite_sample_count": 0}
+            add_finding("amplitude_window", "SEGD-NO-RENDERED-SAMPLES", "info", "amplitude", "No rendered trace window available", "QC could not inspect amplitudes because no trace window has been rendered yet.", "Click Render View or open the file again before rerunning amplitude QC.")
+        add_stage(
+            "amplitude_window", "Amplitude / Dead Trace QC", amplitude_score,
+            amp_metrics,
+            "Displayed trace-window amplitudes, zero traces, RMS, peak and clipping indicators checked.",
+            amplitude_findings,
+        )
+
+        self.loading_progress.emit(82, "Preparing QC score, charts and exportable result tables")
+        QApplication.processEvents()
+        if stages:
+            score = float(np.nanmean([float(stage.get("score", 0.0)) for stage in stages]))
+        else:
+            score = 0.0
+        if any(str(item.get("severity", "")).lower() == "error" for item in findings) or any(stage.get("result") == "fail" for stage in stages):
+            overall_result = "fail"
+        elif findings or any(stage.get("result") == "warn" for stage in stages):
+            overall_result = "warn"
+        else:
+            overall_result = "pass"
         duration_ms = int((perf_counter() - started) * 1000)
-        overall_result = "fail" if any(item["severity"] == "error" for item in findings) else ("warn" if findings or any(flagged_counts.values()) else "pass")
-        score = 35.0 if overall_result == "fail" else (70.0 if overall_result == "warn" else 100.0)
         summary_data = {
-            "physical_traces": trace_count, "seismic_traces": seismic_count, "auxiliary_traces": aux_count,
-            "samples_per_trace": sample_count, "sample_interval_ms": self.reader.get_sample_interval(),
-            "format_code": self.reader.get_format_code(), "qc_type": qc_type, "findings": len(findings),
-            "flagged_trace_statuses": flagged_counts,
+            "physical_traces": trace_count,
+            "seismic_traces": seismic_count,
+            "auxiliary_traces": aux_count,
+            "samples_per_trace": sample_count,
+            "sample_interval_ms": sample_interval,
+            "format_code": format_code,
+            "revision": revision,
+            "qc_type": qc_type,
+            "findings": len(findings),
+            "stage_count": len(stages),
+            "flagged_trace_statuses": flag_counts,
+            "mean_stage_score": score,
+            "duration_ms": duration_ms,
         }
 
-        self.loading_progress.emit(82, "Saving SEG-D QC results and findings")
-        QApplication.processEvents()
         run_uuid = ""
         if self.db_engine is not None:
             try:
@@ -1726,27 +1929,26 @@ class SegdViewerWidget(QWidget):
                 run_uuid = QcHistoryRepository(self.db_engine).record_run(
                     module="segd", file_path=self.file_path, profile=f"SEG-D {qc_type.title()} QC",
                     status="completed", overall_result=overall_result, score=score, summary=summary_data,
-                    parameters={"qc_type": qc_type}, stages=stages, findings=findings, duration_ms=duration_ms,
+                    parameters={"qc_type": qc_type, "scanned_trace_headers": max_scan}, stages=stages, findings=findings, duration_ms=duration_ms,
                 )
             except Exception as error:
                 self.position_label.setText(f"QC completed; history save failed: {error}")
 
-        summary = (
-            f"Physical traces: {trace_count:,}\nSeismic traces: {seismic_count:,}\n"
-            f"Auxiliary traces: {aux_count:,}\nSamples per trace: {sample_count:,}\n"
-            f"Sample interval: {self.reader.get_sample_interval():g} ms\n"
-            f"Overall result: {overall_result.upper()} | Score: {score:.1f}"
-        )
-        if run_uuid:
-            summary += "\nHistory: Saved to QC Run History"
         self.loading_progress.emit(100, "SEG-D QC is complete")
-        self.loading_finished.emit()
         QApplication.processEvents()
-        if findings:
-            review_lines = [str(item.get("title") or item.get("description") or "Review required") for item in findings]
-            QMessageBox.warning(self, "SEG-D QC Results", summary + "\n\nReview required:\n" + "\n".join(review_lines))
-        else:
-            QMessageBox.information(self, "SEG-D QC Results", summary + "\n\nHeader and trace checks passed.")
+        dialog = SegdQcResultsDialog(
+            file_path=self.file_path,
+            qc_type=qc_type,
+            summary=summary_data,
+            stages=stages,
+            findings=findings,
+            overall_result=overall_result,
+            score=score,
+            run_uuid=run_uuid,
+            duration_ms=duration_ms,
+            parent=self,
+        )
+        dialog.exec()
 
     def _on_control_changed(self, *_args) -> None:
         self._schedule_render(320)
@@ -1758,6 +1960,10 @@ class SegdViewerWidget(QWidget):
         self._render_timer.start(max(0, int(delay_ms)))
 
     def render_current_view(self, *_args) -> None:
+        if self.reader is None:
+            QMessageBox.information(self, "SEG-D Render", "Open a SEG-D file before rendering.")
+            return
+        self.position_label.setText("Rendering current SEG-D view…")
         self._schedule_render(0)
 
     def _start_render(self) -> None:
@@ -1794,6 +2000,10 @@ class SegdViewerWidget(QWidget):
         self._render_generation += 1
         generation = self._render_generation
         self.busy_overlay.show_busy("Rendering SEG-D", "Preparing seismic display", 0)
+        for button in (getattr(self, "render_button", None), getattr(self, "header_render_button", None)):
+            if button is not None:
+                button.setEnabled(False)
+                button.setText("Rendering…")
         worker = RenderWorker(generation, self.reader, params)
         key = f"render:{generation}"
         self._workers[key] = worker
@@ -1810,6 +2020,10 @@ class SegdViewerWidget(QWidget):
         self._workers.pop(f"render:{generation}", None)
         if generation == self._render_generation:
             self._active_render_worker = None
+            for button, text in ((getattr(self, "render_button", None), "Render View"), (getattr(self, "header_render_button", None), "Render")):
+                if button is not None:
+                    button.setEnabled(True)
+                    button.setText(text)
 
     def _on_render_progress(self, generation: int, value: int, message: str) -> None:
         if generation == self._render_generation and not self._closing:
@@ -1842,7 +2056,11 @@ class SegdViewerWidget(QWidget):
             f"Trace {self._trace_start + 1}-{self._trace_end} | "
             f"Time {self._sample_start * self.reader.get_sample_interval():.0f}-{record_length:.0f} ms"
         )
+        self.canvas.update()
+        self.canvas.repaint()
         self.busy_overlay.hide()
+        if not self._opening_file:
+            self.position_label.setText(self.position_label.text() + " | Rendered")
         if self._opening_file:
             self._opening_file = False
             self.loading_finished.emit()
@@ -1851,6 +2069,11 @@ class SegdViewerWidget(QWidget):
         if self._closing or generation != self._render_generation:
             return
         self.busy_overlay.hide()
+        self.position_label.setText("SEG-D render failed")
+        for button, text in ((getattr(self, "render_button", None), "Render View"), (getattr(self, "header_render_button", None), "Render")):
+            if button is not None:
+                button.setEnabled(True)
+                button.setText(text)
         if self._opening_file:
             self._opening_file = False
             self.loading_finished.emit()
@@ -1912,6 +2135,21 @@ class SegdViewerWidget(QWidget):
         )
         self.header_viewer.set_trace(trace)
         self.trace_attributes.set_trace(self.reader, trace, sample, time_ms, amplitude, status)
+        dialog = SegdPickActionsDialog(
+            trace=trace,
+            sample=sample,
+            time_ms=time_ms,
+            amplitude=amplitude,
+            status=status,
+            on_inspect=lambda: self._on_trace_inspect_requested(trace, sample),
+            on_headers=lambda: self._show_headers_panel(trace),
+            on_copy=lambda: self._copy_trace_details(trace, sample),
+            on_clear=self.clear_picks,
+            parent=self,
+        )
+        dialog.setModal(False)
+        dialog.show()
+        self._pick_action_dialog = dialog
 
     def _on_hover(self, trace: int, sample: int) -> None:
         if self.reader is None:
@@ -1976,10 +2214,37 @@ class SegdViewerWidget(QWidget):
 
     def _on_measurement(self, trace_1: int, sample_1: int, trace_2: int, sample_2: int) -> None:
         interval = self.reader.get_sample_interval() if self.reader is not None else 0.0
-        self.position_label.setText(
+        delta_time = abs(sample_2 - sample_1) * interval
+        text = (
             f"Δtrace {abs(trace_2 - trace_1)} | Δsample {abs(sample_2 - sample_1)} | "
-            f"Δtime {abs(sample_2 - sample_1) * interval:g} ms"
+            f"Δtime {delta_time:g} ms"
         )
+        self.position_label.setText(text)
+
+        def copy_measurement() -> None:
+            QApplication.clipboard().setText(
+                "SEG-D Measurement\n"
+                f"Start Trace: {trace_1 + 1}\nStart Sample: {sample_1 + 1}\n"
+                f"End Trace: {trace_2 + 1}\nEnd Sample: {sample_2 + 1}\n"
+                f"Delta Trace: {abs(trace_2 - trace_1)}\n"
+                f"Delta Sample: {abs(sample_2 - sample_1)}\n"
+                f"Delta Time ms: {delta_time:g}"
+            )
+            self.position_label.setText("Measurement copied to clipboard")
+
+        dialog = SegdMeasureActionsDialog(
+            trace_1=trace_1,
+            sample_1=sample_1,
+            trace_2=trace_2,
+            sample_2=sample_2,
+            delta_time_ms=delta_time,
+            on_copy=copy_measurement,
+            on_clear=self.clear_picks,
+            parent=self,
+        )
+        dialog.setModal(False)
+        dialog.show()
+        self._measure_action_dialog = dialog
 
     def resizeEvent(self, event: QResizeEvent) -> None:
         super().resizeEvent(event)

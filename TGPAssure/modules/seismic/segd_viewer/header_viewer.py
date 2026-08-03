@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Optional
 
 from PySide6.QtCore import QSignalBlocker, Qt
+from PySide6.QtGui import QColor, QBrush, QFont
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QHeaderView,
@@ -27,6 +28,17 @@ class HeaderViewer(QWidget):
         self._current_trace = 0
         self._show_hex = False
         self._setup_ui()
+        self.setStyleSheet(
+            "QWidget{background:#FFFFFF;color:#102A3D;}"
+            "QTabWidget::pane{border:1px solid #D4DEE8;background:#FFFFFF;}"
+            "QTabBar::tab{background:#EAF1F6;color:#335064;border:1px solid #D4DEE8;padding:6px 9px;font-weight:800;}"
+            "QTabBar::tab:selected{background:#FFFFFF;color:#0A6EA8;border-bottom-color:#FFFFFF;}"
+            "QTreeWidget{background:#FFFFFF;alternate-background-color:#F5F8FA;border:1px solid #D4DEE8;font-size:8pt;}"
+            "QHeaderView::section{background:#173B53;color:white;padding:5px;border:0;font-weight:900;}"
+            "QPushButton{background:#FFFFFF;border:1px solid #BFD0DC;border-radius:4px;padding:4px 8px;font-weight:800;}"
+            "QPushButton:checked{background:#0A86C7;color:white;border-color:#0A86C7;}"
+            "QSpinBox{background:white;border:1px solid #BFD0DC;border-radius:4px;padding:3px;}"
+        )
 
     def _setup_ui(self) -> None:
         layout = QVBoxLayout(self)
@@ -74,6 +86,7 @@ class HeaderViewer(QWidget):
         tree.setSelectionMode(QAbstractItemView.SingleSelection)
         tree.setUniformRowHeights(True)
         tree.setRootIsDecorated(True)
+        tree.setIndentation(16)
         tree.header().setSectionResizeMode(0, QHeaderView.ResizeToContents)
         tree.header().setSectionResizeMode(1, QHeaderView.Stretch)
         tree.header().setMinimumSectionSize(110)
@@ -130,6 +143,15 @@ class HeaderViewer(QWidget):
             parent.addChild(item)
         return item
 
+
+    def _style_section_item(self, item: QTreeWidgetItem) -> None:
+        font = QFont(item.font(0))
+        font.setBold(True)
+        for column in range(2):
+            item.setFont(column, font)
+            item.setForeground(column, QBrush(QColor("#173B53")))
+            item.setBackground(column, QBrush(QColor("#EAF1F6")))
+
     def _format_value(self, value) -> str:
         if self._show_hex and isinstance(value, (int,)):
             return f"0x{int(value):X} ({int(value)})"
@@ -143,6 +165,7 @@ class HeaderViewer(QWidget):
         gh1 = self._reader.general_header_1
         gh1_item = QTreeWidgetItem(["General Header 1", ""])
         self.general_tree.addTopLevelItem(gh1_item)
+        self._style_section_item(gh1_item)
         for label, value in (
             ("File Number", gh1.file_number),
             ("General Header Length", gh1.general_header_length),
@@ -163,6 +186,7 @@ class HeaderViewer(QWidget):
         gh2 = self._reader.general_header_2
         gh2_item = QTreeWidgetItem(["General Header 2", ""])
         self.general_tree.addTopLevelItem(gh2_item)
+        self._style_section_item(gh2_item)
         for label, value in (
             ("Maximum Traces", gh2.maximum_traces),
             ("Channel Sets Count", gh2.channel_sets_count),
@@ -178,6 +202,7 @@ class HeaderViewer(QWidget):
         gh3 = self._reader.general_header_3
         gh3_item = QTreeWidgetItem(["General Header 3", ""])
         self.general_tree.addTopLevelItem(gh3_item)
+        self._style_section_item(gh3_item)
         for label, value in (
             ("Expansion Length", gh3.expansion_length),
             ("Channel Set Descriptor Length", gh3.channel_set_descriptor_length),
@@ -188,9 +213,11 @@ class HeaderViewer(QWidget):
 
         descriptors_item = QTreeWidgetItem(["Channel Set Descriptors", ""])
         self.general_tree.addTopLevelItem(descriptors_item)
+        self._style_section_item(descriptors_item)
         for index, descriptor in enumerate(self._reader.channel_set_descriptors):
             descriptor_item = QTreeWidgetItem([f"Channel Set {index + 1}", ""])
             descriptors_item.addChild(descriptor_item)
+            self._style_section_item(descriptor_item)
             for label, value in (
                 ("Channel Set ID", descriptor.channel_set_id),
                 ("Channel Count", descriptor.channel_count),
@@ -208,6 +235,7 @@ class HeaderViewer(QWidget):
 
         summary_item = QTreeWidgetItem(["File Summary", ""])
         self.general_tree.addTopLevelItem(summary_item)
+        self._style_section_item(summary_item)
         for key, value in self._reader.metadata_summary().items():
             self._add_item(summary_item, self.general_tree, key.replace("_", " ").title(), value)
 
@@ -220,6 +248,7 @@ class HeaderViewer(QWidget):
 
         header_item = QTreeWidgetItem([f"Trace {trace_index + 1}", ""])
         self.trace_tree.addTopLevelItem(header_item)
+        self._style_section_item(header_item)
         try:
             headers = self._reader.read_trace_headers((trace_index, trace_index + 1))
             if len(headers) == 0:
@@ -239,6 +268,7 @@ class HeaderViewer(QWidget):
             info = self._reader.get_trace_info(trace_index)
             attributes_item = QTreeWidgetItem(["Decoded Trace Attributes", ""])
             self.trace_tree.addTopLevelItem(attributes_item)
+            self._style_section_item(attributes_item)
             for label, value in (
                 ("Physical Index", info.physical_index),
                 ("File Number", info.file_number),

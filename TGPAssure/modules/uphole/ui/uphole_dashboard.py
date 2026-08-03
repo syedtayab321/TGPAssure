@@ -419,13 +419,24 @@ class UpholeDashboard(QWidget):
             self._load(path)
 
     def _load(self, path: str) -> None:
+        main_window = self.window()
+        task_id = f"uphole:file:{Path(path).name}"
+        if hasattr(main_window, "begin_busy_task"):
+            main_window.begin_busy_task(task_id, "Opening Uphole File", f"Reading {Path(path).name}", 10)
         try:
             self.records = UpholeReader().read(path)
+            if hasattr(main_window, "update_busy_task"):
+                main_window.update_busy_task(task_id, 62, "Preparing uphole assignment and interpretation tables")
             self.layers = []
             self._populate_assignment()
             self.interpret()
+            if hasattr(main_window, "update_busy_task"):
+                main_window.update_busy_task(task_id, 100, "Uphole file is ready")
         except Exception as exc:
             QMessageBox.critical(self, "Uphole Import", str(exc))
+        finally:
+            if hasattr(main_window, "end_busy_task"):
+                main_window.end_busy_task(task_id)
 
     def _sync_from_table(self) -> None:
         records: list[UpholeShot] = []

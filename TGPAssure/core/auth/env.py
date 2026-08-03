@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
@@ -22,7 +23,7 @@ def _strip_quotes(value: str) -> str:
 def load_dotenv(paths: Iterable[Path]) -> dict[str, str]:
     """Load a minimal .env file format without adding a dependency.
 
-    Existing OS environment variables always win.  This makes packaged desktop
+    Existing OS environment variables always win. This makes packaged desktop
     builds safe for enterprise deployment where values may be injected by the
     launcher, system profile, or installer.
     """
@@ -45,6 +46,53 @@ def load_dotenv(paths: Iterable[Path]) -> dict[str, str]:
         except Exception:
             continue
     return loaded
+
+
+def _unique_paths(paths: Iterable[Path]) -> list[Path]:
+    unique: list[Path] = []
+    seen: set[str] = set()
+    for path in paths:
+        try:
+            marker = str(path.expanduser().resolve(strict=False)).lower()
+        except Exception:
+            marker = str(path).lower()
+        if marker in seen:
+            continue
+        seen.add(marker)
+        unique.append(path.expanduser())
+    return unique
+
+
+def _env_candidates(project_root: Path, app_data_dir: Path) -> list[Path]:
+    """Return .env search locations for source and PyInstaller EXE builds."""
+    candidates: list[Path] = []
+
+    explicit_env_file = os.getenv("TGPASSURE_ENV_FILE", "").strip()
+    if explicit_env_file:
+        candidates.append(Path(explicit_env_file))
+
+    # PyInstaller one-file extracts bundled data files into sys._MEIPASS.
+    frozen_root = getattr(sys, "_MEIPASS", None)
+    if frozen_root:
+        frozen_root_path = Path(frozen_root).resolve()
+        candidates.extend(
+            [
+                frozen_root_path / ".env",
+                frozen_root_path / ".env.local",
+                Path(sys.executable).resolve().parent / ".env",
+                Path(sys.executable).resolve().parent / ".env.local",
+            ]
+        )
+
+    candidates.extend(
+        [
+            project_root / ".env",
+            project_root / ".env.local",
+            app_data_dir / ".env",
+            app_data_dir / ".env.local",
+        ]
+    )
+    return _unique_paths(candidates)
 
 
 @dataclass(frozen=True)
@@ -78,13 +126,7 @@ class AuthEnvironment:
 
     @classmethod
     def load(cls, project_root: Path, app_data_dir: Path) -> "AuthEnvironment":
-        load_dotenv(
-            [
-                project_root / ".env",
-                project_root / ".env.local",
-                app_data_dir / ".env",
-            ]
-        )
+        load_dotenv(_env_candidates(project_root, app_data_dir))
         mode = os.getenv("TGPA_ENV", os.getenv("APP_ENV", "production")).strip().lower() or "production"
         is_dev_default = mode in {"development", "dev", "local", "test", "testing"}
         return cls(

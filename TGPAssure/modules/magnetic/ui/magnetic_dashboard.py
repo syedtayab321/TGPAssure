@@ -57,8 +57,6 @@ from modules.magnetic.readers.boundary_reader import MagneticBoundaryReader
 from modules.magnetic.ui.import_dialog import MagneticImportDialog
 from core.domain.geospatial import CoordinateTransformError, to_wgs84
 from core.domain.spatial_visualization import geographic_to_local_xy
-from ui.widgets.geospatial_view import GeoTrack, GoogleGeospatialView
-from ui.widgets.scientific_spatial_view import ScientificSpatialView
 
 
 _DASHBOARD_QSS = """
@@ -78,10 +76,68 @@ QFrame#magStatusBar,
 QFrame#magMetricCard,
 QFrame#magPanel,
 QFrame#magActionCard,
-QFrame#magControlBand {
+QFrame#magControlBand,
+QFrame#magSlimInfoPanel {
     background: #FFFFFF;
     border: 1px solid #D7E0E7;
     border-radius: 7px;
+}
+QFrame#magHeroPanel {
+    background: qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 #FFFFFF, stop:1 #F0F8FB);
+    border: 1px solid #D1E3ED;
+    border-left: 4px solid #0E8DA8;
+    border-radius: 8px;
+}
+QLabel#magHeroTitle {
+    color: #0B3146;
+    font-size: 11.5pt;
+    font-weight: 900;
+}
+QLabel#magHeroSubtitle {
+    color: #536D7F;
+    font-size: 8.2pt;
+}
+QFrame#magWorkflowCard {
+    background: #FBFDFE;
+    border: 1px solid #DDE8EF;
+    border-radius: 7px;
+}
+QFrame#magWorkflowCard[ready="true"] {
+    background: #F0FAF5;
+    border-color: #B9DFC9;
+}
+QFrame#magWorkflowCard[warning="true"] {
+    background: #FFF8EA;
+    border-color: #EBD3A2;
+}
+QLabel#magWorkflowNumber {
+    background: #103C55;
+    color: #FFFFFF;
+    border-radius: 11px;
+    min-width: 22px;
+    max-width: 22px;
+    min-height: 22px;
+    max-height: 22px;
+    font-size: 8.5pt;
+    font-weight: 900;
+}
+QLabel#magWorkflowTitle {
+    color: #11354C;
+    font-size: 8.7pt;
+    font-weight: 900;
+}
+QLabel#magWorkflowText {
+    color: #607587;
+    font-size: 7.7pt;
+}
+QLabel#magSmallBadge {
+    background: #EEF5FA;
+    color: #24516B;
+    border: 1px solid #D3E2EB;
+    border-radius: 8px;
+    padding: 2px 7px;
+    font-size: 7.4pt;
+    font-weight: 900;
 }
 QLabel#magTitle {
     color: #FFFFFF;
@@ -148,6 +204,36 @@ QLabel#magNavTitle {
     letter-spacing: .5px;
     padding: 3px 4px 4px 5px;
 }
+
+QTabWidget#magOverviewTabs::pane {
+    border: 1px solid #D3DFE8;
+    border-radius: 7px;
+    background: #FFFFFF;
+    top: -1px;
+}
+QTabWidget#magOverviewTabs QTabBar::tab {
+    min-height: 26px;
+    padding: 4px 14px;
+    margin-right: 3px;
+    border: 1px solid #C7D7E2;
+    border-bottom: 0;
+    border-top-left-radius: 6px;
+    border-top-right-radius: 6px;
+    background: #EAF2F7;
+    color: #24465D;
+    font-size: 8pt;
+    font-weight: 800;
+}
+QTabWidget#magOverviewTabs QTabBar::tab:selected {
+    background: #FFFFFF;
+    color: #0B6FA4;
+    border-top: 3px solid #0B6FA4;
+}
+QFrame#magSlimInfoPanel {
+    background: qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 #FFFFFF, stop:1 #F6FBFD);
+    border-left: 4px solid #0E8DA8;
+}
+
 QPushButton#magNavButton {
     text-align: left;
     min-height: 25px;
@@ -161,13 +247,13 @@ QPushButton#magNavButton {
     font-weight: 700;
 }
 QPushButton#magNavButton:hover {
-    background: #FFF3EA;
-    border-color: #F3D1BE;
-    color: #B75518;
+    background: #EAF6FC;
+    border-color: #B9D9EA;
+    color: #075985;
 }
 QPushButton#magNavButton:checked {
-    background: #D95F23;
-    border-color: #B94D18;
+    background: #0B6FA4;
+    border-color: #075985;
     color: #FFFFFF;
 }
 QPushButton {
@@ -181,12 +267,12 @@ QPushButton {
 }
 QPushButton:hover { background:#E7F2FA; border-color:#75AFCF; }
 QPushButton#magPrimaryButton {
-    background: #D95F23;
+    background: #0B6FA4;
     color: #FFFFFF;
-    border: 1px solid #B94D18;
+    border: 1px solid #075985;
     font-weight: 900;
 }
-QPushButton#magPrimaryButton:hover { background:#F07228; }
+QPushButton#magPrimaryButton:hover { background:#0E8DA8; }
 QPushButton#magHeaderButton {
     background: rgba(255,255,255,0.16);
     color: #FFFFFF;
@@ -224,9 +310,9 @@ QTabBar::tab {
 }
 QTabBar::tab:selected {
     background: #FFFFFF;
-    color: #B75518;
-    border: 1px solid #D6AD8E;
-    border-top: 3px solid #D95F23;
+    color: #075985;
+    border: 1px solid #7DB7D3;
+    border-top: 3px solid #0B6FA4;
     border-bottom-color: #FFFFFF;
 }
 QTableWidget {
@@ -234,7 +320,7 @@ QTableWidget {
     alternate-background-color: #F7FAFC;
     border: 1px solid #DCE5EC;
     gridline-color: #E7EDF2;
-    selection-background-color: #F9E5D7;
+    selection-background-color: #DDEFF8;
     selection-color: #0E2E44;
     font-size: 8.2pt;
 }
@@ -257,7 +343,7 @@ QProgressBar {
     max-height: 10px;
     font-size: 7.5px;
 }
-QProgressBar::chunk { border-radius: 5px; background: #D95F23; }
+QProgressBar::chunk { border-radius: 5px; background: #0B6FA4; }
 QPlainTextEdit {
     background: #FFFFFF;
     border: 1px solid #D8E1E8;
@@ -268,6 +354,10 @@ QSplitter::handle { background: #CCD7E0; }
 QSplitter::handle:horizontal { width: 4px; }
 QSplitter::handle:vertical { height: 4px; }
 """
+
+
+_FAST_STAT_SAMPLE_LIMIT = 50_000
+
 
 
 class _MetricCard(QFrame):
@@ -297,6 +387,37 @@ class _MetricCard(QFrame):
     def set_value(self, value: Any, hint: str = "") -> None:
         self.value.setText("—" if value in (None, "") else str(value))
         self.hint.setText(hint)
+
+
+
+class _LazyMagneticPage(QWidget):
+    """Lightweight placeholder used to avoid constructing heavy plot/map widgets at startup."""
+
+    def __init__(self, title: str, description: str, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(18, 18, 18, 18)
+        layout.setSpacing(10)
+        panel = QFrame(self)
+        panel.setObjectName("magSlimInfoPanel")
+        panel_layout = QVBoxLayout(panel)
+        panel_layout.setContentsMargins(16, 14, 16, 14)
+        panel_layout.setSpacing(6)
+        heading = QLabel(title)
+        heading.setObjectName("magSectionTitle")
+        body = QLabel(description)
+        body.setObjectName("magSectionHelp")
+        body.setWordWrap(True)
+        hint = QLabel("This workspace is loaded only when opened so the Magnetic dashboard appears immediately.")
+        hint.setObjectName("magSectionHelp")
+        hint.setWordWrap(True)
+        panel_layout.addWidget(heading)
+        panel_layout.addWidget(body)
+        panel_layout.addWidget(hint)
+        layout.addWidget(panel)
+        layout.addStretch(1)
+
+
 
 
 
@@ -334,6 +455,8 @@ class _NoOpTabBar:
 class _MagneticNavigationStack(QWidget):
     """Electrical-style left navigation wrapper with a QTabWidget-compatible subset."""
 
+    currentChanged = Signal(int)
+
     _SHORT_TITLES = {
         "Data": "Overview",
         "Acq Quick View": "Acquisition",
@@ -369,7 +492,7 @@ class _MagneticNavigationStack(QWidget):
         self.stack = QStackedWidget(self)
         root.addWidget(self.nav_panel)
         root.addWidget(self.stack, 1)
-        self.stack.currentChanged.connect(self._sync_buttons)
+        self.stack.currentChanged.connect(self._handle_current_changed)
 
     def addTab(self, widget: QWidget, title: str) -> int:
         index = self.stack.addWidget(widget)
@@ -405,6 +528,22 @@ class _MagneticNavigationStack(QWidget):
     def currentWidget(self) -> QWidget | None:
         return self.stack.currentWidget()
 
+    def replaceWidget(self, index: int, widget: QWidget) -> QWidget:
+        if not (0 <= index < self.stack.count()):
+            return widget
+        old_widget = self.stack.widget(index)
+        if old_widget is widget:
+            return widget
+        current = self.stack.currentIndex()
+        self.stack.removeWidget(old_widget)
+        old_widget.deleteLater()
+        self.stack.insertWidget(index, widget)
+        if 0 <= index < len(self._widgets):
+            self._widgets[index] = widget
+        self.stack.setCurrentIndex(index if current == index else current)
+        self._sync_buttons(self.stack.currentIndex())
+        return widget
+
     def setDocumentMode(self, *_args: Any, **_kwargs: Any) -> None:
         return None
 
@@ -416,6 +555,10 @@ class _MagneticNavigationStack(QWidget):
 
     def tabBar(self) -> _NoOpTabBar:
         return _NoOpTabBar()
+
+    def _handle_current_changed(self, index: int) -> None:
+        self._sync_buttons(index)
+        self.currentChanged.emit(index)
 
     def _sync_buttons(self, index: int) -> None:
         for i, button in enumerate(self._buttons):
@@ -468,6 +611,9 @@ class MagneticDashboard(QWidget):
         self._acq_scatter_item: Any = None
         self._acq_track_items: list[Any] = []
         self._acq_polygon_item: Any = None
+        self._deferred_refresh_tabs: set[int] = set()
+        self._lazy_tab_factories: dict[int, Callable[[], QWidget]] = {}
+        self._lazy_tab_titles: dict[int, str] = {}
 
         self._build_ui()
         self._connect_controller()
@@ -487,17 +633,113 @@ class MagneticDashboard(QWidget):
 
         self.tabs = _MagneticNavigationStack()
         self.tabs.addTab(self._build_overview_tab(), "Data")
-        self.tabs.addTab(self._build_acquisition_tab(), "Acq Quick View")
-        self.tabs.addTab(self._build_stats_tab(), "Stats")
+        self._add_lazy_tab(self.TAB_ACQUISITION, "Acq Quick View", self._build_acquisition_tab, "Acquisition quick-view plots, sample records and polygon tools.")
+        self._add_lazy_tab(self.TAB_STATS, "Stats", self._build_stats_tab, "Detailed statistics are calculated only when this page is opened.")
         self.tabs.addTab(self._build_qc_tab(), "QC")
         self.tabs.addTab(self._build_findings_tab(), "Findings")
         self.tabs.addTab(self._build_processing_tab(), "Process")
-        self.tabs.addTab(self._build_map_tab(), "Map")
-        self.tabs.addTab(self._build_profile_tab(), "Profiles")
-        self.tabs.addTab(self._build_native_spatial_tab(), "2D/3D")
-        self.tabs.addTab(self._build_geospatial_tab(), "Satellite")
+        self._add_lazy_tab(self.TAB_MAP, "Map", self._build_map_tab, "Spatial point map and channel colour review.")
+        self._add_lazy_tab(self.TAB_PROFILES, "Profiles", self._build_profile_tab, "Line/group profiles and time-series review.")
+        self._add_lazy_tab(self.TAB_SPATIAL, "2D/3D", self._build_native_spatial_tab, "Native scientific 2D/3D magnetic visualization.")
+        self._add_lazy_tab(self.TAB_GEOSPATIAL, "Satellite", self._build_geospatial_tab, "Satellite and terrain viewer. Loaded on demand because it is the heaviest view.")
         self.tabs.finalize()
+        self.tabs.currentChanged.connect(self._on_workspace_changed)
         root.addWidget(self.tabs, 1)
+
+    def _add_lazy_tab(
+        self,
+        index: int,
+        title: str,
+        factory: Callable[[], QWidget],
+        message: str = "This workspace will load when opened.",
+    ) -> None:
+        """Register a lightweight placeholder for a heavy workspace tab.
+
+        The previous performance update correctly moved expensive magnetic pages
+        to lazy loading, but the helper was missing in the deployed file.  As a
+        result, opening the Magnetic module raised:
+
+            'MagneticDashboard' object has no attribute '_add_lazy_tab'
+
+        This method keeps module startup fast by adding only a small placeholder
+        widget first.  The real page is created later by _materialize_lazy_tab()
+        when the user opens that workspace.
+        """
+        placeholder = self._build_lazy_placeholder(title, message)
+        actual_index = self.tabs.addTab(placeholder, title)
+        self._lazy_tab_factories[actual_index] = factory
+        self._lazy_tab_titles[actual_index] = title
+        # Keep the caller's explicit constants aligned with the created stack
+        # order.  If a future edit changes the order, this prevents silent slow
+        # rendering or a hidden-page refresh.
+        if actual_index != index:
+            self._lazy_tab_factories[index] = factory
+            self._lazy_tab_titles[index] = title
+
+    def _build_lazy_placeholder(self, title: str, message: str) -> QWidget:
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(8)
+
+        card = QFrame()
+        card.setObjectName("magPanel")
+        card_layout = QVBoxLayout(card)
+        card_layout.setContentsMargins(18, 18, 18, 18)
+        card_layout.setSpacing(8)
+
+        heading = QLabel(title)
+        heading.setStyleSheet("color:#0B3146; font-size:12pt; font-weight:900; background:transparent;")
+        body = QLabel(message)
+        body.setWordWrap(True)
+        body.setStyleSheet("color:#536D7F; font-size:8.5pt; background:transparent;")
+        hint = QLabel("This page is loaded on demand to keep the Magnetic dashboard fast.")
+        hint.setWordWrap(True)
+        hint.setStyleSheet("color:#6E8392; font-size:8pt; background:transparent;")
+
+        card_layout.addWidget(heading)
+        card_layout.addWidget(body)
+        card_layout.addWidget(hint)
+        card_layout.addStretch(1)
+        layout.addWidget(card)
+        layout.addStretch(1)
+        return page
+
+    def _materialize_lazy_tab(self, index: int) -> None:
+        """Build a registered heavy tab once and replace its placeholder."""
+        factory = self._lazy_tab_factories.pop(index, None)
+        if factory is None:
+            return
+        title = self._lazy_tab_titles.pop(index, "")
+        try:
+            widget = factory()
+        except Exception as exc:  # keep the dashboard open even if optional views fail
+            widget = self._build_lazy_error_tab(title or "Magnetic view", exc)
+        self.tabs.replaceWidget(index, widget)
+
+    def _build_lazy_error_tab(self, title: str, exc: Exception) -> QWidget:
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(12, 12, 12, 12)
+        card = QFrame()
+        card.setObjectName("magPanel")
+        card_layout = QVBoxLayout(card)
+        card_layout.setContentsMargins(18, 18, 18, 18)
+        card_layout.setSpacing(8)
+        heading = QLabel(f"{title} could not be loaded")
+        heading.setStyleSheet("color:#8A2A17; font-size:11pt; font-weight:900; background:transparent;")
+        body = QLabel(str(exc))
+        body.setWordWrap(True)
+        body.setStyleSheet("color:#5E6F7B; background:transparent;")
+        detail = QPlainTextEdit()
+        detail.setReadOnly(True)
+        detail.setPlainText(traceback.format_exc())
+        detail.setMinimumHeight(160)
+        card_layout.addWidget(heading)
+        card_layout.addWidget(body)
+        card_layout.addWidget(detail, 1)
+        layout.addWidget(card, 1)
+        return page
 
     def _build_header(self) -> QWidget:
         frame = QFrame()
@@ -632,30 +874,127 @@ class MagneticDashboard(QWidget):
         return frame
 
     def _build_overview_tab(self) -> QWidget:
+        """Build the magnetic overview using one visible tab row only.
+
+        The previous version placed Dataset/Base/Metadata/Channels inside a
+        second nested tab widget.  That made the Magnetic dashboard feel slow and
+        unprofessional because users had to work through tabs inside tabs.  This
+        version keeps every overview page on the same first-level row.
+        """
         page = QWidget()
         layout = QVBoxLayout(page)
-        layout.setContentsMargins(6, 6, 6, 6)
-        layout.setSpacing(5)
+        layout.setContentsMargins(7, 7, 7, 7)
+        layout.setSpacing(6)
 
-        self.overview_summary = QLabel("No magnetic dataset loaded")
+        self.overview_tabs = QTabWidget()
+        self.overview_tabs.setObjectName("magOverviewTabs")
+        self.overview_tabs.setDocumentMode(True)
+        self.overview_tabs.setUsesScrollButtons(True)
+        self.overview_tabs.tabBar().setExpanding(False)
+
+        self.overview_tabs.addTab(self._build_dataset_overview_page(), "Dataset")
+        self.overview_tabs.addTab(self._build_base_boundary_overview_page(), "Base / Boundary")
+        self.overview_tabs.addTab(self._build_metadata_overview_page(), "Metadata")
+        self.overview_tabs.addTab(self._build_channels_overview_page(), "Channels")
+        self.overview_tabs.addTab(self._build_records_stats_page(), "Records / Stats")
+        self.overview_tabs.addTab(self._build_workflow_overview_page(), "Workflow")
+        layout.addWidget(self.overview_tabs, 1)
+        return page
+
+    def _build_dataset_overview_page(self) -> QWidget:
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(6)
+
+        info = QFrame()
+        info.setObjectName("magSlimInfoPanel")
+        info_layout = QVBoxLayout(info)
+        info_layout.setContentsMargins(10, 7, 10, 7)
+        info_layout.setSpacing(2)
+        title = QLabel("Detected Magnetic Dataset")
+        title.setObjectName("magSectionTitle")
+        self.overview_summary = QLabel("No magnetic dataset loaded. Use Open Data to begin.")
         self.overview_summary.setObjectName("magSectionHelp")
         self.overview_summary.setWordWrap(True)
-        self.overview_summary.setContentsMargins(4, 2, 4, 2)
-        layout.addWidget(self.overview_summary)
-        self.dataset_tabs = QTabWidget()
-        self.dataset_tabs.setDocumentMode(True)
-        self.dataset_tabs.setUsesScrollButtons(False)
-        self.dataset_tabs.tabBar().setExpanding(True)
+        info_layout.addWidget(title)
+        info_layout.addWidget(self.overview_summary)
+        layout.addWidget(info)
 
+        panel = QFrame()
+        panel.setObjectName("magPanel")
+        panel_layout = QVBoxLayout(panel)
+        panel_layout.setContentsMargins(8, 7, 8, 8)
+        panel_layout.setSpacing(5)
+        heading = QLabel("Dataset Properties")
+        heading.setObjectName("magSectionTitle")
+        panel_layout.addWidget(heading)
         self.primary_table = self._make_key_value_table()
-        self.dataset_tabs.addTab(self._table_page(self.primary_table), "Dataset")
+        panel_layout.addWidget(self.primary_table, 1)
+        layout.addWidget(panel, 1)
+        return page
 
+    def _build_base_boundary_overview_page(self) -> QWidget:
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(6)
+        panel = QFrame()
+        panel.setObjectName("magPanel")
+        panel_layout = QVBoxLayout(panel)
+        panel_layout.setContentsMargins(8, 7, 8, 8)
+        panel_layout.setSpacing(5)
+        heading = QLabel("Base Station and Boundary Support")
+        heading.setObjectName("magSectionTitle")
+        help_text = QLabel("Support datasets used by base correction, boundary filtering and boundary-dependent QC stages.")
+        help_text.setObjectName("magSectionHelp")
+        help_text.setWordWrap(True)
+        panel_layout.addWidget(heading)
+        panel_layout.addWidget(help_text)
         self.base_table = self._make_key_value_table()
-        self.dataset_tabs.addTab(self._table_page(self.base_table), "Base & Boundary")
+        panel_layout.addWidget(self.base_table, 1)
+        layout.addWidget(panel, 1)
+        return page
 
+    def _build_metadata_overview_page(self) -> QWidget:
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(6)
+        panel = QFrame()
+        panel.setObjectName("magPanel")
+        panel_layout = QVBoxLayout(panel)
+        panel_layout.setContentsMargins(8, 7, 8, 8)
+        panel_layout.setSpacing(5)
+        heading = QLabel("Metadata")
+        heading.setObjectName("magSectionTitle")
+        help_text = QLabel("Detected file metadata, survey classification, CRS, time range and acquisition properties.")
+        help_text.setObjectName("magSectionHelp")
+        help_text.setWordWrap(True)
+        panel_layout.addWidget(heading)
+        panel_layout.addWidget(help_text)
         self.metadata_table = self._make_key_value_table()
-        self.dataset_tabs.addTab(self._table_page(self.metadata_table), "Metadata")
+        panel_layout.addWidget(self.metadata_table, 1)
+        layout.addWidget(panel, 1)
+        return page
 
+    def _build_channels_overview_page(self) -> QWidget:
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(6)
+        panel = QFrame()
+        panel.setObjectName("magPanel")
+        panel_layout = QVBoxLayout(panel)
+        panel_layout.setContentsMargins(8, 7, 8, 8)
+        panel_layout.setSpacing(5)
+        heading = QLabel("Detected Channels")
+        heading.setObjectName("magSectionTitle")
+        help_text = QLabel("Numeric channels available for QC, mapping, profile review and processing.")
+        help_text.setObjectName("magSectionHelp")
+        help_text.setWordWrap(True)
+        panel_layout.addWidget(heading)
+        panel_layout.addWidget(help_text)
         self.channels_table = QTableWidget(0, 7)
         self._configure_table(
             self.channels_table,
@@ -665,7 +1004,30 @@ class MagneticDashboard(QWidget):
         self.channels_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         for col in range(1, 7):
             self.channels_table.horizontalHeader().setSectionResizeMode(col, QHeaderView.ResizeMode.ResizeToContents)
-        self.dataset_tabs.addTab(self._table_page(self.channels_table), "Channels")
+        panel_layout.addWidget(self.channels_table, 1)
+        layout.addWidget(panel, 1)
+        return page
+
+    def _build_records_stats_page(self) -> QWidget:
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(6)
+
+        layout.addWidget(self._build_metrics())
+
+        panel = QFrame()
+        panel.setObjectName("magPanel")
+        panel_layout = QVBoxLayout(panel)
+        panel_layout.setContentsMargins(8, 7, 8, 8)
+        panel_layout.setSpacing(5)
+        title = QLabel("Record Preview")
+        title.setObjectName("magSectionTitle")
+        help_text = QLabel("First records from the loaded file with detected coordinates, elevation, magnetic field, line and station values.")
+        help_text.setObjectName("magSectionHelp")
+        help_text.setWordWrap(True)
+        panel_layout.addWidget(title)
+        panel_layout.addWidget(help_text)
 
         self.records_table = QTableWidget(0, 8)
         self._configure_table(
@@ -679,9 +1041,59 @@ class MagneticDashboard(QWidget):
             self.records_table.horizontalHeader().setSectionResizeMode(col, QHeaderView.ResizeMode.ResizeToContents)
         self.records_table.horizontalHeader().setSectionResizeMode(6, QHeaderView.ResizeMode.Stretch)
         self.records_table.horizontalHeader().setSectionResizeMode(7, QHeaderView.ResizeMode.Stretch)
-        self.dataset_tabs.addTab(self._table_page(self.records_table), "Data Preview")
+        panel_layout.addWidget(self.records_table, 1)
+        layout.addWidget(panel, 1)
+        return page
 
-        layout.addWidget(self.dataset_tabs, 1)
+    def _build_workflow_overview_page(self) -> QWidget:
+        page = QWidget()
+        layout = QHBoxLayout(page)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(6)
+
+        left_panel = QFrame()
+        left_panel.setObjectName("magPanel")
+        left_layout = QVBoxLayout(left_panel)
+        left_layout.setContentsMargins(8, 7, 8, 8)
+        left_layout.setSpacing(6)
+        left_title = QLabel("Workflow Readiness")
+        left_title.setObjectName("magSectionTitle")
+        left_help = QLabel("Live checklist for import, support data, QC status and export readiness.")
+        left_help.setObjectName("magSectionHelp")
+        left_help.setWordWrap(True)
+        left_layout.addWidget(left_title)
+        left_layout.addWidget(left_help)
+
+        self.workflow_rover_card, self.workflow_rover_text = self._make_workflow_card("1", "Rover / Primary Data", "Waiting for magnetic data")
+        self.workflow_base_card, self.workflow_base_text = self._make_workflow_card("2", "Base Station", "Optional support not loaded")
+        self.workflow_boundary_card, self.workflow_boundary_text = self._make_workflow_card("3", "Survey Boundary", "Optional boundary not loaded")
+        self.workflow_qc_card, self.workflow_qc_text = self._make_workflow_card("4", "QC Profile", "QC has not been run")
+        for card in (self.workflow_rover_card, self.workflow_base_card, self.workflow_boundary_card, self.workflow_qc_card):
+            left_layout.addWidget(card)
+        left_layout.addStretch(1)
+        layout.addWidget(left_panel, 2)
+
+        right_panel = QFrame()
+        right_panel.setObjectName("magPanel")
+        right_layout = QVBoxLayout(right_panel)
+        right_layout.setContentsMargins(8, 7, 8, 8)
+        right_layout.setSpacing(6)
+        right_title = QLabel("Fast Loading Mode")
+        right_title.setObjectName("magSectionTitle")
+        right_help = QLabel(
+            "Map, Profiles, 2D/3D and Satellite views are prepared only when opened. "
+            "This keeps magnetic import responsive and avoids slow dashboard startup."
+        )
+        right_help.setObjectName("magSectionHelp")
+        right_help.setWordWrap(True)
+        right_layout.addWidget(right_title)
+        right_layout.addWidget(right_help)
+        self.workflow_hint = QLabel("Use the left navigation to open heavy visual products only after the dataset is loaded.")
+        self.workflow_hint.setObjectName("magSectionHelp")
+        self.workflow_hint.setWordWrap(True)
+        right_layout.addWidget(self.workflow_hint)
+        right_layout.addStretch(1)
+        layout.addWidget(right_panel, 1)
         return page
 
     def _build_acquisition_tab(self) -> QWidget:
@@ -936,8 +1348,6 @@ class MagneticDashboard(QWidget):
         intro_layout.addWidget(title)
         intro_layout.addWidget(help_label)
         layout.addWidget(intro)
-        layout.addWidget(self._build_metrics())
-
         self.stats_details = QTableWidget(0, 3)
         self._configure_table(self.stats_details, ["Statistic", "Value", "Interpretation"])
         self.stats_details.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
@@ -984,7 +1394,31 @@ class MagneticDashboard(QWidget):
         self.stage_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
         self.stage_table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
         self.stage_table.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeMode.Stretch)
-        layout.addWidget(self.stage_table, 1)
+
+        qc_tabs = QTabWidget(page)
+        qc_tabs.setDocumentMode(True)
+        table_page = QWidget()
+        table_layout = QVBoxLayout(table_page)
+        table_layout.setContentsMargins(4, 4, 4, 4)
+        table_layout.addWidget(self.stage_table, 1)
+        qc_tabs.addTab(table_page, "Stage Table")
+
+        chart_page = QWidget()
+        chart_layout = QVBoxLayout(chart_page)
+        chart_layout.setContentsMargins(4, 4, 4, 4)
+        chart_layout.setSpacing(5)
+        self.qc_stage_status_plot = pg.PlotWidget(background="w")
+        self.qc_stage_status_plot.showGrid(x=False, y=True, alpha=0.18)
+        self.qc_stage_status_plot.setLabel("left", "Stage count")
+        self.qc_stage_status_plot.setTitle("Run QC to display magnetic stage status counts")
+        self.qc_duration_plot = pg.PlotWidget(background="w")
+        self.qc_duration_plot.showGrid(x=False, y=True, alpha=0.18)
+        self.qc_duration_plot.setLabel("left", "Duration (ms)")
+        self.qc_duration_plot.setTitle("QC stage run-time profile")
+        chart_layout.addWidget(self.qc_stage_status_plot, 1)
+        chart_layout.addWidget(self.qc_duration_plot, 1)
+        qc_tabs.addTab(chart_page, "QC Graphs")
+        layout.addWidget(qc_tabs, 1)
         return page
 
     def _build_findings_tab(self) -> QWidget:
@@ -1182,6 +1616,10 @@ class MagneticDashboard(QWidget):
         self.map_plot.setBackground("w")
         self.map_plot.showGrid(x=True, y=True, alpha=0.2)
         layout.addWidget(self.map_plot, 1)
+
+        self.map_stats_table = self._make_key_value_table()
+        self.map_stats_table.setMaximumHeight(115)
+        layout.addWidget(self.map_stats_table)
         return page
 
     def _build_profile_tab(self) -> QWidget:
@@ -1219,6 +1657,10 @@ class MagneticDashboard(QWidget):
         self.profile_plot.setLabel("left", "Magnetic field", units="nT")
         self.profile_plot.showGrid(x=True, y=True, alpha=0.2)
         layout.addWidget(self.profile_plot, 1)
+
+        self.profile_stats_table = self._make_key_value_table()
+        self.profile_stats_table.setMaximumHeight(125)
+        layout.addWidget(self.profile_stats_table)
         return page
 
     def _build_native_spatial_tab(self) -> QWidget:
@@ -1236,6 +1678,8 @@ class MagneticDashboard(QWidget):
         row.addWidget(self.spatial_channel_combo)
         row.addStretch(1)
         layout.addWidget(toolbar)
+        from ui.widgets.scientific_spatial_view import ScientificSpatialView
+
         self.native_spatial_view = ScientificSpatialView(page, title="Magnetic Native 2D / 3D")
         layout.addWidget(self.native_spatial_view, 1)
         return page
@@ -1244,6 +1688,8 @@ class MagneticDashboard(QWidget):
         page = QWidget()
         layout = QVBoxLayout(page)
         layout.setContentsMargins(0, 0, 0, 0)
+        from ui.widgets.geospatial_view import GoogleGeospatialView
+
         self.geospatial_view = GoogleGeospatialView(page, title="Magnetic Survey — Satellite & 3D Terrain")
         layout.addWidget(self.geospatial_view, 1)
         return page
@@ -1537,6 +1983,23 @@ class MagneticDashboard(QWidget):
         return f"{number:,.6g}{suffix}"
 
 
+    @staticmethod
+    def _finite_sample(values: Any, limit: int = _FAST_STAT_SAMPLE_LIMIT) -> tuple[np.ndarray, bool, int]:
+        arr = np.asarray(values, dtype=float)
+        total = int(arr.size)
+        sampled = total > limit
+        if sampled and total > 0:
+            idx = np.linspace(0, total - 1, limit).astype(int)
+            arr = arr[idx]
+        finite = arr[np.isfinite(arr)]
+        return finite, sampled, int(arr.size)
+
+    def _refresh_stats_details_if_visible(self) -> None:
+        if hasattr(self, "tabs") and self.tabs.currentIndex() == self.TAB_STATS and hasattr(self, "stats_details"):
+            self._refresh_stats_details()
+
+
+
     def _display_dataset(self) -> MagneticDataset | None:
         """Dataset currently available for visual review.
 
@@ -1746,6 +2209,8 @@ class MagneticDashboard(QWidget):
         self._set_status(message, "ready")
         self.dataset_changed.emit(self.rover)
         self.tabs.setCurrentIndex(self.TAB_OVERVIEW)
+        if hasattr(self, "overview_tabs"):
+            self.overview_tabs.setCurrentIndex(0)
 
     def open_base(self) -> None:
         path, _ = QFileDialog.getOpenFileName(
@@ -1795,6 +2260,8 @@ class MagneticDashboard(QWidget):
         # makes the load visibly successful instead of appearing to do nothing.
         self.dataset_changed.emit(self.base)
         self.tabs.setCurrentIndex(self.TAB_OVERVIEW)
+        if hasattr(self, "overview_tabs"):
+            self.overview_tabs.setCurrentIndex(1)
 
     def open_boundary(self) -> None:
         path, _ = QFileDialog.getOpenFileName(
@@ -2232,15 +2699,18 @@ class MagneticDashboard(QWidget):
         self._refresh_channels_table()
         self._refresh_records_preview()
         self._refresh_channel_combos()
-        self._refresh_acquisition_quick_view()
         self._refresh_provenance()
-        self._refresh_map()
-        self._refresh_profile()
-        self._refresh_native_spatial()
-        self._refresh_geospatial()
+        self._refresh_workflow_panel()
+        self._defer_heavy_refreshes()
+        self._refresh_visible_heavy_view()
 
     def _refresh_dataset_views_with_progress(self, start_progress: int = 60) -> None:
-        """Refresh the heavy dashboard views while keeping the global loader alive."""
+        """Refresh immediately visible dashboard pages and defer expensive views.
+
+        Map/profile/native 3D/satellite rendering can be expensive for large files.
+        They are therefore marked dirty and refreshed only when the user opens the
+        corresponding workspace.  This makes Magnetic > Open Data noticeably faster.
+        """
         steps = (
             (self._refresh_metrics, "Calculating dataset statistics"),
             (self._refresh_primary_table, "Updating dataset summary"),
@@ -2249,20 +2719,70 @@ class MagneticDashboard(QWidget):
             (self._refresh_channels_table, "Calculating channel statistics"),
             (self._refresh_records_preview, "Preparing records preview"),
             (self._refresh_channel_combos, "Preparing channel controls"),
-            (self._refresh_acquisition_quick_view, "Preparing acquisition quick view"),
             (self._refresh_provenance, "Updating provenance details"),
-            (self._refresh_map, "Rendering magnetic map"),
-            (self._refresh_profile, "Rendering magnetic profile"),
-            (self._refresh_native_spatial, "Preparing native 2D / 3D data view"),
-            (self._refresh_geospatial, "Preparing satellite / terrain geometry"),
+            (self._refresh_workflow_panel, "Updating workflow readiness"),
         )
         start = max(0, min(90, int(start_progress)))
-        span = max(1, 98 - start)
+        span = max(1, 96 - start)
         for index, (callback, message) in enumerate(steps, start=1):
             progress = start + round(span * (index - 1) / max(1, len(steps)))
             self._update_activity(progress, message)
             callback()
+        self._defer_heavy_refreshes()
+        self._refresh_visible_heavy_view()
         self._update_activity(100, "Magnetic dataset is ready")
+
+    def _defer_heavy_refreshes(self) -> None:
+        self._deferred_refresh_tabs.update(
+            {
+                self.TAB_ACQUISITION,
+                self.TAB_MAP,
+                self.TAB_PROFILES,
+                self.TAB_SPATIAL,
+                self.TAB_GEOSPATIAL,
+            }
+        )
+
+    def _on_workspace_changed(self, index: int) -> None:
+        needs_loader = index in self._lazy_tab_factories or index in self._deferred_refresh_tabs or index == self.TAB_STATS
+        if needs_loader:
+            self._begin_activity("Opening Magnetic Page", "Preparing selected dashboard workspace")
+        try:
+            if needs_loader:
+                self._update_activity(20, "Loading dashboard controls")
+            self._materialize_lazy_tab(index)
+            if index == self.TAB_STATS:
+                if needs_loader:
+                    self._update_activity(55, "Refreshing statistics")
+                self._refresh_stats_details()
+            if index in self._deferred_refresh_tabs:
+                if needs_loader:
+                    self._update_activity(70, "Refreshing visual products")
+                self._refresh_visible_heavy_view()
+            if needs_loader:
+                self._update_activity(100, "Workspace ready")
+        finally:
+            if needs_loader:
+                self._finish_activity()
+
+    def _refresh_visible_heavy_view(self) -> None:
+        index = self.tabs.currentIndex() if hasattr(self, "tabs") else self.TAB_OVERVIEW
+        if index not in self._deferred_refresh_tabs:
+            return
+        self._materialize_lazy_tab(index)
+        try:
+            if index == self.TAB_ACQUISITION:
+                self._refresh_acquisition_quick_view()
+            elif index == self.TAB_MAP:
+                self._refresh_map()
+            elif index == self.TAB_PROFILES:
+                self._refresh_profile()
+            elif index == self.TAB_SPATIAL:
+                self._refresh_native_spatial()
+            elif index == self.TAB_GEOSPATIAL:
+                self._refresh_geospatial()
+        finally:
+            self._deferred_refresh_tabs.discard(index)
 
     def _refresh_metrics(self) -> None:
         dataset = self._display_dataset()
@@ -2275,7 +2795,8 @@ class MagneticDashboard(QWidget):
             self.metric_qc.set_value("—", "No QC run")
             if hasattr(self, "overview_summary"):
                 self.overview_summary.setText("No magnetic dataset loaded. Use Open Data to begin.")
-            self._refresh_stats_details()
+            self._refresh_stats_details_if_visible()
+            self._refresh_workflow_panel()
             return
 
         filename = Path(dataset.source_path).name
@@ -2293,13 +2814,14 @@ class MagneticDashboard(QWidget):
         )
         if channel_name:
             values = np.asarray(dataset.channels[channel_name], dtype=float)
-            finite = values[np.isfinite(values)]
+            finite, sampled, _sample_count = self._finite_sample(values)
             if finite.size:
                 field_mean = float(np.mean(finite))
                 field_range = float(np.max(finite) - np.min(finite))
+                prefix = "Sample " if sampled else ""
                 self.metric_field.set_value(
                     f"{field_mean:,.2f} {dataset.magnetic_units}",
-                    f"Range Δ {field_range:,.2f} {dataset.magnetic_units}",
+                    f"{prefix}Range Δ {field_range:,.2f} {dataset.magnetic_units}",
                 )
             else:
                 self.metric_field.set_value("No valid values", channel_name)
@@ -2334,7 +2856,75 @@ class MagneticDashboard(QWidget):
             if start and end:
                 summary += f"  •  {start} to {end}"
             self.overview_summary.setText(summary)
-        self._refresh_stats_details()
+        self._refresh_stats_details_if_visible()
+        self._refresh_workflow_panel()
+
+    def _make_workflow_card(self, number: str, title: str, text: str) -> tuple[QFrame, QLabel]:
+        card = QFrame()
+        card.setObjectName("magWorkflowCard")
+        card.setProperty("ready", False)
+        card.setProperty("warning", False)
+        layout = QHBoxLayout(card)
+        layout.setContentsMargins(8, 7, 8, 7)
+        layout.setSpacing(8)
+        number_label = QLabel(number)
+        number_label.setObjectName("magWorkflowNumber")
+        number_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(number_label)
+        text_layout = QVBoxLayout()
+        text_layout.setContentsMargins(0, 0, 0, 0)
+        text_layout.setSpacing(1)
+        title_label = QLabel(title)
+        title_label.setObjectName("magWorkflowTitle")
+        body_label = QLabel(text)
+        body_label.setObjectName("magWorkflowText")
+        body_label.setWordWrap(True)
+        text_layout.addWidget(title_label)
+        text_layout.addWidget(body_label)
+        layout.addLayout(text_layout, 1)
+        return card, body_label
+
+    def _set_workflow_card_state(self, card: QFrame, *, ready: bool = False, warning: bool = False) -> None:
+        card.setProperty("ready", bool(ready))
+        card.setProperty("warning", bool(warning))
+        card.style().unpolish(card)
+        card.style().polish(card)
+        card.update()
+
+    def _refresh_workflow_panel(self) -> None:
+        if not hasattr(self, "workflow_rover_text"):
+            return
+        dataset = self._display_dataset()
+        if dataset is None:
+            self.workflow_rover_text.setText("No magnetic dataset loaded")
+            self.workflow_base_text.setText("Optional support not loaded")
+            self.workflow_boundary_text.setText("Optional boundary not loaded")
+            self.workflow_qc_text.setText("QC has not been run")
+            for card in (self.workflow_rover_card, self.workflow_base_card, self.workflow_boundary_card, self.workflow_qc_card):
+                self._set_workflow_card_state(card)
+            return
+        self.workflow_rover_text.setText(f"Ready • {dataset.record_count:,} records • {self._humanize(dataset.survey_type.value)}")
+        self._set_workflow_card_state(self.workflow_rover_card, ready=True)
+        if self.base is not None:
+            self.workflow_base_text.setText(f"Loaded • {self.base.record_count:,} base records")
+            self._set_workflow_card_state(self.workflow_base_card, ready=True)
+        else:
+            self.workflow_base_text.setText("Not loaded • base-dependent stages will skip")
+            self._set_workflow_card_state(self.workflow_base_card, warning=True)
+        if self.boundary is not None:
+            self.workflow_boundary_text.setText(f"Loaded • {self.boundary.name} • {self.boundary.vertices.shape[0]} vertices")
+            self._set_workflow_card_state(self.workflow_boundary_card, ready=True)
+        else:
+            self.workflow_boundary_text.setText("Not loaded • boundary filter/QC will skip")
+            self._set_workflow_card_state(self.workflow_boundary_card, warning=True)
+        if self.latest_result:
+            status = str(self.latest_result.get("status", "unknown")).upper()
+            score = float(self.latest_result.get("score", 0.0) or 0.0)
+            self.workflow_qc_text.setText(f"{status} • score {score:.1f}/100")
+            self._set_workflow_card_state(self.workflow_qc_card, ready=status in {"PASS", "WARNING", "WARN"}, warning=status not in {"PASS"})
+        else:
+            self.workflow_qc_text.setText("Not run • choose a profile and run QC")
+            self._set_workflow_card_state(self.workflow_qc_card, warning=True)
 
     def _refresh_stats_details(self) -> None:
         if not hasattr(self, "stats_details"):
@@ -2476,9 +3066,12 @@ class MagneticDashboard(QWidget):
         self.channels_table.setRowCount(len(dataset.channel_names))
         for row, name in enumerate(dataset.channel_names):
             values = np.asarray(dataset.channels[name], dtype=float)
-            finite = values[np.isfinite(values)]
+            finite, sampled, sample_count = self._finite_sample(values)
             unit = dataset.magnetic_units if name == RAW_TOTAL_FIELD or "field" in name.lower() else "—"
-            valid_text = f"{finite.size:,} / {values.size:,}"
+            if sampled:
+                valid_text = f"sample {finite.size:,} / {sample_count:,}"
+            else:
+                valid_text = f"{finite.size:,} / {values.size:,}"
             if finite.size:
                 stats: list[Any] = [
                     name,
@@ -2533,9 +3126,11 @@ class MagneticDashboard(QWidget):
     def _refresh_channel_combos(self) -> None:
         dataset = self._display_dataset()
         channels = list(dataset.channel_names) if dataset else []
-        combos = [self.map_channel_combo, self.profile_channel_combo]
-        if hasattr(self, "spatial_channel_combo"):
-            combos.append(self.spatial_channel_combo)
+        combos: list[QComboBox] = []
+        for attr in ("map_channel_combo", "profile_channel_combo", "spatial_channel_combo"):
+            combo = getattr(self, attr, None)
+            if isinstance(combo, QComboBox):
+                combos.append(combo)
         for combo in combos:
             current = combo.currentText()
             combo.blockSignals(True)
@@ -2549,13 +3144,25 @@ class MagneticDashboard(QWidget):
                 combo.setCurrentText(BASE_TOTAL_FIELD)
             combo.blockSignals(False)
 
-        groups = dataset.line_groups() if dataset else {}
-        self.line_combo.blockSignals(True)
-        self.line_combo.clear()
-        self.line_combo.addItem("All records", "__all__")
-        for line in sorted(groups):
-            self.line_combo.addItem(line, line)
-        self.line_combo.blockSignals(False)
+        line_combo = getattr(self, "line_combo", None)
+        if isinstance(line_combo, QComboBox):
+            groups = dataset.line_groups() if dataset else {}
+            line_combo.blockSignals(True)
+            line_combo.clear()
+            line_combo.addItem("All records", "__all__")
+            for line in sorted(groups):
+                line_combo.addItem(line, line)
+            line_combo.blockSignals(False)
+        # Keep visualization pages alive immediately after file/base/boundary load.
+        # The combo signals are blocked while repopulating, so refresh the visible
+        # plots explicitly instead of leaving Map/Profile/2D-3D blank until the
+        # user toggles a control manually.
+        try:
+            self._refresh_map()
+            self._refresh_profile()
+            self._refresh_native_spatial()
+        except Exception:
+            pass
 
     def _refresh_provenance(self) -> None:
         self.provenance_table.setRowCount(0)
@@ -2583,6 +3190,8 @@ class MagneticDashboard(QWidget):
         if dataset is None or not self.map_channel_combo.currentText():
             if hasattr(self, "map_info_label"):
                 self.map_info_label.setText("No dataset")
+            if hasattr(self, "map_stats_table"):
+                self._set_key_value_rows(self.map_stats_table, [("Status", "No magnetic dataset/channel selected")])
             return
         is_geographic = str(dataset.crs or "").upper() in {"EPSG:4326", "4326", "WGS84", "WGS 84"} or dataset.coordinate_units.lower() in {"deg", "degree", "degrees"}
         self.map_plot.setLabel("bottom", "Longitude" if is_geographic else "X / Easting", units="" if is_geographic else dataset.coordinate_units)
@@ -2593,6 +3202,12 @@ class MagneticDashboard(QWidget):
         mask = dataset.valid_coordinate_mask()
         if not np.any(mask):
             self.map_plot.setTitle("No valid coordinates available")
+            if hasattr(self, "map_stats_table"):
+                self._set_key_value_rows(self.map_stats_table, [
+                    ("Records", f"{dataset.record_count:,}"),
+                    ("Valid XY", "0"),
+                    ("Action", "Use Profile view for time/base-station datasets or load XY/easting/northing columns."),
+                ])
             return
 
         x = np.asarray(dataset.x[mask], dtype=float)
@@ -2626,6 +3241,14 @@ class MagneticDashboard(QWidget):
         except Exception:
             scatter = pg.ScatterPlotItem(x, y, size=5, pen=None, brush=pg.mkBrush(30, 110, 165, 180))
         self.map_plot.addItem(scatter)
+        if hasattr(self, "map_stats_table"):
+            self._set_key_value_rows(self.map_stats_table, [
+                ("Channel", self.map_channel_combo.currentText()),
+                ("Mapped points", f"{values.size:,}"),
+                ("Min / Max", f"{float(np.nanmin(values)):.6g} / {float(np.nanmax(values)):.6g}"),
+                ("Mean / Std", f"{float(np.nanmean(values)):.6g} / {float(np.nanstd(values)):.6g}"),
+                ("P2 / P98 colour stretch", f"{low:.6g} / {high:.6g}"),
+            ])
 
         if self.boundary is not None:
             vertices = self.boundary.vertices
@@ -2643,6 +3266,8 @@ class MagneticDashboard(QWidget):
         if dataset is None or not self.profile_channel_combo.currentText():
             if hasattr(self, "profile_info_label"):
                 self.profile_info_label.setText("No dataset")
+            if hasattr(self, "profile_stats_table"):
+                self._set_key_value_rows(self.profile_stats_table, [("Status", "No magnetic dataset/channel selected")])
             return
 
         if hasattr(self, "profile_info_label"):
@@ -2660,6 +3285,8 @@ class MagneticDashboard(QWidget):
         values = np.asarray(dataset.channel(self.profile_channel_combo.currentText())[indices], dtype=float)
         valid = np.isfinite(values)
         if not np.any(valid):
+            if hasattr(self, "profile_stats_table"):
+                self._set_key_value_rows(self.profile_stats_table, [("Channel", self.profile_channel_combo.currentText()), ("Valid samples", "0")])
             return
 
         max_points = 30000
@@ -2681,13 +3308,28 @@ class MagneticDashboard(QWidget):
         else:
             valid = valid & np.isfinite(x_values)
 
+        x_valid = x_values[valid]
+        y_valid = values[valid]
         self.profile_plot.plot(
-            x_values[valid],
-            values[valid],
-            pen=pg.mkPen("#0B6FA4", width=1.2),
+            x_valid,
+            y_valid,
+            pen=pg.mkPen("#0B6FA4", width=1.35),
         )
+        if y_valid.size:
+            peak_i = int(np.nanargmax(np.abs(y_valid)))
+            self.profile_plot.plot([float(x_valid[peak_i])], [float(y_valid[peak_i])], pen=None, symbol="o", symbolSize=8, symbolBrush=pg.mkBrush("#D97706"))
         self.profile_plot.setTitle(f"{label} — {self.profile_channel_combo.currentText()}")
         self.profile_plot.enableAutoRange()
+        if hasattr(self, "profile_stats_table"):
+            rms = float(np.sqrt(np.nanmean(y_valid * y_valid))) if y_valid.size else float("nan")
+            self._set_key_value_rows(self.profile_stats_table, [
+                ("Profile", label),
+                ("Channel", self.profile_channel_combo.currentText()),
+                ("Samples displayed", f"{y_valid.size:,}"),
+                ("Min / Max", f"{float(np.nanmin(y_valid)):.6g} / {float(np.nanmax(y_valid)):.6g}"),
+                ("Mean / Std", f"{float(np.nanmean(y_valid)):.6g} / {float(np.nanstd(y_valid)):.6g}"),
+                ("RMS / Peak abs", f"{rms:.6g} / {float(np.nanmax(np.abs(y_valid))):.6g}"),
+            ])
 
     def _refresh_native_spatial(self) -> None:
         if not hasattr(self, "native_spatial_view"):
@@ -2747,6 +3389,8 @@ class MagneticDashboard(QWidget):
             self.geospatial_view.set_status_message("No valid geographic coordinates are available for satellite/3D display.")
             return
 
+        from ui.widgets.geospatial_view import GeoTrack
+
         tracks: list[GeoTrack] = []
         groups = dataset.line_groups()
         if groups:
@@ -2778,6 +3422,48 @@ class MagneticDashboard(QWidget):
             tracks,
             render=self.tabs.currentIndex() == self.TAB_GEOSPATIAL,
         )
+
+    def _refresh_qc_graphs(self, stages: list[dict[str, Any]]) -> None:
+        if not hasattr(self, "qc_stage_status_plot"):
+            return
+        self.qc_stage_status_plot.clear()
+        self.qc_duration_plot.clear()
+        if not stages:
+            self.qc_stage_status_plot.setTitle("Run QC to display magnetic stage status counts")
+            self.qc_duration_plot.setTitle("QC stage run-time profile")
+            return
+        counts: dict[str, int] = {}
+        durations: list[float] = []
+        labels: list[str] = []
+        for stage in stages:
+            status = str(stage.get("status", "unknown")).upper()
+            counts[status] = counts.get(status, 0) + 1
+            durations.append(float(stage.get("duration_ms", 0) or 0))
+            labels.append(str(stage.get("display_name", stage.get("stage_key", "Stage")))[:12])
+        order = ["PASSED", "PASS", "WARNING", "WARN", "SKIPPED", "FAILED", "FAIL", "ERROR"]
+        labels_count = [key for key in order if key in counts] + [key for key in sorted(counts) if key not in order]
+        values = np.asarray([counts[key] for key in labels_count], dtype=float)
+        brushes = []
+        for key in labels_count:
+            low = key.lower()
+            if low in {"failed", "fail", "error"}:
+                brushes.append(pg.mkBrush("#C2414A"))
+            elif low in {"warning", "warn"}:
+                brushes.append(pg.mkBrush("#D97706"))
+            elif low in {"skipped", "skip"}:
+                brushes.append(pg.mkBrush("#64748B"))
+            else:
+                brushes.append(pg.mkBrush("#15945C"))
+        self.qc_stage_status_plot.addItem(pg.BarGraphItem(x=np.arange(len(values)), height=values, width=0.62, brushes=brushes, pen=pg.mkPen("#FFFFFF")))
+        self.qc_stage_status_plot.getAxis("bottom").setTicks([[(float(i), key.title()) for i, key in enumerate(labels_count)]])
+        self.qc_stage_status_plot.setYRange(0, max(1.0, float(np.max(values)) * 1.18), padding=0)
+        self.qc_stage_status_plot.setTitle("Magnetic QC stage status summary")
+
+        duration_values = np.asarray(durations, dtype=float)
+        self.qc_duration_plot.addItem(pg.BarGraphItem(x=np.arange(len(duration_values)), height=duration_values, width=0.62, brush=pg.mkBrush("#0A86C7"), pen=pg.mkPen("#FFFFFF")))
+        self.qc_duration_plot.getAxis("bottom").setTicks([[(float(i), label) for i, label in enumerate(labels)]])
+        self.qc_duration_plot.setYRange(0, max(1.0, float(np.max(duration_values)) * 1.18), padding=0)
+        self.qc_duration_plot.setTitle("Magnetic QC processing duration by stage")
 
     def _populate_results(self, result: dict[str, Any]) -> None:
         stages = list(result.get("stage_outcomes", []))
@@ -2815,6 +3501,7 @@ class MagneticDashboard(QWidget):
         summary = "  •  ".join(f"{key}: {value}" for key, value in sorted(status_counts.items()))
         self.qc_summary_label.setText(summary or "No stage outcomes")
         self.stage_table.resizeRowsToContents()
+        self._refresh_qc_graphs(stages)
         self._apply_findings_filter()
 
     def _apply_findings_filter(self) -> None:
@@ -2849,6 +3536,7 @@ class MagneticDashboard(QWidget):
         self.qc_summary_label.setText("No QC run has been completed")
         self.finding_count_label.setText("0 findings")
         self.metric_qc.set_value("Not run", "Select a profile and run QC")
+        self._refresh_qc_graphs([])
 
     # ------------------------------------------------------------------
     # Helpers

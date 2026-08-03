@@ -16,7 +16,6 @@ class SegdRibbonProvider(RibbonProvider):
                 RibbonAction("Open SEG-D", "segd_open_file", icon="document-open", accent=True),
                 RibbonAction("Open 2D/3D", "segd_open_2d3d", icon="view-3d"),
                 RibbonAction("Reload", "segd_reload", icon="view-refresh"),
-                RibbonAction("Headers", "segd_headers", icon="view-list-details"),
                 RibbonAction("Export Image", "segd_export_image", icon="document-export"),
             ],
         )

@@ -9,6 +9,7 @@ import pyqtgraph.exporters
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
+    QApplication,
     QWidget,
     QVBoxLayout,
     QHBoxLayout,
@@ -34,12 +35,21 @@ from PySide6.QtWidgets import (
     QRadioButton,
     QButtonGroup,
     QScrollArea,
+    QProgressDialog,
 )
 
 from modules.vibroseis import SweepParameters, VibroseisEngine
 from modules.vibroseis.vaps_reader import VapsReader, VapsQcEngine, VapsRecord
 from core.domain.geospatial import CoordinateTransformError, to_wgs84
 from ui.widgets.geospatial_view import GeoTrack, GoogleGeospatialView
+from modules.vibroseis.ui.vibroseis_results_dialog import (
+    CorrelationResultsDialog,
+    GroundForceResultsDialog,
+    ProductivityResultsDialog,
+    SignalQcResultsDialog,
+    SweepResultsDialog,
+    VapsQcResultsDialog,
+)
 
 
 _VIB_QSS = """
@@ -242,7 +252,7 @@ class VibroseisDashboard(QWidget):
         self._vaps_path: Optional[Path] = None
         self._vaps_records: list[VapsRecord] = []
         self._build_ui()
-        self.design_sweep()
+        self._show_initial_state()
 
     def _build_ui(self) -> None:
         root = QVBoxLayout(self)
@@ -321,6 +331,88 @@ class VibroseisDashboard(QWidget):
         table.verticalHeader().setVisible(False)
         table.verticalHeader().setDefaultSectionSize(22)
         table.horizontalHeader().setStretchLastSection(True)
+
+    def _show_initial_state(self) -> None:
+        """Keep the Vibroseis workspace clean until the user loads or generates data."""
+        self.telemetry_badge.setText("No telemetry loaded")
+        self.status_badge.setText("No data loaded")
+        self._plot_placeholder(self.sweep_plot, "Pilot Sweep", "Click Generate Sweep to create a pilot sweep.")
+        self._plot_placeholder(self.spectrum_plot, "Normalized Sweep Spectrum", "No generated sweep yet.")
+        self._plot_placeholder(self.klauder_plot, "Klauder Wavelet / Autocorrelation", "No generated sweep yet.")
+        self._plot_placeholder(self.signal_plot, "Signal / Correlation View", "Load telemetry, map columns, then run Source Signal QC or Correlate Trace.")
+        self._plot_placeholder(self.force_plot, "Estimated Ground Force", "Load a telemetry / ground-force file, map acceleration channels, then calculate.")
+        if hasattr(self, "vaps_plot"):
+            self._plot_placeholder(self.vaps_plot, "VAPS Attribute Display", "Load VAPS / H26 field attributes, then run Field QC.")
+
+    @staticmethod
+    def _plot_placeholder(plot: pg.PlotWidget, title: str, message: str) -> None:
+        plot.clear()
+        plot.setTitle(title, color="#15384F", size="9pt")
+        try:
+            text = pg.TextItem(message, color="#5D7588", anchor=(0.5, 0.5))
+            text.setFont(QFont("Arial", 9))
+            plot.addItem(text)
+            text.setPos(0.5, 0.5)
+            plot.setXRange(0, 1, padding=0)
+            plot.setYRange(0, 1, padding=0)
+        except Exception:
+            pass
+
+    def _busy(self, title: str, message: str) -> QProgressDialog:
+        dlg = QProgressDialog(message, None, 0, 0, self)
+        dlg.setWindowTitle(title)
+        dlg.setWindowModality(Qt.ApplicationModal)
+        dlg.setMinimumDuration(0)
+        dlg.setAutoClose(False)
+        dlg.setAutoReset(False)
+        dlg.setCancelButton(None)
+        dlg.resize(420, 92)
+        dlg.show()
+        QApplication.processEvents()
+        return dlg
+
+    @staticmethod
+    def _finish_busy(dlg: QProgressDialog | None) -> None:
+        if dlg is not None:
+            dlg.close()
+            dlg.deleteLater()
+        QApplication.processEvents()
+
+    def _require_telemetry(self, process_name: str) -> bool:
+        if self._telemetry_data is not None:
+            return True
+        msg = QMessageBox(self)
+        msg.setIcon(QMessageBox.Information)
+        msg.setWindowTitle(process_name)
+        msg.setText(f"{process_name} needs a telemetry CSV/TXT file first.")
+        msg.setInformativeText("Open the file now, then map the required columns and run the process again.")
+        open_btn = msg.addButton("Open File", QMessageBox.AcceptRole)
+        msg.addButton("Cancel", QMessageBox.RejectRole)
+        msg.exec()
+        if msg.clickedButton() is open_btn:
+            self.open_telemetry()
+        return self._telemetry_data is not None
+
+    def _require_vaps(self, process_name: str) -> bool:
+        if self._vaps_records:
+            return True
+        msg = QMessageBox(self)
+        msg.setIcon(QMessageBox.Information)
+        msg.setWindowTitle(process_name)
+        msg.setText(f"{process_name} needs a VAPS/H26 field attribute file first.")
+        msg.setInformativeText("Open the VAPS/H26 file now, then run Field QC again.")
+        open_btn = msg.addButton("Open VAPS/H26", QMessageBox.AcceptRole)
+        msg.addButton("Cancel", QMessageBox.RejectRole)
+        msg.exec()
+        if msg.clickedButton() is open_btn:
+            self.open_vaps(run_after_load=False)
+        return bool(self._vaps_records)
+
+    def open_ground_force_file(self) -> None:
+        self.show_ground_force()
+        self.open_telemetry()
+        if self._telemetry_data is not None:
+            self.status_badge.setText("Ground-force telemetry loaded")
 
     def _build_sweep_tab(self) -> None:
         page = QWidget()
@@ -637,7 +729,7 @@ class VibroseisDashboard(QWidget):
         proot.setContentsMargins(8, 8, 8, 8)
         proot.setSpacing(6)
         plot_controls = QHBoxLayout()
-        mode_box = QGroupBox("432 Mode")
+        mode_box = QGroupBox("Display Mode")
         mode_layout = QHBoxLayout(mode_box)
         mode_layout.setContentsMargins(8, 6, 8, 6)
         self.vaps_filtered_radio = QRadioButton("Filtered")
@@ -705,6 +797,14 @@ class VibroseisDashboard(QWidget):
         self.rm_mass = self._spin(1, 100000, 3000, 1, " kg"); self.bp_mass = self._spin(1, 100000, 1500, 1, " kg")
         self.rm_sign = QComboBox(); self.rm_sign.addItems(["+1", "-1"])
         self.bp_sign = QComboBox(); self.bp_sign.addItems(["+1", "-1"])
+        load_force = QPushButton("Open Ground-Force / Telemetry File")
+        load_force.setObjectName("vibGreen")
+        load_force.clicked.connect(self.open_ground_force_file)
+        form.addRow(load_force)
+        self.ground_force_file_label = QLabel("No ground-force telemetry loaded")
+        self.ground_force_file_label.setObjectName("vibInfo")
+        self.ground_force_file_label.setWordWrap(True)
+        form.addRow(self.ground_force_file_label)
         form.addRow("Reaction accel:", self.rm_col); form.addRow("Baseplate accel:", self.bp_col)
         form.addRow("Reaction mass:", self.rm_mass); form.addRow("Baseplate mass:", self.bp_mass)
         form.addRow("Reaction polarity:", self.rm_sign); form.addRow("Baseplate polarity:", self.bp_sign)
@@ -747,7 +847,7 @@ class VibroseisDashboard(QWidget):
         self.prod_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
         layout.addWidget(self.prod_table, 1)
         self.tabs.addTab(page, "Productivity")
-        self.calculate_productivity()
+        self._set_table(self.prod_table, {"Status": "Click Calculate Productivity to generate cycle results."})
 
     def _build_geospatial_tab(self) -> None:
         page = QWidget()
@@ -775,7 +875,9 @@ class VibroseisDashboard(QWidget):
         table.resizeRowsToContents()
 
     def design_sweep(self) -> None:
+        dlg = None
         try:
+            dlg = self._busy("Generating Sweep", "Generating pilot sweep, spectrum and Klauder wavelet...")
             p = SweepParameters(
                 start_frequency_hz=self.f0.value(), end_frequency_hz=self.f1.value(), duration_s=self.duration.value(),
                 sample_rate_hz=self.fs.value(), sweep_type=self.sweep_type.currentText().lower(),
@@ -783,13 +885,20 @@ class VibroseisDashboard(QWidget):
             )
             result = self.engine.design_sweep(p); self._last_sweep = result
             self.sweep_plot.clear(); self.sweep_plot.plot(result.time_s, result.samples, pen=pg.mkPen("#0A6EA8", width=1.2))
+            self.sweep_plot.setTitle("Pilot Sweep", color="#15384F", size="9pt")
             self.spectrum_plot.clear(); self.spectrum_plot.plot(result.frequency_hz, result.amplitude_spectrum, pen=pg.mkPen("#15945C", width=1.4))
+            self.spectrum_plot.setTitle("Normalized Sweep Spectrum", color="#15384F", size="9pt")
             self.spectrum_plot.setXRange(0, min(self.fs.value()/2, max(self.f0.value(), self.f1.value())*1.35), padding=0.02)
             self.klauder_plot.clear(); self.klauder_plot.plot(result.autocorrelation_lag_s, result.klauder_wavelet, pen=pg.mkPen("#D98919", width=1.1))
+            self.klauder_plot.setTitle("Klauder Wavelet / Autocorrelation", color="#15384F", size="9pt")
             half = min(2.0, self.duration.value()); self.klauder_plot.setXRange(-half, half, padding=0.01)
             self.status_badge.setText("Sweep design ready")
+            self._finish_busy(dlg); dlg = None
+            SweepResultsDialog(result, self.fs.value(), self).exec()
         except Exception as exc:
+            self._finish_busy(dlg)
             QMessageBox.critical(self, "Vibroseis Sweep Error", str(exc))
+
 
     def export_pilot(self) -> None:
         if self._last_sweep is None: self.design_sweep()
@@ -800,21 +909,34 @@ class VibroseisDashboard(QWidget):
         self.status_badge.setText("Pilot CSV exported")
 
     def open_telemetry(self) -> None:
-        path, _ = QFileDialog.getOpenFileName(self, "Open Vibroseis telemetry", str(Path.home()), "Data (*.csv *.txt *.dat);;All Files (*.*)")
-        if not path: return
+        path, _ = QFileDialog.getOpenFileName(self, "Open Vibroseis telemetry", str(Path.home()), "Data (*.csv *.txt *.dat *.log);;All Files (*.*)")
+        if not path:
+            return
+        dlg = None
         try:
+            dlg = self._busy("Loading Telemetry", "Reading telemetry / source QC file and detecting numeric columns...")
             names, data = self.engine.load_numeric_table(path)
             self._telemetry_path = Path(path); self._telemetry_names = names; self._telemetry_data = data
             label = f"{self._telemetry_path.name} — {data.shape[0]:,} rows × {data.shape[1]} columns"
             self.telemetry_label.setText(label)
             self.telemetry_badge.setText(label)
+            if hasattr(self, "ground_force_file_label"):
+                self.ground_force_file_label.setText(label)
             self.status_badge.setText("Telemetry loaded")
             for combo in (self.reference_col, self.measured_col, self.trace_col, self.rm_col, self.bp_col):
                 combo.clear(); combo.addItems(names)
             self._auto_map_columns(names)
             self._refresh_geospatial()
+            self._finish_busy(dlg); dlg = None
+            QMessageBox.information(
+                self,
+                "Telemetry Loaded",
+                f"Loaded {data.shape[0]:,} rows and {data.shape[1]} columns.\n\nNext: check column mapping, then run Signal QC, Correlation or Ground Force.",
+            )
         except Exception as exc:
+            self._finish_busy(dlg)
             QMessageBox.critical(self, "Vibroseis Import Error", str(exc))
+
 
     def _auto_map_columns(self, names: list[str]) -> None:
         lowered = [n.lower() for n in names]
@@ -833,7 +955,11 @@ class VibroseisDashboard(QWidget):
         return self._telemetry_data[:, combo.currentIndex()]
 
     def run_signal_qc(self) -> None:
+        if not self._require_telemetry("Source Signal QC"):
+            return
+        dlg = None
         try:
+            dlg = self._busy("Running Source Signal QC", "Calculating lag, RMS, amplitude ratio, coherence, phase error and band energy...")
             ref = self._column(self.reference_col); mea = self._column(self.measured_col)
             result = self.engine.signal_qc(ref, mea, self.telemetry_fs.value(), (self.band_lo.value(), self.band_hi.value()))
             self._set_table(self.qc_table, {
@@ -842,32 +968,84 @@ class VibroseisDashboard(QWidget):
                 "RMS spectral phase error": f"{result.phase_error_rms_deg:.3f}°", "Mean magnitude-squared coherence": f"{result.spectral_coherence_mean:.5f}",
                 "Energy inside QC band": f"{100*result.in_band_energy_fraction:.2f}%", "Dominant frequency": f"{result.dominant_frequency_hz:.3f} Hz", "Crest factor": f"{result.crest_factor:.4f}",
             })
-            n = min(ref.size, mea.size); t = np.arange(n)/self.telemetry_fs.value(); self.signal_plot.clear(); self.signal_plot.plot(t, ref[:n], pen=pg.mkPen("#0A6EA8", width=1)); self.signal_plot.plot(t, mea[:n], pen=pg.mkPen("#D98919", width=1))
+            n = min(ref.size, mea.size)
+            t = np.arange(n)/self.telemetry_fs.value()
+            self.signal_plot.clear()
+            self.signal_plot.setTitle("Source Signal QC — Reference vs Measured", color="#15384F", size="9pt")
+            self.signal_plot.plot(t, ref[:n], pen=pg.mkPen("#0A6EA8", width=1.05))
+            self.signal_plot.plot(t, mea[:n], pen=pg.mkPen("#D98919", width=1.05))
             self.status_badge.setText("Signal QC complete")
-        except Exception as exc: QMessageBox.critical(self, "Vibroseis Signal QC Error", str(exc))
+            self._finish_busy(dlg); dlg = None
+            SignalQcResultsDialog(result, np.asarray(ref, dtype=float), np.asarray(mea, dtype=float), self.telemetry_fs.value(), self).exec()
+        except Exception as exc:
+            self._finish_busy(dlg)
+            QMessageBox.critical(self, "Vibroseis Signal QC Error", str(exc))
+
 
     def correlate_trace(self) -> None:
+        if not self._require_telemetry("Trace Correlation"):
+            return
+        dlg = None
         try:
+            dlg = self._busy("Running Trace Correlation", "Calculating normalized trace × pilot cross-correlation...")
             trace = self._column(self.trace_col); ref = self._column(self.reference_col)
             lag, corr = self.engine.correlate_trace(trace, ref, self.telemetry_fs.value())
-            self.signal_plot.clear(); self.signal_plot.plot(lag, corr, pen=pg.mkPen("#15945C", width=1.25)); self.signal_plot.setTitle("Normalized Trace × Pilot Cross-Correlation", color="#15384F", size="9pt")
+            self.signal_plot.clear()
+            self.signal_plot.plot(lag, corr, pen=pg.mkPen("#15945C", width=1.25))
+            self.signal_plot.setTitle("Normalized Trace × Pilot Cross-Correlation", color="#15384F", size="9pt")
             self.status_badge.setText("Trace correlation complete")
-        except Exception as exc: QMessageBox.critical(self, "Vibroseis Correlation Error", str(exc))
+            self._finish_busy(dlg); dlg = None
+            CorrelationResultsDialog(lag, corr, self).exec()
+        except Exception as exc:
+            self._finish_busy(dlg)
+            QMessageBox.critical(self, "Vibroseis Correlation Error", str(exc))
+
 
     def calculate_ground_force(self) -> None:
+        if not self._require_telemetry("Ground Force Calculation"):
+            return
+        dlg = None
         try:
-            r = self.engine.calculate_ground_force(self._column(self.rm_col), self._column(self.bp_col), self.rm_mass.value(), self.bp_mass.value(), self.telemetry_fs.value(), 1 if self.rm_sign.currentIndex()==0 else -1, 1 if self.bp_sign.currentIndex()==0 else -1)
-            self._set_table(self.force_table, {"Peak |ground force|": f"{r.peak_force_n:,.2f} N", "RMS ground force": f"{r.rms_force_n:,.2f} N", "Signed force impulse": f"{r.impulse_ns:,.3f} N·s"})
-            self.force_plot.clear(); self.force_plot.plot(r.time_s, r.ground_force_n, pen=pg.mkPen("#0A6EA8", width=1))
+            dlg = self._busy("Calculating Ground Force", "Calculating inertial force from reaction-mass and baseplate acceleration channels...")
+            r = self.engine.calculate_ground_force(
+                self._column(self.rm_col), self._column(self.bp_col), self.rm_mass.value(), self.bp_mass.value(),
+                self.telemetry_fs.value(), 1 if self.rm_sign.currentIndex()==0 else -1, 1 if self.bp_sign.currentIndex()==0 else -1,
+            )
+            self._set_table(self.force_table, {
+                "Peak |ground force|": f"{r.peak_force_n:,.2f} N",
+                "RMS ground force": f"{r.rms_force_n:,.2f} N",
+                "Signed force impulse": f"{r.impulse_ns:,.3f} N·s",
+            })
+            self.force_plot.clear()
+            self.force_plot.setTitle("Estimated Ground Force", color="#15384F", size="9pt")
+            self.force_plot.plot(r.time_s, r.ground_force_n, pen=pg.mkPen("#0A6EA8", width=1.15))
+            self.force_plot.addLine(y=0, pen=pg.mkPen("#687B88", width=1.0, style=Qt.DashLine))
             self.status_badge.setText("Ground force calculated")
-        except Exception as exc: QMessageBox.critical(self, "Ground Force Error", str(exc))
+            self._finish_busy(dlg); dlg = None
+            GroundForceResultsDialog(r, self).exec()
+        except Exception as exc:
+            self._finish_busy(dlg)
+            QMessageBox.critical(self, "Ground Force Error", str(exc))
+
 
     def calculate_productivity(self) -> None:
+        dlg = None
         try:
+            dlg = self._busy("Calculating Productivity", "Calculating nominal VP/hour and active sweep fraction...")
             r = self.engine.productivity(self.prod_sweep.value(), self.prod_n.value(), self.prod_listen.value(), self.prod_pad.value(), self.prod_move.value())
-            self._set_table(self.prod_table, {"Nominal cycle time / VP": f"{r.cycle_time_per_vp_s:.2f} s", "Theoretical VP / hour": f"{r.theoretical_vp_per_hour:.2f}", "Theoretical sweeps / hour": f"{r.theoretical_sweeps_per_hour:.2f}", "Active sweep fraction": f"{100*r.active_sweep_fraction:.2f}%"})
+            self._set_table(self.prod_table, {
+                "Nominal cycle time / VP": f"{r.cycle_time_per_vp_s:.2f} s",
+                "Theoretical VP / hour": f"{r.theoretical_vp_per_hour:.2f}",
+                "Theoretical sweeps / hour": f"{r.theoretical_sweeps_per_hour:.2f}",
+                "Active sweep fraction": f"{100*r.active_sweep_fraction:.2f}%",
+            })
             self.status_badge.setText("Productivity calculated")
-        except Exception as exc: QMessageBox.critical(self, "Productivity Error", str(exc))
+            self._finish_busy(dlg); dlg = None
+            ProductivityResultsDialog(r, self).exec()
+        except Exception as exc:
+            self._finish_busy(dlg)
+            QMessageBox.critical(self, "Productivity Error", str(exc))
+
 
     def _set_vaps_vibs(self, checked: bool) -> None:
         for cb in getattr(self, "vaps_vib_checks", {}).values():
@@ -970,11 +1148,13 @@ class VibroseisDashboard(QWidget):
         except Exception as exc:
             QMessageBox.critical(self, "VAPS Export Error", str(exc))
 
-    def open_vaps(self) -> None:
+    def open_vaps(self, run_after_load: bool = True) -> None:
         path, _ = QFileDialog.getOpenFileName(self, "Open VAPS / H26 vibrator attributes", str(Path.home()), "VAPS/H26/Text (*.vaps *.h26 *.csv *.txt *.dat *.log);;All Files (*.*)")
         if not path:
             return
+        dlg = None
         try:
+            dlg = self._busy("Loading VAPS/H26", "Reading field vibrator attributes and mapping QC columns...")
             self._vaps_records = VapsReader().read(path)
             self._vaps_path = Path(path)
             self.vaps_label.setText(f"{self._vaps_path.name} — {len(self._vaps_records):,} VAPS records")
@@ -983,42 +1163,67 @@ class VibroseisDashboard(QWidget):
                 self.vaps_summary_table.setItem(1, 1, QTableWidgetItem(str(self._vaps_path)))
             self.status_badge.setText("VAPS/H26 attributes loaded")
             self._reset_vaps_vibs_to_loaded()
-            self.run_vaps_qc()
+            self._finish_busy(dlg); dlg = None
+            if run_after_load:
+                self.run_vaps_qc()
+            else:
+                QMessageBox.information(
+                    self,
+                    "VAPS/H26 Loaded",
+                    f"Loaded {len(self._vaps_records):,} VAPS/H26 records.\n\nNext: select vibrators/attribute and run Field QC.",
+                )
         except Exception as exc:
+            self._finish_busy(dlg)
             QMessageBox.critical(self, "VAPS/H26 Import Error", str(exc))
 
-    def run_vaps_qc(self) -> None:
-        if not self._vaps_records:
-            QMessageBox.information(self, "VAPS Field QC", "Load a VAPS/H26 attribute file first.")
-            return
-        engine = VapsQcEngine()
-        summary = engine.summarize(self._vaps_records)
-        self.vaps_metrics["records"].setText(f"{summary['records']:,}")
-        self.vaps_metrics["vibs"].setText(f"{summary['vibs']:,}")
-        self.vaps_metrics["pass"].setText(f"{summary['pass']:,}")
-        self.vaps_metrics["fail"].setText(f"{summary['fail']:,}")
 
-        display_records = self._selected_vaps_records() or list(self._vaps_records)
-        self.vaps_table.setRowCount(0)
-        for record in display_records:
-            status, findings = engine.evaluate_record(record)
-            row = self.vaps_table.rowCount(); self.vaps_table.insertRow(row)
-            values = [
-                status, record.vib, record.vp, record.drive_level_pct, record.avg_phase_deg, record.peak_phase_deg,
-                record.avg_distortion_pct, record.peak_distortion_pct, record.avg_force, record.peak_force,
-                record.avg_viscosity, record.avg_stiffness, record.hdop, record.status_code, "; ".join(findings), record.source_line,
-            ]
-            for col, value in enumerate(values):
-                self.vaps_table.setItem(row, col, QTableWidgetItem("" if value is None else str(value)))
-        self.vaps_table.resizeRowsToContents()
-        self.vaps_warning_table.setRowCount(0)
-        for key, count in sorted(summary.get("warnings", {}).items()):
-            row = self.vaps_warning_table.rowCount(); self.vaps_warning_table.insertRow(row)
-            self.vaps_warning_table.setItem(row, 0, QTableWidgetItem(str(key)))
-            self.vaps_warning_table.setItem(row, 1, QTableWidgetItem(str(count)))
-        self.vaps_warning_table.resizeRowsToContents()
-        self._plot_vaps_metric()
-        self.status_badge.setText("VAPS analyser display/QC complete")
+    def run_vaps_qc(self) -> None:
+        if not self._require_vaps("VAPS / H26 Field QC"):
+            return
+        dlg = None
+        try:
+            dlg = self._busy("Running VAPS Field QC", "Evaluating vibrator attributes, status flags, warning categories and selected attribute graph...")
+            engine = VapsQcEngine()
+            summary = engine.summarize(self._vaps_records)
+            self.vaps_metrics["records"].setText(f"{summary['records']:,}")
+            self.vaps_metrics["vibs"].setText(f"{summary['vibs']:,}")
+            self.vaps_metrics["pass"].setText(f"{summary['pass']:,}")
+            self.vaps_metrics["fail"].setText(f"{summary['fail']:,}")
+
+            display_records = self._selected_vaps_records() or list(self._vaps_records)
+            self.vaps_table.setRowCount(0)
+            for record in display_records:
+                status, findings = engine.evaluate_record(record)
+                row = self.vaps_table.rowCount(); self.vaps_table.insertRow(row)
+                values = [
+                    status, record.vib, record.vp, record.drive_level_pct, record.avg_phase_deg, record.peak_phase_deg,
+                    record.avg_distortion_pct, record.peak_distortion_pct, record.avg_force, record.peak_force,
+                    record.avg_viscosity, record.avg_stiffness, record.hdop, record.status_code, "; ".join(findings), record.source_line,
+                ]
+                for col, value in enumerate(values):
+                    item = QTableWidgetItem("" if value is None else str(value))
+                    if status == "FAIL":
+                        item.setBackground(Qt.GlobalColor.red)
+                        item.setForeground(Qt.GlobalColor.white)
+                    elif status == "PASS" and col == 0:
+                        item.setBackground(Qt.GlobalColor.green)
+                    self.vaps_table.setItem(row, col, item)
+            self.vaps_table.resizeRowsToContents()
+            self.vaps_warning_table.setRowCount(0)
+            for key, count in sorted(summary.get("warnings", {}).items()):
+                row = self.vaps_warning_table.rowCount(); self.vaps_warning_table.insertRow(row)
+                self.vaps_warning_table.setItem(row, 0, QTableWidgetItem(str(key)))
+                self.vaps_warning_table.setItem(row, 1, QTableWidgetItem(str(count)))
+            self.vaps_warning_table.resizeRowsToContents()
+            self._plot_vaps_metric()
+            self.status_badge.setText("VAPS analyser display/QC complete")
+            attr, label = self._selected_vaps_metric()
+            self._finish_busy(dlg); dlg = None
+            VapsQcResultsDialog(summary, display_records, attr, label, self._vaps_metric_value, self).exec()
+        except Exception as exc:
+            self._finish_busy(dlg)
+            QMessageBox.critical(self, "VAPS Field QC Error", str(exc))
+
 
     def _find_telemetry_column(self, aliases: tuple[str, ...]) -> np.ndarray | None:
         if self._telemetry_data is None:
@@ -1075,10 +1280,12 @@ class VibroseisDashboard(QWidget):
         self.tabs.setCurrentIndex(5); self._refresh_geospatial(); self.geospatial_view.set_mode("3d" if str(mode).lower().startswith("3") else "2d")
 
     def can_execute(self, action_id: str) -> bool:
-        if action_id in {"vibroseis_open", "vibroseis_load", "vibroseis_sweep", "vibroseis_generate", "vibroseis_productivity", "vibroseis_load_vaps"}:
+        # Navigation/load/action buttons must stay enabled so the dashboard can guide the user to the required file.
+        if action_id in {
+            "vibroseis_open", "vibroseis_load", "vibroseis_sweep", "vibroseis_generate", "vibroseis_productivity",
+            "vibroseis_load_vaps", "vibroseis_vaps_qc", "vibroseis_signal_qc", "vibroseis_ground_force",
+        }:
             return True
-        if action_id in {"vibroseis_vaps_qc"}:
-            return bool(self._vaps_records)
-        if action_id in {"vibroseis_view_2d", "vibroseis_view_3d", "vibroseis_satellite", "vibroseis_signal_qc", "vibroseis_correlation", "vibroseis_ground_force"}:
+        if action_id in {"vibroseis_correlation", "vibroseis_view_2d", "vibroseis_view_3d", "vibroseis_satellite"}:
             return self._telemetry_data is not None
         return True

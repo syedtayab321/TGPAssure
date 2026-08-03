@@ -245,6 +245,8 @@ class MainWindow(QMainWindow):
         self._ribbon_workspace_timer.timeout.connect(self._run_pending_ribbon_workspace_activation)
         self._pending_ribbon_workspace_context: str | None = None
         self._ribbon_workspace_activation_in_progress = False
+        self._workspace_loader_finish_tokens: dict[str, int] = {}
+        self._workspace_loader_finish_token = 0
         self._current_project_name = None
         self._current_project_path = None
         self._active_module = "home"
@@ -383,7 +385,7 @@ class MainWindow(QMainWindow):
             user = self._license_service.user
             if user is not None:
                 self.status_bar.showMessage(
-                    f"Logged in: {user.email} | Plan: {self._license_service.current_plan}",
+                    f"Logged in: {user.email}",
                     3500,
                 )
         if hasattr(self, "ribbon_groups_layout"):
@@ -979,47 +981,182 @@ class MainWindow(QMainWindow):
 
     def _schedule_ribbon_workspace_activation(self, context_id: str | None) -> None:
         context = str(context_id or "").strip()
+        task_id = "ribbon:workspace"
         if not context or context == "home":
+            self.end_busy_task(task_id)
             return
         self._pending_ribbon_workspace_context = context
+
+        # Start the full-screen loader immediately on ribbon tab/sub-tab click.
+        # Dashboard construction is delayed by a short single-shot timer, so
+        # waiting until the timer fires makes the UI feel unresponsive. Showing
+        # the loader here gives instant feedback and keeps it visible until the
+        # requested dashboard/view is actually activated or the file picker is
+        # cancelled.
+        self.begin_busy_task(
+            task_id,
+            "Opening Dashboard",
+            f"Preparing {self._ribbon_context_label(context)} dashboard",
+            5,
+        )
+        QApplication.processEvents()
+
         if self._ribbon_workspace_activation_in_progress:
             return
-        # Small delay lets Qt finish repainting the ribbon selection before the
-        # heavier workspace widget is created, giving a smoother visible response.
-        self._ribbon_workspace_timer.start(120)
+        # Keep the delay short only to allow the ribbon selection paint event to
+        # complete before any heavier dashboard widget is built.
+        self._ribbon_workspace_timer.start(40)
 
     def _run_pending_ribbon_workspace_activation(self) -> None:
         context = self._pending_ribbon_workspace_context
         self._pending_ribbon_workspace_context = None
+        task_id = "ribbon:workspace"
         if not context or context == "home":
+            self.end_busy_task(task_id)
             return
         if self._ribbon_workspace_activation_in_progress:
             self._pending_ribbon_workspace_context = context
-            self._ribbon_workspace_timer.start(120)
+            self._ribbon_workspace_timer.start(80)
             return
         # A newer click may have changed the selected provider while this request
         # was waiting. Drop stale requests instead of opening the wrong module.
         if context != self._active_module:
+            self.end_busy_task(task_id)
             return
 
-        task_id = "ribbon:workspace"
-        show_loader = self._ribbon_context_needs_build(context)
         self._ribbon_workspace_activation_in_progress = True
+        target_widget = None
+        finish_message = f"{self._ribbon_context_label(context)} dashboard is ready"
         try:
-            if show_loader:
+            if not self.has_busy_task(task_id):
                 self.begin_busy_task(
                     task_id,
-                    "Opening Workspace",
+                    "Opening Dashboard",
                     f"Preparing {self._ribbon_context_label(context)} dashboard",
+                    10,
+                )
+            else:
+                self.update_busy_task(
+                    task_id,
+                    22,
+                    f"Loading {self._ribbon_context_label(context)} dashboard",
+                    title="Opening Dashboard",
+                )
+            QApplication.processEvents()
+
+            self._activate_ribbon_workspace_context(context)
+            target_widget = self.tab_widget.currentWidget() if hasattr(self, "tab_widget") else None
+            self.update_busy_task(task_id, 82, "Finalising dashboard layout and graphs")
+            QApplication.processEvents()
+        except Exception as exc:
+            self.log(f"Ribbon workspace activation failed for {context}: {exc}")
+            finish_message = "Dashboard activation finished with errors"
+        finally:
+            self._ribbon_workspace_activation_in_progress = False
+            if self.has_busy_task(task_id):
+                # Do not hide the loader here.  Qt paints the newly-created
+                # dashboard after this slot returns, so ending the loader in this
+                # finally block makes it disappear while the lower workspace is
+                # still blank.  Keep polling for a visible, painted tab and only
+                # then fade the loader out.
+                self._finish_busy_task_after_workspace_paint(
+                    task_id,
+                    context,
+                    target_widget,
+                    ready_message=finish_message,
+                )
+            if self._pending_ribbon_workspace_context and self._pending_ribbon_workspace_context != context:
+                self._ribbon_workspace_timer.start(40)
+
+    def _finish_busy_task_after_workspace_paint(
+        self,
+        task_id: str,
+        context_id: str | None = None,
+        target_widget: QWidget | None = None,
+        *,
+        ready_message: str = "Dashboard is ready",
+        attempt: int = 0,
+        stable_frames: int = 0,
+    ) -> None:
+        """Keep the full-screen loader visible until the workspace is actually painted.
+
+        Ribbon clicks and file-open actions often finish their Python slot before
+        Qt has laid out and painted the document tab underneath the loader.  This
+        method waits for the requested widget to be the current tab, visible,
+        sized, and stable for a few event-loop cycles.  It gives the user a
+        smooth transition instead of a blank/lagging lower workspace.
+        """
+        key = str(task_id or "foreground")
+        if attempt == 0:
+            self._workspace_loader_finish_token += 1
+            self._workspace_loader_finish_tokens[key] = self._workspace_loader_finish_token
+        token = self._workspace_loader_finish_tokens.get(key)
+
+        def _poll(next_attempt: int, next_stable: int) -> None:
+            if self._workspace_loader_finish_tokens.get(key) != token:
+                return
+            if not self.has_busy_task(key):
+                self._workspace_loader_finish_tokens.pop(key, None)
+                return
+
+            widget = target_widget
+            if widget is None or not is_qobject_valid(widget):
+                widget = self.tab_widget.currentWidget() if hasattr(self, "tab_widget") else None
+
+            ready = self._workspace_widget_is_painted(widget)
+            if ready:
+                next_stable += 1
+                self.update_busy_task(
+                    key,
+                    min(98, 88 + next_stable * 3),
+                    ready_message if next_stable >= 2 else "Rendering dashboard on screen",
                 )
                 QApplication.processEvents()
-            self._activate_ribbon_workspace_context(context)
-        finally:
-            if show_loader:
-                self.end_busy_task(task_id)
-            self._ribbon_workspace_activation_in_progress = False
-            if self._pending_ribbon_workspace_context and self._pending_ribbon_workspace_context != context:
-                self._ribbon_workspace_timer.start(80)
+                # Require multiple stable event-loop turns so graphs/tables get
+                # one real paint behind the overlay before it disappears.
+                if next_stable >= 3:
+                    self.update_busy_task(key, 100, ready_message)
+                    QApplication.processEvents()
+                    self._workspace_loader_finish_tokens.pop(key, None)
+                    self.end_busy_task(key)
+                    return
+            else:
+                next_stable = 0
+                progress = min(96, 82 + max(0, next_attempt // 2))
+                self.update_busy_task(key, progress, "Waiting for dashboard to appear")
+
+            # Safety valve: never leave the loader stuck forever if a dashboard
+            # constructor opens a file dialog, is cancelled, or fails to create a
+            # visible widget.  The delay is long enough for slow dashboard pages
+            # but still recovers gracefully.
+            if next_attempt >= 55:
+                self._workspace_loader_finish_tokens.pop(key, None)
+                self.end_busy_task(key)
+                return
+            QTimer.singleShot(70, lambda: _poll(next_attempt + 1, next_stable))
+
+        QTimer.singleShot(90, lambda: _poll(attempt, stable_frames))
+
+    def _workspace_widget_is_painted(self, widget: QWidget | None) -> bool:
+        if widget is None or not is_qobject_valid(widget):
+            return False
+        if not hasattr(self, "tab_widget") or not is_qobject_valid(self.tab_widget):
+            return bool(widget.isVisible() and widget.width() > 20 and widget.height() > 20)
+        if self.tab_widget.currentWidget() is not widget:
+            return False
+        if self.tab_widget.indexOf(widget) < 0:
+            return False
+        if not self.tab_widget.isVisible() or not widget.isVisible():
+            return False
+        if widget.width() < 40 or widget.height() < 40:
+            return False
+        try:
+            widget.ensurePolished()
+            widget.update()
+            self.tab_widget.update()
+        except RuntimeError:
+            return False
+        return True
 
     def _ribbon_context_label(self, context_id: str) -> str:
         context = str(context_id or "workspace")
@@ -1034,32 +1171,11 @@ class MainWindow(QMainWindow):
         return dashboard is not None and is_qobject_valid(dashboard)
 
     def _ribbon_context_needs_build(self, context_id: str) -> bool:
-        context = str(context_id or "")
-        if context == "converter":
-            return not self._dashboard_is_alive("_converter_page")
-        # File-backed seismic viewers open a file picker when no matching document
-        # exists.  Do not cover that picker with the full-page dashboard loader.
-        if context in {"seismic", "segd", "segy_viewer", "visualization"}:
-            return False
-        if context == "segy_qc":
-            return not self._is_qobject_alive(self._segy_qc_view)
-        if context == "segd_scanner":
-            return not self._dashboard_is_alive("_segd_scanner_dashboard")
-        if context == "receiver_qc":
-            return not self._dashboard_is_alive("_receiver_qc_dashboard")
-        if context == "uphole":
-            return not self._dashboard_is_alive("_uphole_dashboard")
-        if context.startswith("magnetic"):
-            return not self._dashboard_is_alive("_magnetic_dashboard")
-        if context.startswith("electrical"):
-            return not self._dashboard_is_alive("_electrical_dashboard")
-        if context.startswith("gravity"):
-            return not self._dashboard_is_alive("_gravity_dashboard")
-        if context.startswith("vibroseis"):
-            return not self._dashboard_is_alive("_vibroseis_dashboard")
-        if context.startswith("geodetic"):
-            return not self._dashboard_is_alive("_geodetic_dashboard")
-        return False
+        # Kept for older call sites. Current ribbon navigation intentionally shows
+        # the full-screen loader for every non-home tab click, even when a
+        # dashboard already exists, so users always receive immediate feedback.
+        context = str(context_id or "").strip()
+        return bool(context and context != "home")
 
     def _activate_existing_workspace(self, module_id: str) -> QWidget | None:
         """Activate an already-open document for *module_id*, regardless of the current tab."""
@@ -1363,7 +1479,7 @@ class MainWindow(QMainWindow):
             from ui.ribbon.ribbon_group_widget import RibbonGroupWidget
             widget = RibbonGroupWidget(group, self.ribbon_groups_container)
             widget.action_triggered.connect(self._on_ribbon_action)
-            widget.details_requested.connect(self._show_feature_details)
+            widget.details_requested.connect(self._update_feature_inspector)
             self.ribbon_groups_layout.addWidget(widget)
         except ImportError:
             self.log("RibbonGroupWidget not available")
@@ -1502,7 +1618,7 @@ class MainWindow(QMainWindow):
         if action_id.startswith("vibroseis_"):
             dashboard = self._vibroseis_dashboard
             if dashboard is None:
-                return action_id in {"vibroseis_open", "vibroseis_load", "vibroseis_sweep", "vibroseis_generate", "vibroseis_productivity", "vibroseis_load_vaps"}
+                return action_id in {"vibroseis_open", "vibroseis_load", "vibroseis_sweep", "vibroseis_generate", "vibroseis_productivity", "vibroseis_load_vaps", "vibroseis_signal_qc", "vibroseis_ground_force", "vibroseis_vaps_qc"}
             resolver = getattr(dashboard, "can_execute", None)
             return bool(resolver(action_id)) if callable(resolver) else True
 
@@ -1525,7 +1641,6 @@ class MainWindow(QMainWindow):
         FeatureDetailsDialog(get_feature_detail(action_id), self).exec()
 
     def _on_ribbon_action(self, action_id: str) -> None:
-        self._update_feature_inspector(action_id)
         if not self._is_action_licensed(action_id):
             self._show_purchase_required(feature_for_action(action_id), self._active_main_tab)
             return
@@ -1711,13 +1826,13 @@ class MainWindow(QMainWindow):
         elif action_id == "vibroseis_export_pilot":
             self._open_vibroseis_dashboard().export_pilot()
         elif action_id == "vibroseis_signal_qc":
-            self._open_vibroseis_dashboard().show_signal_qc()
+            dashboard = self._open_vibroseis_dashboard(); dashboard.show_signal_qc(); dashboard.run_signal_qc()
         elif action_id == "vibroseis_correlation":
             dashboard = self._open_vibroseis_dashboard(); dashboard.show_signal_qc(); dashboard.correlate_trace()
         elif action_id == "vibroseis_ground_force":
-            self._open_vibroseis_dashboard().show_ground_force()
+            dashboard = self._open_vibroseis_dashboard(); dashboard.show_ground_force(); dashboard.calculate_ground_force()
         elif action_id == "vibroseis_productivity":
-            self._open_vibroseis_dashboard().show_productivity()
+            dashboard = self._open_vibroseis_dashboard(); dashboard.show_productivity(); dashboard.calculate_productivity()
         elif action_id == "vibroseis_view_2d":
             self._open_vibroseis_dashboard().show_geospatial_view("2d")
         elif action_id == "vibroseis_view_3d":
@@ -2217,29 +2332,47 @@ class MainWindow(QMainWindow):
         if not file_path:
             return
         resolved = str(Path(file_path).resolve())
-        for index in range(self.tab_widget.count()):
-            widget = self.tab_widget.widget(index)
-            if widget is not None and widget.property("segy_viewer_file_path") == resolved:
-                self.tab_widget.setCurrentIndex(index)
-                self._set_active_module("segy_viewer")
-                qc_view = self._get_segy_qc_view()
-                if qc_view is not None and getattr(qc_view, "current_file_path", None) != Path(resolved):
-                    qc_view.set_file_path(resolved)
-                return
+        task_id = f"file-open:segy:{Path(resolved).name}"
+        self.begin_busy_task(task_id, "Opening SEG-Y File", f"Preparing {Path(resolved).name}", 5)
         try:
+            for index in range(self.tab_widget.count()):
+                widget = self.tab_widget.widget(index)
+                if widget is not None and widget.property("segy_viewer_file_path") == resolved:
+                    self.update_busy_task(task_id, 45, "Activating existing SEG-Y viewer")
+                    self.tab_widget.setCurrentIndex(index)
+                    self._set_active_module("segy_viewer")
+                    qc_view = self._get_segy_qc_view()
+                    if qc_view is not None and getattr(qc_view, "current_file_path", None) != Path(resolved):
+                        self.update_busy_task(task_id, 75, "Synchronizing SEG-Y QC workspace")
+                        qc_view.set_file_path(resolved)
+                    self.update_busy_task(task_id, 100, "SEG-Y viewer is ready")
+                    return
             from modules.seismic.segy_viewer.segy_viewer_widget import SegyViewerWidget
+            self.update_busy_task(task_id, 35, "Building SEG-Y trace viewer")
+            QApplication.processEvents()
             viewer = SegyViewerWidget(resolved, self)
             viewer.setProperty("segy_viewer_file_path", resolved)
+            self.update_busy_task(task_id, 60, "Opening SEG-Y document tab")
             index = self._add_document_tab(viewer, f"SEG-Y: {Path(resolved).name}", icon=get_icon("seg-y", color="#FFFFFF", size=15))
             self.tab_widget.setCurrentIndex(index)
             self._set_active_module("segy_viewer")
             # Keep the QC workspace synchronized so Run SEG-Y QC works immediately.
             qc_view = self._get_segy_qc_view()
             if qc_view is not None:
+                self.update_busy_task(task_id, 82, "Synchronizing SEG-Y QC workspace")
                 qc_view.set_file_path(resolved)
+            self.update_busy_task(task_id, 100, "SEG-Y file is open")
             self.log(f"Opened SEG-Y viewer: {resolved}")
         except Exception as exc:
             QMessageBox.critical(self, "SEG-Y Open Error", str(exc))
+        finally:
+            if self.has_busy_task(task_id):
+                self._finish_busy_task_after_workspace_paint(
+                    task_id,
+                    "segy_viewer",
+                    self.tab_widget.currentWidget() if hasattr(self, "tab_widget") else None,
+                    ready_message="SEG-Y file is ready",
+                )
 
     def _open_seg2_file(self) -> None:
         file_path, _ = QFileDialog.getOpenFileName(

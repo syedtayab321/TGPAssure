@@ -309,9 +309,19 @@ class SegyViewerWidget(QWidget):
         self.clip.setValue(99)
         self.clip.setSuffix(" %")
         self.clip.valueChanged.connect(self.render)
+        self.trace_density = QSpinBox()
+        self.trace_density.setRange(10, 100)
+        self.trace_density.setSingleStep(5)
+        self.trace_density.setValue(100)
+        self.trace_density.setSuffix(" %")
+        self.trace_density.setToolTip("Controls how many traces are drawn in wiggle/variable-area mode. Lower values keep dense 3D/2D SEG-Y displays readable and fast.")
+        self.trace_density.valueChanged.connect(self.render)
+        self.display_status = QLabel("Trace density 100% • all visible traces are drawn")
+        self.display_status.setWordWrap(True)
+        self.display_status.setStyleSheet("color:#3A6176;background:#F1F8FC;border:1px solid #D5E9F3;border-radius:5px;padding:5px;font-weight:700;")
         self.polarity = QCheckBox("Reverse polarity")
         self.polarity.toggled.connect(self.render)
-        for control in (self.mode, self.attribute, self.gain, self.agc_window, self.clip):
+        for control in (self.mode, self.attribute, self.gain, self.agc_window, self.clip, self.trace_density):
             control.setMinimumWidth(100)
             control.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         form.addRow("Display", self.mode)
@@ -319,8 +329,10 @@ class SegyViewerWidget(QWidget):
         form.addRow("Gain", self.gain)
         form.addRow("AGC", self.agc_window)
         form.addRow("Clip", self.clip)
+        form.addRow("Trace density", self.trace_density)
         form.addRow(self.polarity)
         layout.addWidget(display_group)
+        layout.addWidget(self.display_status)
         hint = QLabel("Use mouse wheel on the seismic panel for true trace/time zoom. Ctrl = traces only, Shift = time only.")
         hint.setWordWrap(True)
         hint.setStyleSheet("color:#657B8D;background:#F6FAFC;border:1px solid #E1E9EF;border-radius:5px;padding:6px;")
@@ -473,9 +485,16 @@ class SegyViewerWidget(QWidget):
             self.open_file(path)
 
     def open_file(self, path: str | Path) -> None:
+        main_window = self.window()
+        source = Path(path)
+        task_id = f"segy-viewer:file:{source.name}"
+        if hasattr(main_window, "begin_busy_task"):
+            main_window.begin_busy_task(task_id, "Opening SEG-Y File", f"Reading {source.name}", 10)
         try:
-            self.file_path = Path(path)
+            self.file_path = source
             self.reader = SegyReader(self.file_path)
+            if hasattr(main_window, "update_busy_task"):
+                main_window.update_busy_task(task_id, 35, "Scanning SEG-Y trace headers")
             self.index = self.reader.scan_trace_headers()
             if self.index.trace_count <= 0:
                 raise ValueError("SEG-Y contains no complete traces")
@@ -485,6 +504,8 @@ class SegyViewerWidget(QWidget):
             if np.any(intervals <= 0):
                 raise ValueError("SEG-Y does not contain a valid sample interval")
             self._effective_intervals_us = intervals
+            if hasattr(main_window, "update_busy_task"):
+                main_window.update_busy_task(task_id, 62, "Building display time grid and trace controls")
             self.time_grid = build_time_grid(self.index.sample_counts, intervals, self.index.delay_time_ms)
             n = self.index.trace_count
             self.file_label.setText(self.file_path.name)
@@ -500,9 +521,16 @@ class SegyViewerWidget(QWidget):
             self.send.setMaximum(self.time_grid.sample_count)
             self._populate_headers()
             self._populate_file_info()
+            if hasattr(main_window, "update_busy_task"):
+                main_window.update_busy_task(task_id, 88, "Rendering initial SEG-Y view")
             self.fit()
+            if hasattr(main_window, "update_busy_task"):
+                main_window.update_busy_task(task_id, 100, "SEG-Y file is ready")
         except Exception as exc:
             QMessageBox.critical(self, "SEG-Y Open Error", str(exc))
+        finally:
+            if hasattr(main_window, "end_busy_task"):
+                main_window.end_busy_task(task_id)
 
     def _populate_file_info(self) -> None:
         if self.reader is None or self.index is None or self.time_grid is None:
@@ -665,12 +693,27 @@ class SegyViewerWidget(QWidget):
                     rgb[..., 2][valid] = blue.astype(np.uint8)
                 raster = QImage(rgb.data, width, height, 3 * width, QImage.Format.Format_RGB888).copy()
                 painter.drawImage(0, 0, raster)
+                if hasattr(self, "display_status"):
+                    self.display_status.setText(
+                        f"Density/raster view • {nt:,} visible traces × {ns:,} samples • "
+                        f"window traces {self._t0 + 1:,}-{self._t1:,}, samples {self._s0 + 1:,}-{self._s1:,}"
+                    )
             else:
                 spacing = width / max(1, nt)
                 scale = 0.45 * spacing
-                painter.setRenderHint(QPainter.RenderHint.Antialiasing, nt < 350)
-                painter.setPen(QPen(Qt.GlobalColor.black, 0 if nt > 450 else 1))
-                for i, trace in enumerate(data):
+                density_pct = int(self.trace_density.value()) if hasattr(self, "trace_density") else 100
+                target_traces = max(1, int(round(nt * max(10, min(100, density_pct)) / 100.0)))
+                draw_step = max(1, int(np.ceil(nt / target_traces)))
+                drawn_traces = int(np.ceil(nt / draw_step))
+                if hasattr(self, "display_status"):
+                    self.display_status.setText(
+                        f"Trace density {density_pct}% • drawing {drawn_traces:,} of {nt:,} visible traces • "
+                        f"window traces {self._t0 + 1:,}-{self._t1:,}, samples {self._s0 + 1:,}-{self._s1:,}"
+                    )
+                painter.setRenderHint(QPainter.RenderHint.Antialiasing, drawn_traces < 350)
+                painter.setPen(QPen(Qt.GlobalColor.black, 0 if drawn_traces > 450 else 1))
+                for i in range(0, nt, draw_step):
+                    trace = data[i]
                     valid = np.isfinite(trace)
                     if np.count_nonzero(valid) < 2:
                         continue
@@ -703,6 +746,7 @@ class SegyViewerWidget(QWidget):
                             painter.fillPath(fill, QColor(15, 25, 35, 105))
             painter.end()
             self.canvas.set_image(image, self._t0, self._t1, self._s0, self._s1)
+            self.canvas.repaint()
         except Exception as exc:
             QMessageBox.warning(self, "SEG-Y Render", str(exc))
 
@@ -796,5 +840,15 @@ class SegyViewerWidget(QWidget):
             str(self.file_path.with_suffix(".png")),
             "PNG (*.png);;JPEG (*.jpg)",
         )
-        if path and not self.canvas._image.save(path):
+        if not path:
+            return
+        output = Path(path)
+        if not output.suffix:
+            output = output.with_suffix(".jpg" if "JPEG" in _ else ".png")
+        if output.suffix.lower() in {".jpg", ".jpeg"}:
+            ok = self.canvas._image.save(str(output), "JPEG")
+        else:
+            output = output.with_suffix(".png")
+            ok = self.canvas._image.save(str(output), "PNG")
+        if not ok:
             QMessageBox.warning(self, "Export", "Could not save image")

@@ -3,6 +3,9 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Iterable
 
+import numpy as np
+import pyqtgraph as pg
+
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -423,6 +426,7 @@ class MagneticImportDialog(QDialog):
             source_table.setSpan(0, 0, 1, max(1, len(headers)))
         source_layout.addWidget(source_table, 1)
         preview_tabs.addTab(source_page, "Source Values")
+        preview_tabs.addTab(self._build_graph_preview_tab(), "Import Graphs")
 
         layout.addWidget(preview_tabs, 1)
         hint = QLabel(
@@ -431,6 +435,63 @@ class MagneticImportDialog(QDialog):
         hint.setWordWrap(True)
         hint.setObjectName("mutedLabel")
         layout.addWidget(hint)
+        return page
+
+    def _build_graph_preview_tab(self) -> QWidget:
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(6, 6, 6, 6)
+        layout.setSpacing(6)
+        plot = pg.PlotWidget(background="w")
+        plot.showGrid(x=True, y=True, alpha=0.18)
+        plot.setLabel("bottom", "Preview row")
+        plot.setLabel("left", "Detected numeric value")
+        plot.setTitle("Magnetic import preview — mapped numeric channels")
+
+        preview_rows = self.inspection.get("preview") if isinstance(self.inspection.get("preview"), list) else []
+        mapping = self.inspection.get("mapping") if isinstance(self.inspection.get("mapping"), dict) else {}
+        candidate_columns: list[tuple[str, str]] = []
+        for canonical, source in mapping.items():
+            label = str(canonical).replace("_", " ").title()
+            candidate_columns.append((label, str(source)))
+        if not candidate_columns and preview_rows and isinstance(preview_rows[0], dict):
+            for key in list(preview_rows[0].keys())[:10]:
+                candidate_columns.append((str(key), str(key)))
+
+        plotted = 0
+        palette = ["#0A86C7", "#15945C", "#D97706", "#7857B6", "#C2414A"]
+        x_axis = np.arange(len(preview_rows), dtype=float)
+        for label, source_key in candidate_columns:
+            values: list[float] = []
+            for row in preview_rows:
+                try:
+                    value = float(str(row.get(source_key, "")).replace(",", "")) if isinstance(row, dict) else np.nan
+                except Exception:
+                    value = np.nan
+                values.append(value)
+            data = np.asarray(values, dtype=float)
+            finite = np.isfinite(data)
+            if np.count_nonzero(finite) < 2:
+                continue
+            y = data.copy()
+            finite_values = y[finite]
+            scale = float(np.nanpercentile(np.abs(finite_values - np.nanmedian(finite_values)), 95))
+            if np.isfinite(scale) and scale > 0:
+                y = (y - float(np.nanmedian(finite_values))) / scale
+            plot.plot(x_axis[finite], y[finite], pen=pg.mkPen(palette[plotted % len(palette)], width=2), name=label)
+            plotted += 1
+            if plotted >= 5:
+                break
+        if plotted == 0:
+            plot.setTitle("No numeric preview columns available for graphing; import table is still usable")
+        else:
+            plot.addLegend(offset=(8, 8))
+        layout.addWidget(plot, 1)
+
+        help_label = QLabel("Graphs are normalized preview curves only. They help identify spikes, dead columns and obvious mapping problems before import.")
+        help_label.setObjectName("mutedLabel")
+        help_label.setWordWrap(True)
+        layout.addWidget(help_label)
         return page
 
     def _build_options_tab(self) -> QWidget:

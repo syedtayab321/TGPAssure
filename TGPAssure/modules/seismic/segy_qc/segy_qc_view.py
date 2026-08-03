@@ -4,8 +4,8 @@ import json
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from PySide6.QtCore import QEvent, QSize, Qt, Signal
-from PySide6.QtGui import QColor, QFont, QResizeEvent
+from PySide6.QtCore import QEvent, QRectF, QSize, Qt, Signal
+from PySide6.QtGui import QColor, QFont, QPainter, QPen, QResizeEvent
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
@@ -67,6 +67,193 @@ SEVERITY_COLORS = {
     "warning": ("#7C2D12", "#FFEDD5"),
     "info": ("#075985", "#E0F2FE"),
 }
+
+
+class _SegyQcChartPanel(QWidget):
+    """Compact native-Qt SEG-Y QC graphics panel.
+
+    It avoids heavyweight plotting dependencies, updates from the QC stage table,
+    and gives the operator visual status, score and finding distributions.
+    """
+
+    STATUS_FILL = {
+        "pass": "#16A34A",
+        "completed": "#16A34A",
+        "warn": "#F59E0B",
+        "warning": "#F59E0B",
+        "fail": "#DC2626",
+        "failed": "#DC2626",
+        "running": "#0284C7",
+        "pending": "#94A3B8",
+        "cancelled": "#64748B",
+    }
+
+    def __init__(self, parent: Optional[QWidget] = None) -> None:
+        super().__init__(parent)
+        self._summary: Dict[str, Any] = {}
+        self._stages: List[Dict[str, Any]] = []
+        self._findings: List[Dict[str, Any]] = []
+        self.setMinimumHeight(280)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+
+    def set_data(
+        self,
+        summary: Dict[str, Any] | None,
+        stages: List[Dict[str, Any]] | None,
+        findings: List[Dict[str, Any]] | None,
+    ) -> None:
+        self._summary = dict(summary or {})
+        self._stages = list(stages or [])
+        self._findings = list(findings or [])
+        self.update()
+
+    def paintEvent(self, event: QEvent) -> None:  # type: ignore[override]
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        painter.fillRect(self.rect(), QColor("#F6FAFC"))
+
+        area = QRectF(self.rect()).adjusted(12, 12, -12, -12)
+        if not self._stages:
+            self._draw_empty(painter, area)
+            painter.end()
+            return
+
+        gap = 12.0
+        top_h = max(115.0, min(170.0, area.height() * 0.38))
+        top_left = QRectF(area.left(), area.top(), (area.width() - gap) * 0.58, top_h)
+        top_right = QRectF(top_left.right() + gap, area.top(), area.right() - top_left.right() - gap, top_h)
+        bottom = QRectF(area.left(), top_left.bottom() + gap, area.width(), area.bottom() - top_left.bottom() - gap)
+
+        self._draw_score_bars(painter, top_left)
+        self._draw_status_summary(painter, top_right)
+        self._draw_findings_bars(painter, bottom)
+        painter.end()
+
+    def _draw_empty(self, painter: QPainter, rect: QRectF) -> None:
+        self._draw_card(painter, rect, "QC Graphs")
+        painter.setPen(QColor("#64748B"))
+        font = painter.font()
+        font.setPointSize(10)
+        font.setBold(True)
+        painter.setFont(font)
+        painter.drawText(rect.adjusted(18, 42, -18, -18), Qt.AlignLeft | Qt.AlignTop, "Run or load a SEG-Y QC result to display score, status and finding graphs.")
+
+    def _draw_card(self, painter: QPainter, rect: QRectF, title: str) -> QRectF:
+        painter.setPen(QPen(QColor("#D5E1EA"), 1))
+        painter.setBrush(QColor("#FFFFFF"))
+        painter.drawRoundedRect(rect, 8, 8)
+        painter.setPen(QColor("#17364B"))
+        font = painter.font()
+        font.setPointSize(9)
+        font.setBold(True)
+        painter.setFont(font)
+        painter.drawText(rect.adjusted(12, 8, -12, -8), Qt.AlignLeft | Qt.AlignTop, title)
+        return rect.adjusted(12, 34, -12, -12)
+
+    @staticmethod
+    def _safe_float(value: Any, default: float = 0.0) -> float:
+        try:
+            text = str(value).strip()
+            if text in ("", "—", "-"):
+                return default
+            return float(text)
+        except Exception:
+            return default
+
+    def _draw_score_bars(self, painter: QPainter, rect: QRectF) -> None:
+        inner = self._draw_card(painter, rect, "Stage QC Score")
+        values = [max(0.0, min(100.0, self._safe_float(stage.get("score")))) for stage in self._stages]
+        if not values:
+            return
+        bar_area = inner.adjusted(2, 8, -2, -22)
+        count = max(1, len(values))
+        bar_gap = 3.0
+        bar_w = max(5.0, (bar_area.width() - bar_gap * (count - 1)) / count)
+        painter.setPen(QPen(QColor("#E2E8F0"), 1))
+        for frac in (0.25, 0.50, 0.75, 1.0):
+            y = bar_area.bottom() - bar_area.height() * frac
+            painter.drawLine(int(bar_area.left()), int(y), int(bar_area.right()), int(y))
+        for idx, stage in enumerate(self._stages):
+            score = values[idx]
+            status = str(stage.get("status") or "pending").lower()
+            fill = QColor(self.STATUS_FILL.get(status, "#0284C7"))
+            x = bar_area.left() + idx * (bar_w + bar_gap)
+            h = max(2.0, bar_area.height() * (score / 100.0))
+            brect = QRectF(x, bar_area.bottom() - h, bar_w, h)
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(fill)
+            painter.drawRoundedRect(brect, 2.5, 2.5)
+        painter.setPen(QColor("#64748B"))
+        font = painter.font()
+        font.setPointSize(7)
+        font.setBold(False)
+        painter.setFont(font)
+        painter.drawText(inner.adjusted(0, inner.height() - 16, 0, 0), Qt.AlignLeft | Qt.AlignBottom, "Each bar = one QC stage, scaled 0–100")
+
+    def _draw_status_summary(self, painter: QPainter, rect: QRectF) -> None:
+        inner = self._draw_card(painter, rect, "Run Status Distribution")
+        counts: Dict[str, int] = {}
+        for stage in self._stages:
+            key = str(stage.get("status") or "pending").lower()
+            counts[key] = counts.get(key, 0) + 1
+        total = max(1, sum(counts.values()))
+        pill = QRectF(inner.left(), inner.top() + 8, inner.width(), 22)
+        x = pill.left()
+        painter.setPen(Qt.NoPen)
+        for key, count in counts.items():
+            width = max(2.0, pill.width() * count / total)
+            painter.setBrush(QColor(self.STATUS_FILL.get(key, "#94A3B8")))
+            painter.drawRoundedRect(QRectF(x, pill.top(), width, pill.height()), 8, 8)
+            x += width
+        painter.setPen(QColor("#17364B"))
+        font = painter.font()
+        font.setPointSize(8)
+        font.setBold(True)
+        painter.setFont(font)
+        y = pill.bottom() + 20
+        for key in sorted(counts):
+            color = QColor(self.STATUS_FILL.get(key, "#94A3B8"))
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(color)
+            painter.drawRoundedRect(QRectF(inner.left(), y - 10, 10, 10), 3, 3)
+            painter.setPen(QColor("#334155"))
+            painter.drawText(QRectF(inner.left() + 16, y - 14, inner.width() - 16, 18), Qt.AlignLeft | Qt.AlignVCenter, f"{key.upper()}: {counts[key]}")
+            y += 18
+
+    def _draw_findings_bars(self, painter: QPainter, rect: QRectF) -> None:
+        inner = self._draw_card(painter, rect, "Findings by QC Stage")
+        rows = []
+        for stage in self._stages:
+            value = int(self._safe_float(stage.get("findings"), 0.0))
+            if value > 0:
+                rows.append((str(stage.get("name") or "Stage"), value, str(stage.get("status") or "pending").lower()))
+        if not rows:
+            painter.setPen(QColor("#166534"))
+            font = painter.font()
+            font.setPointSize(10)
+            font.setBold(True)
+            painter.setFont(font)
+            painter.drawText(inner, Qt.AlignCenter, "No findings recorded for the current result.")
+            return
+        rows = rows[:8]
+        max_value = max(value for _name, value, _status in rows)
+        row_h = max(18.0, min(26.0, (inner.height() - 4) / max(1, len(rows))))
+        label_w = min(240.0, inner.width() * 0.34)
+        for idx, (name, value, status) in enumerate(rows):
+            y = inner.top() + idx * row_h
+            painter.setPen(QColor("#334155"))
+            font = painter.font()
+            font.setPointSize(7)
+            font.setBold(True)
+            painter.setFont(font)
+            painter.drawText(QRectF(inner.left(), y, label_w - 8, row_h), Qt.AlignRight | Qt.AlignVCenter, name[:34])
+            bar_left = inner.left() + label_w
+            bar_w = (inner.width() - label_w - 38) * (value / max_value)
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(QColor(self.STATUS_FILL.get(status, "#0284C7")))
+            painter.drawRoundedRect(QRectF(bar_left, y + 4, max(3.0, bar_w), row_h - 8), 4, 4)
+            painter.setPen(QColor("#0F172A"))
+            painter.drawText(QRectF(bar_left + bar_w + 5, y, 32, row_h), Qt.AlignLeft | Qt.AlignVCenter, str(value))
 
 
 
@@ -408,8 +595,8 @@ class SegyQcView(QWidget):
     def _build_sidebar_navigation(self) -> QWidget:
         sidebar = QFrame(self)
         sidebar.setObjectName("segySidebar")
-        sidebar.setMinimumWidth(142)
-        sidebar.setMaximumWidth(168)
+        sidebar.setMinimumWidth(170)
+        sidebar.setMaximumWidth(205)
         layout = QVBoxLayout(sidebar)
         layout.setContentsMargins(7, 8, 7, 8)
         layout.setSpacing(5)
@@ -423,11 +610,11 @@ class SegyQcView(QWidget):
         self.nav_buttons: List[QPushButton] = []
 
         nav_items = (
-            ("File", "Load & inspect"),
+            ("File", "Load && inspect"),
             ("Setup", "Profile settings"),
             ("Run", "QC workflow"),
             ("Results", "Stage metrics"),
-            ("Findings", "Issues & actions"),
+            ("Findings", "Issues && actions"),
             ("History", "Previous runs"),
             ("Headers", "Text / binary"),
         )
@@ -435,6 +622,8 @@ class SegyQcView(QWidget):
             button = QPushButton(f"{title_text}\n{subtitle_text}")
             button.setObjectName("navButton")
             button.setCheckable(True)
+            button.setMinimumHeight(43)
+            button.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
             button.setCursor(Qt.PointingHandCursor)
             button.clicked.connect(lambda _checked=False, page_index=index: self.main_tabs.setCurrentIndex(page_index))
             self.nav_button_group.addButton(button, index)
@@ -777,9 +966,9 @@ class SegyQcView(QWidget):
 
         heading_box = QVBoxLayout()
         heading_box.setSpacing(0)
-        heading = QLabel("QC Run Summary")
+        heading = QLabel("SEG-Y QC Results")
         heading.setObjectName("sectionTitle")
-        hint = QLabel("Select a stage to inspect its detailed metrics.")
+        hint = QLabel("Review run summary, stage table, QC graphs and selected-stage metrics in separate tabs.")
         hint.setObjectName("mutedLabel")
         heading_box.addWidget(heading)
         heading_box.addWidget(hint)
@@ -807,10 +996,30 @@ class SegyQcView(QWidget):
         bar_layout.addWidget(self.results_xlsx_button)
         layout.addWidget(top_bar)
 
+        self.results_subtabs = QTabWidget()
+        self.results_subtabs.setObjectName("subTabs")
+        self.results_subtabs.setDocumentMode(True)
+        self.results_subtabs.tabBar().setExpanding(False)
+        self.results_subtabs.tabBar().setUsesScrollButtons(True)
+        self.results_subtabs.tabBar().setElideMode(Qt.ElideRight)
+
+        self.results_subtabs.addTab(self._build_results_overview_page(), "Overview / Stats")
+        self.results_subtabs.addTab(self._build_stage_results_page(), "Stage Table")
+        self.results_subtabs.addTab(self._build_qc_graphs_page(), "QC Graphs")
+        self.results_subtabs.addTab(self._build_metrics_page(), "Stage Metrics")
+        layout.addWidget(self.results_subtabs, 1)
+        return page
+
+    def _build_results_overview_page(self) -> QWidget:
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(7, 7, 7, 7)
+        layout.setSpacing(7)
+
         self.results_empty_state = self._build_empty_state(
             "No QC run loaded yet",
             "Run the SEG-Y QC pipeline or load a previous run. This area will then show stage scores, findings, metrics and report status.",
-            ["Stage table", "Selected-stage metrics", "Findings and actions", "PDF/XLSX export"],
+            ["Run summary", "Stage table", "QC graphs", "PDF/XLSX export"],
         )
         layout.addWidget(self.results_empty_state)
 
@@ -845,19 +1054,26 @@ class SegyQcView(QWidget):
             self._summary_cards.append(card)
 
         layout.addWidget(self.summary_grid_widget)
+        layout.addStretch(1)
+        return page
 
-        self.results_subtabs = QTabWidget()
-        self.results_subtabs.setObjectName("subTabs")
-        self.results_subtabs.setDocumentMode(True)
-        self.results_subtabs.addTab(self._build_stage_results_page(), "Stage Results")
-        self.results_subtabs.addTab(self._build_metrics_page(), "Selected Stage Metrics")
-        layout.addWidget(self.results_subtabs, 1)
+    def _build_qc_graphs_page(self) -> QWidget:
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(0, 8, 0, 0)
+        self.qc_graphs_panel = _SegyQcChartPanel(page)
+        layout.addWidget(self.qc_graphs_panel, 1)
         return page
 
     def _build_stage_results_page(self) -> QWidget:
         page = QWidget()
         layout = QVBoxLayout(page)
         layout.setContentsMargins(0, 8, 0, 0)
+        layout.setSpacing(6)
+
+        note = QLabel("Stage-by-stage QC status, score, findings and processing duration.")
+        note.setObjectName("mutedLabel")
+        layout.addWidget(note)
 
         self.stage_table = self._create_table(0, 7)
         self.stage_table.setHorizontalHeaderLabels(
@@ -940,8 +1156,9 @@ class SegyQcView(QWidget):
         self.findings_subtabs = QTabWidget()
         self.findings_subtabs.setObjectName("subTabs")
         self.findings_subtabs.setDocumentMode(True)
-        self.findings_subtabs.tabBar().setExpanding(True)
-        self.findings_subtabs.tabBar().setUsesScrollButtons(False)
+        self.findings_subtabs.tabBar().setExpanding(False)
+        self.findings_subtabs.tabBar().setUsesScrollButtons(True)
+        self.findings_subtabs.tabBar().setElideMode(Qt.ElideRight)
 
         table_page = QWidget()
         table_layout = QVBoxLayout(table_page)
@@ -1090,6 +1307,9 @@ class SegyQcView(QWidget):
         self.headers_subtabs = QTabWidget()
         self.headers_subtabs.setObjectName("subTabs")
         self.headers_subtabs.setDocumentMode(True)
+        self.headers_subtabs.tabBar().setExpanding(False)
+        self.headers_subtabs.tabBar().setUsesScrollButtons(True)
+        self.headers_subtabs.tabBar().setElideMode(Qt.ElideRight)
 
         text_page = QWidget()
         text_layout = QVBoxLayout(text_page)
@@ -1278,9 +1498,9 @@ class SegyQcView(QWidget):
                 color: #1E3C52;
                 border: 0px;
                 border-radius: 6px;
-                min-height: 34px;
-                max-height: 38px;
-                padding: 3px 8px;
+                min-height: 42px;
+                max-height: 48px;
+                padding: 4px 9px;
                 text-align: left;
                 font-size: 8.0pt;
                 font-weight: 800;
@@ -1305,14 +1525,9 @@ class SegyQcView(QWidget):
                 margin: 0px;
                 padding: 0px;
             }
-            QTabWidget#segyMainTabs QTabBar::tab {
-                min-height: 0px;
-                max-height: 0px;
-                width: 0px;
-                padding: 0px;
-                margin: 0px;
-                border: 0px;
-            }
+            /* Main workflow tabs are controlled by the left navigation.
+               Do not style descendant QTabBars here: SEG-Y result/header
+               sub-tabs live inside this widget and must remain visible. */
 
             QTabWidget#subTabs::pane {
                 border: 1px solid #D5E1EA;
@@ -1320,14 +1535,20 @@ class SegyQcView(QWidget):
                 border-radius: 5px;
                 top: -1px;
             }
+            QTabWidget#subTabs QTabBar {
+                min-height: 34px;
+                max-height: 36px;
+                background: transparent;
+            }
             QTabWidget#subTabs QTabBar::tab {
                 background: #EAF0F4;
                 color: #3D5668;
                 border: 1px solid #D4DFE7;
                 border-bottom: 0px;
-                min-height: 22px;
-                padding: 4px 9px;
-                margin-right: 1px;
+                min-height: 26px;
+                min-width: 118px;
+                padding: 5px 12px;
+                margin-right: 2px;
                 font-size: 8.0pt;
                 font-weight: 700;
             }
@@ -1859,7 +2080,7 @@ class SegyQcView(QWidget):
             QMessageBox.warning(self, "SEG-Y QC", f"Unknown QC stage: {stage_key}")
             return
         self.main_tabs.setCurrentWidget(self.results_tab)
-        self.results_subtabs.setCurrentIndex(0)
+        self.results_subtabs.setCurrentIndex(1)
         self.stage_table.selectRow(row)
         self.stage_table.scrollToItem(self.stage_table.item(row, 1))
 
@@ -1939,6 +2160,7 @@ class SegyQcView(QWidget):
             self.stage_table.setItem(row, 4, QTableWidgetItem("0"))
             self.stage_table.setItem(row, 5, QTableWidgetItem("—"))
             self.stage_table.setItem(row, 6, QTableWidgetItem("Waiting"))
+        self._update_qc_graphs()
 
     def _on_run_started(self, run_uuid: str, job_id: int) -> None:
         self._current_run_uuid = run_uuid
@@ -1970,7 +2192,7 @@ class SegyQcView(QWidget):
         if row is not None:
             self._set_stage_status(row, "running")
             self.stage_table.selectRow(row)
-            self.results_subtabs.setCurrentIndex(0)
+            self.results_subtabs.setCurrentIndex(1)
 
     def _on_stage_completed(
         self,
@@ -2090,7 +2312,7 @@ class SegyQcView(QWidget):
         self.refresh_findings()
         self.refresh_history()
         self.main_tabs.setCurrentWidget(self.results_tab)
-        self.results_subtabs.setCurrentIndex(0)
+        self.results_subtabs.setCurrentIndex(2)
 
     def _on_run_failed(self, run_uuid: str, error: str) -> None:
         self.run_button.setEnabled(True)
@@ -2176,8 +2398,46 @@ class SegyQcView(QWidget):
         loaded_result = str(run.get("overall_result", "pending"))
         self._set_report_actions_enabled(True)
         self._set_status_badge(f"LOADED: {loaded_result.upper()}", loaded_result)
+        self._update_qc_graphs()
         self.main_tabs.setCurrentWidget(self.results_tab)
-        self.results_subtabs.setCurrentIndex(0)
+        self.results_subtabs.setCurrentIndex(2)
+
+    def _stage_graph_records(self) -> List[Dict[str, Any]]:
+        records: List[Dict[str, Any]] = []
+        table = getattr(self, "stage_table", None)
+        if table is None:
+            return records
+        for row in range(table.rowCount()):
+            records.append(
+                {
+                    "name": self._table_text(table, row, 1),
+                    "status": self._table_text(table, row, 2).lower() or "pending",
+                    "score": self._table_text(table, row, 3),
+                    "findings": self._table_text(table, row, 4),
+                    "duration": self._table_text(table, row, 5),
+                    "summary": self._table_text(table, row, 6),
+                }
+            )
+        return records
+
+    @staticmethod
+    def _table_text(table: QTableWidget, row: int, column: int) -> str:
+        item = table.item(row, column)
+        return "" if item is None else item.text()
+
+    def _current_summary_snapshot(self) -> Dict[str, Any]:
+        labels = getattr(self, "summary_labels", {})
+        return {key: label.text() for key, label in labels.items()}
+
+    def _update_qc_graphs(self) -> None:
+        panel = getattr(self, "qc_graphs_panel", None)
+        if panel is None:
+            return
+        panel.set_data(
+            self._current_summary_snapshot(),
+            self._stage_graph_records(),
+            getattr(self, "_findings", []),
+        )
 
     def _update_summary(self, summary: Dict[str, Any]) -> None:
         result = str(
@@ -2203,6 +2463,7 @@ class SegyQcView(QWidget):
             f"color:{foreground};background:{background};"
             "border-radius:5px;padding:2px 6px;font-size:18px;font-weight:700;"
         )
+        self._update_qc_graphs()
 
     def show_results(self) -> None:
         if not self._current_run_uuid:
@@ -2214,6 +2475,7 @@ class SegyQcView(QWidget):
                 if hasattr(self, "results_empty_state"):
                     self.results_empty_state.setVisible(True)
                 self.main_tabs.setCurrentWidget(self.results_tab)
+                self.results_subtabs.setCurrentIndex(0)
                 self.progress_message.setText("No QC result available yet")
                 return
             self.controller.load_run(runs[0]["run_uuid"])
@@ -2241,6 +2503,7 @@ class SegyQcView(QWidget):
         self.summary_labels["unresolved"].setText(
             str(sum(not bool(item.get("is_resolved")) for item in all_findings))
         )
+        self._update_qc_graphs()
 
     def _populate_findings(self, findings: List[Dict[str, Any]]) -> None:
         self.findings_table.setRowCount(len(findings))
@@ -2290,6 +2553,7 @@ class SegyQcView(QWidget):
             self.findings_table.selectRow(0)
         else:
             self._clear_finding_detail()
+        self._update_qc_graphs()
 
     @staticmethod
     def _context_trace(context: Dict[str, Any]) -> str:
@@ -2556,6 +2820,7 @@ class SegyQcView(QWidget):
         for row in range(self.stage_table.rowCount()):
             if self.stage_table.item(row, 2) not in self._stage_items.values():
                 self._set_stage_status(row, "pending")
+        self._update_qc_graphs()
 
     def request_report(self, format_type: str) -> None:
         if not self._current_run_uuid:
@@ -2644,9 +2909,15 @@ class SegyQcView(QWidget):
         self._reflow_summary_cards(mode)
         self._reflow_toolbar_controls(mode)
 
-        self.main_tabs.tabBar().setExpanding(True)
-        self.main_tabs.tabBar().setUsesScrollButtons(False)
+        self.main_tabs.tabBar().setExpanding(False)
+        self.main_tabs.tabBar().setUsesScrollButtons(True)
         self.main_tabs.tabBar().setElideMode(Qt.ElideRight)
+        for tab_widget_name in ("results_subtabs", "findings_subtabs", "headers_subtabs"):
+            tab_widget = getattr(self, tab_widget_name, None)
+            if tab_widget is not None:
+                tab_widget.tabBar().setExpanding(False)
+                tab_widget.tabBar().setUsesScrollButtons(True)
+                tab_widget.tabBar().setElideMode(Qt.ElideRight)
 
         compact_rows = 21 if height < 610 else 23
         for table in (

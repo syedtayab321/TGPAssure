@@ -13,6 +13,13 @@ datas = [
     (str(project_root / "migrations"), "migrations"),
 ]
 
+# Bundle build-time environment configuration into the one-file EXE.
+# The runtime loader reads these files from sys._MEIPASS after extraction.
+for env_name in (".env", ".env.local"):
+    env_file = project_root / env_name
+    if env_file.is_file():
+        datas.append((str(env_file), "."))
+
 resources_dir = project_root / "resources"
 if resources_dir.is_dir():
     datas.append((str(resources_dir), "resources"))
