@@ -177,17 +177,51 @@ class SpreadCanvas(QWidget):
         self._slice_values = values
         vals = np.array([v for v in values.values() if np.isfinite(v)], dtype=float)
         if vals.size:
-            lo, hi = float(np.nanmin(vals)), float(np.nanmax(vals))
-            if abs(hi - lo) < 1e-12:
-                hi = lo + 1.0
-            self._slice_minmax = (lo, hi)
+            # Spread peak scaling like the legacy viewer: one scale is used for
+            # the full row/spread.  This keeps the row green overall and only
+            # paints narrow colored clips where the selected sample/frequency is
+            # actually stronger than the spread background.
+            abs_vals = np.abs(vals)
+            scale = float(np.nanpercentile(abs_vals, 98)) if abs_vals.size else 1.0
+            if not np.isfinite(scale) or scale < 1e-12:
+                scale = float(np.nanmax(abs_vals)) if abs_vals.size else 1.0
+            if not np.isfinite(scale) or scale < 1e-12:
+                scale = 1.0
+            self._slice_minmax = (-scale, scale)
         else:
-            self._slice_minmax = (0.0, 1.0)
+            self._slice_minmax = (-1.0, 1.0)
         self.update()
 
     def set_cursor_position(self, frac: float) -> None:
         self._cursor_frac = max(0.0, min(1.0, float(frac)))
         self.update()
+
+    def _slice_clip_color(self, value: Any) -> QColor:
+        """Legacy-like T/F slice color: green base, only stronger values become clips."""
+        try:
+            v = float(value)
+        except Exception:
+            return QColor("#1DFF00")
+        if not np.isfinite(v):
+            return QColor("#1DFF00")
+        lo, hi = self._slice_minmax
+        scale = max(abs(float(lo)), abs(float(hi)), 1e-12)
+        ratio = max(-1.0, min(1.0, v / scale))
+        mag = abs(ratio)
+        # Most traces must remain green like the old 408 animation.
+        if mag < 0.18:
+            return QColor("#1DFF00")
+        if ratio < 0:
+            if mag >= 0.72:
+                return QColor("#103BFF")
+            if mag >= 0.42:
+                return QColor("#00D9FF")
+            return QColor("#12D96C")
+        if mag >= 0.72:
+            return QColor("#FF1A12")
+        if mag >= 0.42:
+            return QColor("#FFB000")
+        return QColor("#FFFF00")
 
     def _metric_color(self, mode: str, row: dict[str, Any]) -> QColor:
         def f(v: Any) -> float | None:
@@ -228,11 +262,7 @@ class SpreadCanvas(QWidget):
             frac = (v - lo) / (hi - lo)
             return self.SLICE_COLORS[min(len(self.SLICE_COLORS)-1, max(0, int(frac * len(self.SLICE_COLORS))))]
         if mode in ("TSlice", "FSlice"):
-            v = f(self._slice_values.get(int(row.get("index", 0))))
-            if v is None: return QColor("#E0E0E0")
-            lo, hi = self._slice_minmax
-            frac = (v - lo) / max(hi - lo, 1e-12)
-            return self.SLICE_COLORS[min(len(self.SLICE_COLORS)-1, max(0, int(frac * len(self.SLICE_COLORS))))]
+            return self._slice_clip_color(self._slice_values.get(int(row.get("index", 0))))
         return QColor("#C8C8C8")
 
     def _legend_items(self) -> list[tuple[str, QColor]]:
@@ -243,7 +273,7 @@ class SpreadCanvas(QWidget):
         if self._mode == "Leakage":
             return [(label, QColor(color)) for label, color in self.LEAK_LEGEND]
         if self._mode in ("TSlice", "FSlice"):
-            return [("Low", self.SLICE_COLORS[0]), ("Mid", self.SLICE_COLORS[2]), ("High", self.SLICE_COLORS[4]), ("Peak", self.SLICE_COLORS[-1])]
+            return [("Base", QColor("#1DFF00")), ("Neg Clip", QColor("#103BFF")), ("Mid Clip", QColor("#FFB000")), ("Peak Clip", QColor("#FF1A12"))]
         return [("Low", self.SLICE_COLORS[0]), ("Normal", self.SLICE_COLORS[2]), ("High", self.SLICE_COLORS[-1])]
 
     def paintEvent(self, event: Any) -> None:
@@ -286,13 +316,31 @@ class SpreadCanvas(QWidget):
             xs = [plot.left() + ((float(r.get("point", r.get("index", 0) + 1)) - pmin) / (pmax - pmin)) * plot.width() for r in row_group]
             painter.setPen(QColor("#111"))
             painter.drawText(QRectF(4, yy - 11, plot.left() - 12, 22), Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter, f"{line:g}")
-            for j, row in enumerate(row_group):
-                left = plot.left() if j == 0 else (xs[j-1] + xs[j]) / 2.0
-                right = plot.right() if j == len(xs) - 1 else (xs[j] + xs[j+1]) / 2.0
-                if right < left:
-                    left, right = right, left
-                color = self._metric_color(self._mode, row)
-                painter.fillRect(QRectF(left, yy - bar_h / 2, max(1.0, right - left), bar_h), color)
+            if self._mode in ("TSlice", "FSlice"):
+                # Legacy behaviour: the full receiver row remains the base QC
+                # colour (normally green).  The animated slice only appears as
+                # small narrow colored clips at individual receiver positions.
+                base_status = "None"
+                non_none = [str(r.get("status", "None")) for r in row_group if str(r.get("status", "None")) not in ("None", "Normal", "Auxiliary")]
+                if non_none:
+                    base_status = non_none[0]
+                base_color = self.ERROR_COLORS.get(base_status, self.ERROR_COLORS["None"])
+                painter.fillRect(QRectF(plot.left(), yy - bar_h / 2, plot.width(), bar_h), base_color)
+                clip_w = max(2.0, min(5.0, plot.width() / max(160.0, len(row_group) * 1.8)))
+                for j, row in enumerate(row_group):
+                    clip_color = self._metric_color(self._mode, row)
+                    if clip_color == base_color or clip_color == QColor("#1DFF00"):
+                        continue
+                    x = xs[j]
+                    painter.fillRect(QRectF(x - clip_w / 2.0, yy - bar_h / 2, clip_w, bar_h), clip_color)
+            else:
+                for j, row in enumerate(row_group):
+                    left = plot.left() if j == 0 else (xs[j-1] + xs[j]) / 2.0
+                    right = plot.right() if j == len(xs) - 1 else (xs[j] + xs[j+1]) / 2.0
+                    if right < left:
+                        left, right = right, left
+                    color = self._metric_color(self._mode, row)
+                    painter.fillRect(QRectF(left, yy - bar_h / 2, max(1.0, right - left), bar_h), color)
             cx = plot.left() + self._cursor_frac * plot.width()
             painter.setPen(QPen(QColor("#1396D9"), 1.4))
             painter.drawLine(int(cx), int(yy - bar_h / 2 - 1), int(cx), int(yy + bar_h / 2 + 1))
@@ -348,12 +396,22 @@ class SpreadViewDialog(QDialog):
                 "index": i,
                 "line": float(getattr(ti, "receiver_line", 0.0) or 0.0),
                 "point": float(getattr(ti, "receiver_point", i + 1) or (i + 1)),
+                "channel_type": getattr(ti, "channel_type", 1),
                 "status": _status_from_trace_info(ti),
                 "resistance": getattr(ti, "resistance", np.nan),
                 "capacitance": getattr(ti, "capacitance", np.nan),
                 "leakage": getattr(ti, "leakage", np.nan),
                 "tilt": getattr(ti, "tilt", np.nan),
             })
+        # The legacy 408 spread view displays the receiver spread, not the
+        # auxiliary/header traces.  Some SEG-D files decode a few traces with
+        # receiver line 0; keeping those produces the unwanted top row seen in
+        # the new dialog.  When real receiver lines exist, keep only those.
+        seismic_rows = [r for r in rows if int(r.get("channel_type", 1) or 1) == 1]
+        if seismic_rows:
+            rows = seismic_rows
+        if any(abs(float(r.get("line", 0.0))) > 1e-9 for r in rows):
+            rows = [r for r in rows if abs(float(r.get("line", 0.0))) > 1e-9]
         return rows
 
     def _build_ui(self) -> None:
