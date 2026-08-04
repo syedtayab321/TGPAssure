@@ -20,12 +20,11 @@ class MagneticSchemaDetector:
 
     def inspect(self, headers: Iterable[str], *, base: bool = False) -> SchemaInspection:
         mapping = self.mapper.detect(headers)
+        # A magnetic QC file may be a simple map/profile table containing only
+        # coordinates and total field.  Time-dependent QC stages will skip when
+        # no timestamp/date+time fields are mapped.
         required = {"total_field"}
-        if "timestamp" not in mapping and not ({"date", "time"} <= mapping.keys()):
-            required.add("timestamp")
-        missing = tuple(sorted(name for name in required if name not in mapping and name != "timestamp"))
-        if "timestamp" in required:
-            missing = tuple(sorted((*missing, "timestamp or date+time")))
+        missing = tuple(sorted(name for name in required if name not in mapping))
         recognised = len(mapping)
         confidence = min(1.0, recognised / 8.0)
         optional = tuple(sorted(set(mapping) - {"timestamp", "date", "time", "total_field"}))

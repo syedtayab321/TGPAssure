@@ -19,6 +19,8 @@ class ReaderOptions:
     encoding: str = "utf-8-sig"
     timezone: str | None = None
     column_mapping: dict[str, str] = field(default_factory=dict)
+    skip_rows: int = 0
+    skip_columns: tuple[str, ...] = ()
     metadata: dict[str, Any] = field(default_factory=dict)
 
 

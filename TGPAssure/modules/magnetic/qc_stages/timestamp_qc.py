@@ -18,6 +18,11 @@ class TimestampQC(MagneticQCStage):
         timestamps = context.rover_dataset.timestamps
         valid = ~np.isnat(timestamps)
         findings: list[QCFinding] = []
+        if str(context.rover_dataset.metadata.get("timestamp_source") or "").lower() == "missing":
+            return self.skipped(
+                "No timestamp/date+time columns were mapped; coordinate, channel and schema QC can still run.",
+                {"invalid_timestamp_pct": 100.0},
+            )
         missing_pct = 100.0 * float(np.count_nonzero(~valid)) / timestamps.size
         if not np.any(valid):
             findings.append(finding("MAG.TIME.ALL_INVALID", QCSeverity.CRITICAL, "No valid rover timestamps are available."))

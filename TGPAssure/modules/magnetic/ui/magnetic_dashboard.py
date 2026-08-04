@@ -2163,6 +2163,9 @@ class MagneticDashboard(QWidget):
             path,
             survey_type=dialog.selected_survey_type,
             crs=dialog.selected_crs,
+            column_mapping=dialog.selected_column_mapping,
+            skip_rows=dialog.skip_rows,
+            skip_columns=dialog.skip_columns,
         )
 
     def _load_rover_background(
@@ -2171,6 +2174,9 @@ class MagneticDashboard(QWidget):
         *,
         survey_type: Any = None,
         crs: Any = None,
+        column_mapping: dict[str, str] | None = None,
+        skip_rows: int = 0,
+        skip_columns: tuple[str, ...] = (),
     ) -> None:
         def load(report: Callable[[int, str], None]) -> MagneticDataset:
             report(5, "Opening magnetic dataset")
@@ -2179,6 +2185,12 @@ class MagneticDashboard(QWidget):
                 options["survey_type"] = survey_type
             if crs not in (None, ""):
                 options["crs"] = crs
+            if column_mapping:
+                options["column_mapping"] = dict(column_mapping)
+            if skip_rows:
+                options["skip_rows"] = int(skip_rows)
+            if skip_columns:
+                options["skip_columns"] = tuple(skip_columns)
             dataset = MagneticReader().read_rover(path, **options)
             report(62, f"Parsed {dataset.record_count:,} magnetic records")
             return dataset
@@ -2234,10 +2246,22 @@ class MagneticDashboard(QWidget):
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return
         selected_crs = dialog.selected_crs
+        selected_mapping = dialog.selected_column_mapping
+        selected_skip_rows = dialog.skip_rows
+        selected_skip_columns = dialog.skip_columns
 
         def load(report: Callable[[int, str], None]) -> MagneticDataset:
             report(10, "Reading base-station records")
-            dataset = MagneticReader().read_base(path, crs=selected_crs)
+            options: dict[str, Any] = {}
+            if selected_crs not in (None, ""):
+                options["crs"] = selected_crs
+            if selected_mapping:
+                options["column_mapping"] = dict(selected_mapping)
+            if selected_skip_rows:
+                options["skip_rows"] = int(selected_skip_rows)
+            if selected_skip_columns:
+                options["skip_columns"] = tuple(selected_skip_columns)
+            dataset = MagneticReader().read_base(path, **options)
             report(70, f"Parsed {dataset.record_count:,} base-station records")
             return dataset
 

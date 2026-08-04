@@ -61,6 +61,7 @@ class HomePage(QWidget):
             ("428 Header Scanner", "Batch SEG-D/Sercel header audit, source/timebreak and trace-extension summary.", "segd_scanner", "view-list-details", "#0E7490"),
             ("Uphole", "SEG-2/OYO import, file-depth assignment, first-break picks and velocity curves.", "uphole", "seg-2", "#6B5BA7"),
             ("Receiver SMT QC", "SMT-200/300 geophone tests, limits, failures, serial history and export.", "receiver_qc", "dialog-ok-apply", "#2F8A76"),
+            ("SMT Results Database", "SQLite archive for SMT200/300/400/SGT-II imports, plots, statistics and pending retests.", "smt", "package-x-generic", "#0A86C7"),
             ("SEG-Y QC & Viewer", "Standards-aware headers, trace QC, seismic display and frequency analysis.", "segy_viewer", "office-chart-line", "#315E9C"),
             ("SEG-Y → SEG-D", "Controlled format conversion with timing, resampling and output validation.", "converter", "document-export", "#7656A5"),
             ("Vibroseis", "Sweep design, VAPS/H26 field QC, pilot correlation, ground-force and productivity.", "vibroseis", "media-playback-start", "#B26A21"),

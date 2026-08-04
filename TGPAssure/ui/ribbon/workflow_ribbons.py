@@ -297,6 +297,30 @@ class ReceiverQcRibbonProvider(_Provider):
     ]
 
 
+class SmtRibbonProvider(_Provider):
+    tab_id = "smt"
+    groups = [
+        RibbonGroup("SMT Project", [
+            RibbonAction("New / Select", "smt_project", icon="document-new", accent=True),
+            RibbonAction("Add Records", "smt_add_records", icon="document-open"),
+            RibbonAction("Configure", "smt_configure", icon="preferences-system"),
+            RibbonAction("Export Records", "smt_export_records", icon="document-export"),
+        ]),
+        RibbonGroup("Results Database", [
+            RibbonAction("Records", "smt_records", icon="view-list-details"),
+            RibbonAction("Results", "smt_results", icon="office-chart-line", accent=True),
+            RibbonAction("Statistics", "smt_statistics", icon="view-statistics"),
+            RibbonAction("Pending Retests", "smt_pending", icon="dialog-warning"),
+        ]),
+        RibbonGroup("Utilities", [
+            RibbonAction("Single String", "smt_single_string", icon="office-chart-line"),
+            RibbonAction("Time Analysis", "smt_time_analysis", icon="appointment-new"),
+            RibbonAction("Unseen Strings", "smt_unseen", icon="edit-find"),
+            RibbonAction("Maintenance", "smt_maintenance", icon="preferences-system"),
+        ]),
+    ]
+
+
 class UpholeRibbonProvider(_Provider):
     tab_id = "uphole"
     groups = [
@@ -325,5 +349,5 @@ def workflow_providers() -> list[RibbonProvider]:
         ElectricalViewerRibbonProvider(), ElectricalReportsRibbonProvider(),
         VibroseisDataRibbonProvider(), VibroseisQcRibbonProvider(), VibroseisViewerRibbonProvider(),
         VibroseisPlanningRibbonProvider(),
-        SegdScannerRibbonProvider(), ReceiverQcRibbonProvider(), UpholeRibbonProvider(),
+        SegdScannerRibbonProvider(), ReceiverQcRibbonProvider(), SmtRibbonProvider(), UpholeRibbonProvider(),
     ]

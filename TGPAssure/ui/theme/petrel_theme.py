@@ -12,20 +12,20 @@ QMainWindow { background: #dfe1e6; }
 QWidget { background: #f6f7fa; }
 
 #titleBar {
-    background: qlineargradient(x1:0,y1:0,x2:0,y2:1,stop:0 #f8f9fc,stop:1 #e7e9ee);
-    border-bottom: 1px solid #c7cad1;
+    background: qlineargradient(x1:0,y1:0,x2:0,y2:1,stop:0 #4B5158,stop:1 #30353B);
+    border-bottom: 1px solid #1E2328;
 }
-#titleBar QLabel { background: transparent; color: #1e1e1e; }
-#titleBar > QLabel { font-size: 10pt; }
+#titleBar QLabel { background: transparent; color: #FFFFFF; }
+#titleBar > QLabel { font-size: 9pt; }
 #appGlyph {
-    background: #d6a316; color: white; border: 1px solid #bb8c0c;
-    border-radius: 4px; font-weight: 700; font-size: 11pt;
+    background: #D7A514; color: #FFFFFF; border: 1px solid #F0C64B;
+    border-radius: 3px; font-weight: 700; font-size: 10pt;
 }
 #quickAccessButton, #windowControl, #closeControl {
-    background: transparent; border: 1px solid transparent; border-radius: 3px; padding: 0;
+    background: transparent; color: #FFFFFF; border: 1px solid transparent; border-radius: 3px; padding: 0;
 }
-#quickAccessButton:hover, #windowControl:hover { background: #e1e5eb; border-color: #c5cad2; }
-#closeControl:hover { background: #e81123; border-color: #e81123; }
+#quickAccessButton:hover, #windowControl:hover { background: rgba(255,255,255,42); border-color: rgba(255,255,255,76); }
+#closeControl:hover { background: #E5484D; border-color: #F06A6E; }
 
 #ribbonContainer {
     background: qlineargradient(x1:0,y1:0,x2:0,y2:1,stop:0 #f1f2f5,stop:1 #e8e9ed);

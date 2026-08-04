@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Optional, Dict, Any
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QTimer, Signal, QSize, QPoint, QPropertyAnimation
+from PySide6.QtCore import Qt, QTimer, Signal, QSize, QPoint, QPropertyAnimation, QEvent
 from PySide6.QtGui import QColor, QAction, QKeySequence, QShortcut, QCloseEvent, QIcon, QGuiApplication, QResizeEvent
 try:
     from shiboken6 import isValid as is_qobject_valid
@@ -22,7 +22,7 @@ from core.infrastructure.service_container import ServiceContainer
 from core.auth import LicenseService
 from core.auth.plans import FEATURE_BY_KEY, FEATURES, MODULE_TITLES, feature_for_action, feature_for_provider
 from ui.styles import apply_theme, Theme
-from ui.icons import get_icon, icon_color
+from ui.icons import get_icon
 from ui.animations import fade_widget
 from ui.docks.project_explorer import ProjectExplorer
 from ui.ribbon.home_ribbon import HomeRibbonProvider
@@ -54,37 +54,39 @@ class TitleBar(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("titleBar")
-        self.setFixedHeight(32)
+        self.setFixedHeight(30)
         self._drag_position: QPoint | None = None
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(8, 1, 3, 1)
+        layout.setContentsMargins(7, 1, 2, 1)
         layout.setSpacing(4)
 
         self.icon = QLabel()
         self.icon.setObjectName("appGlyph")
         self.icon.setText("T")
         self.icon.setAlignment(Qt.AlignCenter)
-        self.icon.setFixedSize(26, 26)
+        self.icon.setFixedSize(24, 24)
         layout.addWidget(self.icon)
 
         # Keep only quick-access commands that have real application actions.
         # The former Undo/Redo glyphs were decorative and therefore misleading.
         self.quick_save_btn = QToolButton(self)
         self.quick_save_btn.setObjectName("quickAccessButton")
-        self.quick_save_btn.setIcon(get_icon("document-save", color=icon_color("document-save"), size=13))
+        self.quick_save_btn.setIcon(get_icon("document-save", color="#FFFFFF", size=13))
         self.quick_save_btn.setIconSize(QSize(16, 16))
         self.quick_save_btn.setToolTip("Save Project")
         self.quick_save_btn.setAutoRaise(True)
         self.quick_save_btn.clicked.connect(self.quick_save_requested.emit)
+        self.quick_save_btn.setFixedSize(28, 26)
         layout.addWidget(self.quick_save_btn)
 
         self.quick_open_btn = QToolButton(self)
         self.quick_open_btn.setObjectName("quickAccessButton")
-        self.quick_open_btn.setIcon(get_icon("document-open", color=icon_color("document-open"), size=13))
+        self.quick_open_btn.setIcon(get_icon("document-open", color="#FFFFFF", size=13))
         self.quick_open_btn.setIconSize(QSize(16, 16))
         self.quick_open_btn.setToolTip("Open Project")
         self.quick_open_btn.setAutoRaise(True)
         self.quick_open_btn.clicked.connect(self.quick_open_requested.emit)
+        self.quick_open_btn.setFixedSize(28, 26)
         layout.addWidget(self.quick_open_btn)
 
         self.title = QLabel("TGPAssure E&P Software Platform ")
@@ -100,64 +102,84 @@ class TitleBar(QWidget):
         self.account_btn.clicked.connect(self.subscription_requested.emit)
         layout.addWidget(self.account_btn)
 
-        self.toggle_theme_btn = QToolButton()
-        self.toggle_theme_btn.setObjectName("windowControl")
-        self.toggle_theme_btn.setIcon(get_icon("color", color="#4A5568", size=13))
-        self.toggle_theme_btn.setToolTip("Theme")
+        icon_tone = "#FFFFFF"
         self.min_btn = QToolButton()
         self.min_btn.setObjectName("windowControl")
-        self.min_btn.setIcon(get_icon("window-minimize", color="#4A5568", size=13))
+        self.min_btn.setIcon(get_icon("window-minimize", color=icon_tone, size=13))
         self.min_btn.setIconSize(QSize(13, 13))
         self.max_btn = QToolButton()
         self.max_btn.setObjectName("windowControl")
         self.fit_btn = QToolButton()
         self.fit_btn.setObjectName("windowControl")
-        self.fit_btn.setIcon(get_icon("zoom-fit-best", color="#4A5568", size=13))
+        self.fit_btn.setIcon(get_icon("zoom-fit-best", color=icon_tone, size=13))
         self.fit_btn.setIconSize(QSize(13, 13))
         self.fit_btn.setToolTip("Fit TGPAssure to this screen")
-        self.max_btn.setIcon(get_icon("window-maximize", color="#4A5568", size=13))
+        self.max_btn.setIcon(get_icon("window-maximize", color=icon_tone, size=13))
         self.max_btn.setIconSize(QSize(13, 13))
         self.close_btn = QToolButton()
         self.close_btn.setObjectName("closeControl")
-        self.close_btn.setIcon(get_icon("window-close", color="#4A5568", size=13))
+        self.close_btn.setIcon(get_icon("window-close", color=icon_tone, size=13))
         self.close_btn.setIconSize(QSize(13, 13))
 
-        for button in (self.account_btn, self.toggle_theme_btn, self.fit_btn, self.min_btn, self.max_btn, self.close_btn):
-            button.setFixedSize(34, 28)
+        for button in (self.fit_btn, self.min_btn, self.max_btn, self.close_btn):
+            button.setFixedSize(32, 26)
             button.setAutoRaise(True)
             button.setCursor(Qt.PointingHandCursor)
+        self.account_btn.setFixedSize(76, 26)
+        self.account_btn.setAutoRaise(True)
+        self.account_btn.setCursor(Qt.PointingHandCursor)
 
         self.setStyleSheet("""
-            QToolButton#quickAccessButton {
+            QWidget#titleBar {
+                background: qlineargradient(x1:0,y1:0,x2:0,y2:1,
+                    stop:0 #4B5158, stop:1 #30353B);
+                border-bottom: 1px solid #1E2328;
+            }
+            QWidget#titleBar QLabel {
                 background: transparent;
-                border: 1px solid transparent;
+                color: #FFFFFF;
+                font-size: 9pt;
+            }
+            QLabel#appGlyph {
+                background: #D7A514;
+                color: #FFFFFF;
+                border: 1px solid #F0C64B;
                 border-radius: 3px;
-                padding: 0;
+                font-weight: 700;
+                font-size: 10pt;
             }
-            QToolButton#quickAccessButton:hover {
-                background: #E8EEF5;
-                border-color: #D5DEE8;
-            }
+            QToolButton#quickAccessButton,
             QToolButton#windowControl,
             QToolButton#closeControl {
                 background: transparent;
+                color: #FFFFFF;
                 border: 1px solid transparent;
                 border-radius: 3px;
                 padding: 0;
                 min-width: 0;
                 min-height: 0;
+                font-size: 8pt;
+                font-weight: 650;
             }
+            QToolButton#quickAccessButton:hover,
             QToolButton#windowControl:hover {
-                background: #E8EEF5;
-                border-color: #D5DEE8;
+                background: rgba(255, 255, 255, 42);
+                border-color: rgba(255, 255, 255, 76);
+            }
+            QToolButton#quickAccessButton:pressed,
+            QToolButton#windowControl:pressed {
+                background: rgba(255, 255, 255, 70);
             }
             QToolButton#closeControl:hover {
                 background: #E5484D;
-                border-color: #E5484D;
+                border-color: #F06A6E;
             }
+            QToolButton#closeControl:pressed {
+                background: #C83439;
+            }
+            QToolButton#closeControl:hover::menu-indicator { image: none; }
         """)
 
-        layout.addWidget(self.toggle_theme_btn)
         layout.addWidget(self.fit_btn)
         layout.addWidget(self.min_btn)
         layout.addWidget(self.max_btn)
@@ -263,6 +285,7 @@ class MainWindow(QMainWindow):
                 ("segd_scanner", "428 Header Scanner"),
                 ("uphole", "Uphole"),
                 ("receiver_qc", "Receiver QC"),
+                ("smt", "SMT"),
                 ("segy_viewer", "SEGY"),
                 ("converter", "Converter"),
                 ("visualization", "2D/3D Viewer"),
@@ -315,6 +338,7 @@ class MainWindow(QMainWindow):
         self._geodetic_dashboard = None
         self._segd_scanner_dashboard = None
         self._receiver_qc_dashboard = None
+        self._smt_dashboard = None
         self._uphole_dashboard = None
         self._qc_history_page = None
         self._selected_project_path: Path | None = None
@@ -331,6 +355,7 @@ class MainWindow(QMainWindow):
             "segy_viewer": ("SEG-Y Viewer", "SEG-Y View", "SEG-Y"),
             "visualization": ("2D/3D View", "2D/3D", "View"),
             "converter": ("Converter", "Converter", "Convert"),
+            "smt": ("SMT Database", "SMT", "SMT"),
             "vibroseis": ("Vibroseis", "Vibroseis", "Vibroseis"),
             "magnetic": ("Magnetic", "Magnetic", "Magnetic"),
             "gravity": ("Gravity", "Gravity", "Gravity"),
@@ -354,6 +379,9 @@ class MainWindow(QMainWindow):
         self._create_ribbon()
         self._create_status_bar()
         self._create_shortcuts()
+        app = QApplication.instance()
+        if app is not None:
+            app.installEventFilter(self)
         self._apply_tab_styling()
         self._full_page_loader = FullPageLoader(self)
         self._full_page_loader.sync_geometry()
@@ -595,11 +623,13 @@ class MainWindow(QMainWindow):
 
         fullscreen_action = QAction("Full Screen View (F11)", self)
         fullscreen_action.setShortcut(QKeySequence("F11"))
+        fullscreen_action.setShortcutContext(Qt.ApplicationShortcut)
         fullscreen_action.triggered.connect(self.enter_dashboard_fullscreen)
         view_menu.addAction(fullscreen_action)
 
         normal_screen_action = QAction("Back to Normal Screen (F5)", self)
         normal_screen_action.setShortcut(QKeySequence("F5"))
+        normal_screen_action.setShortcutContext(Qt.ApplicationShortcut)
         normal_screen_action.triggered.connect(self.exit_dashboard_fullscreen)
         view_menu.addAction(normal_screen_action)
 
@@ -802,7 +832,7 @@ class MainWindow(QMainWindow):
         document_tab_font.setPointSize(8 if mode == "compact" else 9)
         self.tab_widget.tabBar().setFont(document_tab_font)
         self.title_bar.title.setVisible(width >= 760)
-        self.title_bar.setFixedHeight(30 if mode == "compact" else 32)
+        self.title_bar.setFixedHeight(28 if mode == "compact" else 30)
         self.job_progress_bar.setFixedWidth(82 if mode == "compact" else 100)
 
         if mode_changed and self._active_module in self._ribbon_providers:
@@ -1249,6 +1279,9 @@ class MainWindow(QMainWindow):
             if context == "receiver_qc":
                 self._open_receiver_qc_dashboard()
                 return
+            if context == "smt":
+                self._open_smt_dashboard()
+                return
             if context == "uphole":
                 self._open_uphole_dashboard()
                 return
@@ -1391,6 +1424,7 @@ class MainWindow(QMainWindow):
             "visualization": "seismic",
             "segd_scanner": "seismic",
             "receiver_qc": "seismic",
+            "smt": "seismic",
             "uphole": "seismic",
         })
 
@@ -1556,6 +1590,7 @@ class MainWindow(QMainWindow):
             "electrical_open", "electrical_open_data", "electrical_thresholds",
             "geodetic_open", "geodetic_examiner",
             "segd_scanner_open", "segd_scanner_folder", "receiver_open", "receiver_limits",
+            "smt_project",
             "uphole_open", "uphole_open_folder", "vibroseis_load_vaps",
         }
         if action_id in always:
@@ -1576,6 +1611,13 @@ class MainWindow(QMainWindow):
             dashboard = self._receiver_qc_dashboard
             if dashboard is None:
                 return action_id in {"receiver_open", "receiver_limits"}
+            resolver = getattr(dashboard, "can_execute", None)
+            return bool(resolver(action_id)) if callable(resolver) else True
+
+        if action_id.startswith("smt_"):
+            dashboard = self._smt_dashboard
+            if dashboard is None:
+                return action_id == "smt_project"
             resolver = getattr(dashboard, "can_execute", None)
             return bool(resolver(action_id)) if callable(resolver) else True
 
@@ -1809,6 +1851,30 @@ class MainWindow(QMainWindow):
             self._open_receiver_qc_dashboard().show_limits()
         elif action_id == "receiver_statistics":
             self._open_receiver_qc_dashboard().show_statistics()
+        elif action_id == "smt_project":
+            self._open_smt_dashboard().new_select_project()
+        elif action_id == "smt_add_records":
+            self._open_smt_dashboard().add_records()
+        elif action_id == "smt_configure":
+            self._open_smt_dashboard().configure()
+        elif action_id == "smt_records":
+            self._open_smt_dashboard().show_records()
+        elif action_id == "smt_results":
+            self._open_smt_dashboard().show_results()
+        elif action_id == "smt_statistics":
+            self._open_smt_dashboard().show_statistics()
+        elif action_id == "smt_pending":
+            self._open_smt_dashboard().show_pending_retests()
+        elif action_id == "smt_single_string":
+            self._open_smt_dashboard().show_single_string()
+        elif action_id == "smt_time_analysis":
+            self._open_smt_dashboard().show_time_analysis()
+        elif action_id == "smt_unseen":
+            self._open_smt_dashboard().show_unseen_strings()
+        elif action_id == "smt_maintenance":
+            self._open_smt_dashboard().show_maintenance()
+        elif action_id == "smt_export_records":
+            self._open_smt_dashboard().export_records()
         elif action_id == "uphole_open":
             self._open_uphole_dashboard().open_file()
         elif action_id == "uphole_open_folder":
@@ -2690,6 +2756,32 @@ class MainWindow(QMainWindow):
         dashboard.show(); dashboard.raise_(); dashboard.setFocus(Qt.OtherFocusReason)
         return dashboard
 
+    def _open_smt_dashboard(self):
+        dashboard = self._smt_dashboard
+        if dashboard is None or not is_qobject_valid(dashboard):
+            try:
+                from modules.seismic.smt.ui import SmtDashboard
+                dashboard = SmtDashboard(self)
+                self._smt_dashboard = dashboard
+                dashboard.destroyed.connect(lambda *_: setattr(self, "_smt_dashboard", None))
+                index = self._add_document_tab(
+                    dashboard,
+                    "SMT Results Database",
+                    icon=get_icon("package-x-generic", color="#0E7490", size=16),
+                    closable=True,
+                )
+            except Exception as exc:
+                QMessageBox.critical(self, "SMT Results Database", f"Unable to open SMT module:\n{exc}")
+                return None
+        else:
+            index = self.tab_widget.indexOf(dashboard)
+            if index < 0:
+                index = self._add_document_tab(dashboard, "SMT Results Database", closable=True)
+        self.tab_widget.setCurrentIndex(index)
+        self._set_active_module("smt")
+        dashboard.show(); dashboard.raise_(); dashboard.setFocus(Qt.OtherFocusReason)
+        return dashboard
+
     def _open_uphole_dashboard(self):
         dashboard = self._uphole_dashboard
         if dashboard is None or not is_qobject_valid(dashboard):
@@ -3097,6 +3189,7 @@ class MainWindow(QMainWindow):
             "vibroseis": self._open_vibroseis_dashboard,
             "segd_scanner": self._open_segd_scanner_dashboard,
             "receiver_qc": self._open_receiver_qc_dashboard,
+            "smt": self._open_smt_dashboard,
             "uphole": self._open_uphole_dashboard,
             "visualization": self._open_visualization,
             "magnetic": self._open_magnetic_dashboard,
@@ -3336,10 +3429,28 @@ class MainWindow(QMainWindow):
             ('Ctrl+Shift+Tab', self._prev_tab),
             ('F11', self.enter_dashboard_fullscreen),
             ('F5', self.exit_dashboard_fullscreen),
+            ('Esc', self.exit_dashboard_fullscreen),
         ):
             shortcut = QShortcut(QKeySequence(sequence), self)
+            shortcut.setContext(Qt.ApplicationShortcut)
             shortcut.activated.connect(handler)
             self._shortcuts.append(shortcut)
+
+    def eventFilter(self, watched, event):
+        if event.type() == QEvent.KeyPress:
+            key = event.key()
+            modifiers = event.modifiers() & ~Qt.KeypadModifier
+            if key == Qt.Key_F11 and modifiers == Qt.NoModifier:
+                if getattr(self, "_dashboard_fullscreen_active", False) or self.isFullScreen():
+                    self.exit_dashboard_fullscreen()
+                else:
+                    self.enter_dashboard_fullscreen()
+                return True
+            if key in (Qt.Key_F5, Qt.Key_Escape) and modifiers == Qt.NoModifier:
+                if getattr(self, "_dashboard_fullscreen_active", False) or self.isFullScreen():
+                    self.exit_dashboard_fullscreen()
+                    return True
+        return super().eventFilter(watched, event)
 
     def _sync_fullscreen_controls(self) -> None:
         """Keep the bottom full-screen controls correct on every dashboard."""
@@ -3397,6 +3508,12 @@ class MainWindow(QMainWindow):
     def exit_dashboard_fullscreen(self) -> None:
         """Restore the normal workstation layout from full-screen dashboard view."""
         if not getattr(self, "_dashboard_fullscreen_active", False):
+            if self.isFullScreen():
+                self.showNormal()
+                self.setWindowState(Qt.WindowNoState)
+                self._sync_fullscreen_controls()
+                if hasattr(self, "status_bar"):
+                    self.status_bar.showMessage("Normal dashboard layout restored", 2500)
             return
 
         state = getattr(self, "_dashboard_fullscreen_state", {}) or {}

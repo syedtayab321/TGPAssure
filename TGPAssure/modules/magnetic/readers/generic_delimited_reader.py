@@ -78,7 +78,7 @@ class GenericDelimitedMagneticReader(MagneticFormatReader):
         sample_rows: list[dict[str, str]] = []
         record_count = 0
         with path.open("r", encoding=options.encoding, errors="replace", newline="") as stream:
-            rows = self._dict_rows(self._data_lines(stream), delimiter)
+            rows = self._dict_rows(self._data_lines(stream, options), delimiter, options.skip_columns)
             for row in rows:
                 if not row or all(not str(value or "").strip() for value in row.values()):
                     continue
@@ -189,13 +189,11 @@ class GenericDelimitedMagneticReader(MagneticFormatReader):
                 "For ordinary tabular files, include a column such as mag, mag_nt, "
                 "total_field, tmi or total_intensity, or provide a column mapping."
             )
-        if "timestamp" not in mapping and not ({"date", "time"} <= mapping.keys()):
-            raise MagneticSchemaError("A timestamp column, or separate date and time columns, is required")
 
         columns: dict[str, list[Any]] = {key: [] for key in mapping}
         rejected_rows = 0
         with path.open("r", encoding=options.encoding, errors="replace", newline="") as stream:
-            rows = self._dict_rows(self._data_lines(stream), delimiter)
+            rows = self._dict_rows(self._data_lines(stream, options), delimiter, options.skip_columns)
             for row in rows:
                 if not row or all(not str(value or "").strip() for value in row.values()):
                     continue
@@ -209,10 +207,16 @@ class GenericDelimitedMagneticReader(MagneticFormatReader):
         if not columns["total_field"]:
             raise MagneticReadError("Magnetic input contains no data records")
 
-        timestamps = np.array(
-            [self._parse_timestamp(columns, index) for index in range(len(columns["total_field"]))],
-            dtype="datetime64[ms]",
-        )
+        has_timestamp = "timestamp" in columns or ({"date", "time"} <= columns.keys())
+        if has_timestamp:
+            timestamps = np.array(
+                [self._parse_timestamp(columns, index) for index in range(len(columns["total_field"]))],
+                dtype="datetime64[ms]",
+            )
+            timestamp_source = "source"
+        else:
+            timestamps = np.full(len(columns["total_field"]), np.datetime64("NaT", "ms"), dtype="datetime64[ms]")
+            timestamp_source = "missing"
         total_field = self._float_array(columns["total_field"])
         role = options.role
         channels = {BASE_TOTAL_FIELD if role == MagneticDataRole.BASE else RAW_TOTAL_FIELD: total_field}
@@ -252,6 +256,9 @@ class GenericDelimitedMagneticReader(MagneticFormatReader):
                 "source_headers": headers,
                 "source_coordinate_type": coordinate_type,
                 "source_crs_detected": detected_crs,
+                "timestamp_source": timestamp_source,
+                "skip_rows": int(options.skip_rows or 0),
+                "skip_columns": list(options.skip_columns or ()),
             }
         )
         return MagneticDataset(
@@ -279,21 +286,19 @@ class GenericDelimitedMagneticReader(MagneticFormatReader):
             raise MagneticReadError("Magnetic source file is empty")
         with path.open("r", encoding=options.encoding, errors="replace", newline="") as stream:
             lines = []
-            for line in stream:
-                stripped = line.strip()
-                if stripped and not stripped.startswith(("#", "//", ";;")):
-                    lines.append(line)
+            for line in self._data_lines(stream, options):
+                lines.append(line)
                 if len(lines) >= 25:
                     break
         if not lines:
             raise MagneticReadError("No data header could be found")
         sample = "".join(lines)
         delimiter = options.delimiter or self._detect_delimiter(sample)
-        rows = list(self._dict_rows(lines, delimiter))
-        if delimiter == " ":
-            headers = re.split(r"\s+", lines[0].strip())
-        else:
-            headers = [str(name).strip() for name in next(csv.reader([lines[0]], delimiter=delimiter), [])]
+        headers = self._parse_header(lines[0], delimiter)
+        skip_indices = self._resolve_skip_column_indices(headers, options.skip_columns)
+        if skip_indices:
+            headers = [name for index, name in enumerate(headers) if index not in skip_indices]
+        rows = list(self._dict_rows(lines, delimiter, options.skip_columns))
         preview = rows[:5]
         if len(headers) <= 1:
             raise MagneticSchemaError(
@@ -302,27 +307,31 @@ class GenericDelimitedMagneticReader(MagneticFormatReader):
             )
         return delimiter, headers, preview
 
-    @staticmethod
-    def _dict_rows(lines: Iterable[str], delimiter: str) -> Iterable[dict[str, str]]:
-        """Yield rows while treating arbitrary whitespace as one delimiter.
+    @classmethod
+    def _dict_rows(
+        cls,
+        lines: Iterable[str],
+        delimiter: str,
+        skip_columns: Iterable[str] | None = None,
+    ) -> Iterable[dict[str, str]]:
+        """Yield rows while supporting skipped source columns.
 
-        Field/base magnetometer exports frequently use aligned columns separated
-        by a variable number of spaces. ``csv.DictReader(delimiter=" ")`` creates
-        empty pseudo-columns for those files, so whitespace tables need explicit
-        tokenization while comma/tab/semicolon files retain CSV semantics.
+        Field/base magnetometer exports often contain extra housekeeping
+        columns.  Users can skip unwanted columns by 1-based index or by header
+        name before the magnetic column mapper runs.
         """
         iterator = iter(lines)
         try:
             header_line = next(iterator)
         except StopIteration:
             return
-        if delimiter != " ":
-            reader = csv.DictReader(chain([header_line], iterator), delimiter=delimiter)
-            yield from reader
-            return
-        headers = re.split(r"\s+", header_line.strip())
+
+        headers = cls._parse_header(header_line, delimiter)
+        skip_indices = cls._resolve_skip_column_indices(headers, skip_columns or ())
+        kept_headers = [name for index, name in enumerate(headers) if index not in skip_indices]
+
         for line in iterator:
-            values = re.split(r"\s+", line.strip())
+            values = cls._parse_row_values(line, delimiter)
             if not values:
                 continue
             # Preserve a final free-text field rather than shifting all columns.
@@ -330,7 +339,45 @@ class GenericDelimitedMagneticReader(MagneticFormatReader):
                 values = values[: len(headers) - 1] + [" ".join(values[len(headers) - 1 :])]
             if len(values) < len(headers):
                 values += [""] * (len(headers) - len(values))
-            yield dict(zip(headers, values))
+            kept_values = [value for index, value in enumerate(values[: len(headers)]) if index not in skip_indices]
+            if len(kept_values) < len(kept_headers):
+                kept_values += [""] * (len(kept_headers) - len(kept_values))
+            yield dict(zip(kept_headers, kept_values))
+
+    @staticmethod
+    def _parse_header(line: str, delimiter: str) -> list[str]:
+        if delimiter == " ":
+            return [part.strip() for part in re.split(r"\s+", line.strip()) if part.strip()]
+        return [str(name).strip() for name in next(csv.reader([line], delimiter=delimiter), [])]
+
+    @staticmethod
+    def _parse_row_values(line: str, delimiter: str) -> list[str]:
+        if delimiter == " ":
+            return [part.strip() for part in re.split(r"\s+", line.strip()) if part.strip()]
+        return [str(value).strip() for value in next(csv.reader([line], delimiter=delimiter), [])]
+
+    @staticmethod
+    def _resolve_skip_column_indices(headers: list[str], skip_columns: Iterable[str]) -> set[int]:
+        indices: set[int] = set()
+        normalised_headers = {normalise_header(header): index for index, header in enumerate(headers)}
+        raw_headers = {str(header).strip().lower(): index for index, header in enumerate(headers)}
+        for item in skip_columns or ():
+            text = str(item or "").strip()
+            if not text:
+                continue
+            if text.isdigit():
+                index = int(text) - 1
+                if 0 <= index < len(headers):
+                    indices.add(index)
+                continue
+            lowered = text.lower()
+            if lowered in raw_headers:
+                indices.add(raw_headers[lowered])
+                continue
+            normalised = normalise_header(text)
+            if normalised in normalised_headers:
+                indices.add(normalised_headers[normalised])
+        return indices
 
     @staticmethod
     def _detect_delimiter(sample: str) -> str:
@@ -345,8 +392,11 @@ class GenericDelimitedMagneticReader(MagneticFormatReader):
             return delimiter
 
     @staticmethod
-    def _data_lines(stream: Iterable[str]) -> Iterable[str]:
-        for line in stream:
+    def _data_lines(stream: Iterable[str], options: ReaderOptions) -> Iterable[str]:
+        skip_rows = max(0, int(getattr(options, "skip_rows", 0) or 0))
+        for physical_index, line in enumerate(stream):
+            if physical_index < skip_rows:
+                continue
             stripped = line.strip()
             if stripped and not stripped.startswith(("#", "//", ";;")):
                 yield line

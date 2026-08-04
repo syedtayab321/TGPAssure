@@ -18,8 +18,11 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QMessageBox,
+    QPushButton,
     QRadioButton,
     QScrollArea,
+    QSpinBox,
     QTabWidget,
     QTableWidget,
     QTableWidgetItem,
@@ -28,6 +31,7 @@ from PySide6.QtWidgets import (
 )
 
 from modules.magnetic.models import MagneticSurveyType
+from modules.magnetic.reader import MagneticReader
 
 
 _DIALOG_QSS = """
@@ -128,11 +132,55 @@ QComboBox:disabled {
     color: #81909D;
     background: #EEF2F5;
 }
+QSpinBox {
+    min-height: 28px;
+    border: 1px solid #C9D5DF;
+    border-radius: 4px;
+    background: #FFFFFF;
+    padding: 2px 7px;
+}
 QPushButton {
     min-height: 28px;
     padding: 3px 14px;
+    border: 1px solid #B9C8D4;
+    border-radius: 5px;
+    background: #FFFFFF;
+    color: #18384E;
+    font-weight: 700;
+}
+QPushButton:hover {
+    border-color: #1687B8;
+    background: #EEF8FD;
+}
+QPushButton#primaryButton {
+    background: #1687B8;
+    border-color: #0D6E98;
+    color: #FFFFFF;
 }
 """
+
+
+_CANONICAL_FIELDS: tuple[tuple[str, str, bool], ...] = (
+    ("total_field", "Total magnetic field / TMI", True),
+    ("timestamp", "Timestamp", False),
+    ("date", "Date", False),
+    ("time", "Time", False),
+    ("x", "X / Easting / Longitude", False),
+    ("y", "Y / Northing / Latitude", False),
+    ("elevation", "Elevation / GPS height", False),
+    ("line_id", "Line ID", False),
+    ("station_id", "Station / Fiducial", False),
+    ("line_type", "Line type", False),
+    ("base_field", "Base magnetic field", False),
+    ("sensor_1", "Sensor 1", False),
+    ("sensor_2", "Sensor 2", False),
+    ("gps_quality", "GPS quality / fix", False),
+    ("gps_hdop", "GPS HDOP", False),
+    ("satellites", "Satellites", False),
+    ("temperature", "Temperature", False),
+    ("heading", "Heading / azimuth", False),
+    ("speed", "Speed", False),
+)
 
 
 class MagneticImportDialog(QDialog):
@@ -154,11 +202,36 @@ class MagneticImportDialog(QDialog):
         super().__init__(parent)
         self.inspection = dict(inspection)
         self.importing_base = importing_base
+        self._layout_skip_rows_value = int(self.inspection.get("skip_rows", 0) or 0)
+        self._layout_skip_columns_value = str(self.inspection.get("skip_columns", "") or "")
+        self.mapping_combos: dict[str, QComboBox] = {}
         self.setWindowTitle("Magnetic Data Import")
         self.resize(790, 575)
         self.setMinimumSize(700, 500)
         self.setStyleSheet(_DIALOG_QSS)
         self._build_ui()
+
+    @property
+    def skip_rows(self) -> int:
+        spin = getattr(self, "skip_rows_spin", None)
+        if spin is not None:
+            return int(spin.value())
+        return int(self._layout_skip_rows_value or 0)
+
+    @property
+    def skip_columns(self) -> tuple[str, ...]:
+        edit = getattr(self, "skip_columns_edit", None)
+        text = edit.text() if edit is not None else self._layout_skip_columns_value
+        return tuple(part.strip() for part in str(text or "").split(",") if part.strip())
+
+    @property
+    def selected_column_mapping(self) -> dict[str, str]:
+        mapping: dict[str, str] = {}
+        for canonical, combo in getattr(self, "mapping_combos", {}).items():
+            value = combo.currentData()
+            if value not in (None, ""):
+                mapping[canonical] = str(value)
+        return mapping
 
     @property
     def selected_crs(self) -> str | None:
@@ -186,11 +259,7 @@ class MagneticImportDialog(QDialog):
 
         self.tabs = QTabWidget()
         self.tabs.setDocumentMode(True)
-        self.tabs.addTab(self._build_overview_tab(), "Overview")
-        self.tabs.addTab(self._build_coordinates_tab(), "Coordinates & GPS")
-        self.tabs.addTab(self._build_sensor_tab(), "Sensor & Channels")
-        self.tabs.addTab(self._build_preview_tab(), "Data Preview")
-        self.tabs.addTab(self._build_options_tab(), "Import Settings")
+        self._populate_tabs()
         root.addWidget(self.tabs, 1)
 
         buttons = QDialogButtonBox(
@@ -203,6 +272,15 @@ class MagneticImportDialog(QDialog):
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         root.addWidget(buttons)
+
+    def _populate_tabs(self) -> None:
+        self.tabs.clear()
+        self.tabs.addTab(self._build_overview_tab(), "Overview")
+        self.tabs.addTab(self._build_layout_mapping_tab(), "Layout & Mapping")
+        self.tabs.addTab(self._build_coordinates_tab(), "Coordinates & GPS")
+        self.tabs.addTab(self._build_sensor_tab(), "Sensor & Channels")
+        self.tabs.addTab(self._build_preview_tab(), "Data Preview")
+        self.tabs.addTab(self._build_options_tab(), "Import Settings")
 
     def _build_header(self) -> QWidget:
         frame = QFrame()
@@ -362,6 +440,121 @@ class MagneticImportDialog(QDialog):
             channel_table.setItem(0, 1, QTableWidgetItem("Automatic"))
         layout.addWidget(channel_table, 1)
         return page
+
+    def _build_layout_mapping_tab(self) -> QWidget:
+        page = QWidget()
+        outer = QVBoxLayout(page)
+        outer.setContentsMargins(12, 12, 12, 12)
+        outer.setSpacing(10)
+
+        layout_card = QFrame()
+        layout_card.setObjectName("infoCard")
+        layout = QGridLayout(layout_card)
+        layout.setContentsMargins(14, 12, 14, 12)
+        layout.setHorizontalSpacing(10)
+        layout.setVerticalSpacing(7)
+
+        title = QLabel("File layout before import")
+        title.setObjectName("sectionTitle")
+        layout.addWidget(title, 0, 0, 1, 4)
+
+        layout.addWidget(QLabel("Skip first rows:"), 1, 0)
+        self.skip_rows_spin = QSpinBox()
+        self.skip_rows_spin.setRange(0, 5000)
+        self.skip_rows_spin.setValue(int(self._layout_skip_rows_value or 0))
+        self.skip_rows_spin.setToolTip("Use this when the file has report titles, notes or units above the real header row.")
+        layout.addWidget(self.skip_rows_spin, 1, 1)
+
+        layout.addWidget(QLabel("Skip columns:"), 1, 2)
+        self.skip_columns_edit = QLineEdit(self._layout_skip_columns_value)
+        self.skip_columns_edit.setPlaceholderText("Example: 1, 4, Notes, unused")
+        self.skip_columns_edit.setToolTip("Enter 1-based column numbers or exact header names separated by commas.")
+        layout.addWidget(self.skip_columns_edit, 1, 3)
+
+        refresh_btn = QPushButton("Refresh Preview")
+        refresh_btn.setObjectName("primaryButton")
+        refresh_btn.setToolTip("Re-read the file preview using the skip-row and skip-column settings above.")
+        refresh_btn.clicked.connect(self._refresh_preview_with_layout)
+        layout.addWidget(refresh_btn, 2, 0)
+
+        help_text = QLabel(
+            "Use skip rows/columns first, then map the important magnetic fields. Required import needs Total magnetic field. If Timestamp or Date + Time is not mapped, time-dependent QC will skip and the rest of QC can still run. Extra columns can stay unmapped."
+        )
+        help_text.setWordWrap(True)
+        help_text.setObjectName("mutedLabel")
+        layout.addWidget(help_text, 2, 1, 1, 3)
+        outer.addWidget(layout_card)
+
+        map_card = QFrame()
+        map_card.setObjectName("infoCard")
+        map_outer = QVBoxLayout(map_card)
+        map_outer.setContentsMargins(14, 12, 14, 12)
+        map_outer.setSpacing(8)
+        map_title = QLabel("Column mapping")
+        map_title.setObjectName("sectionTitle")
+        map_outer.addWidget(map_title)
+
+        headers = [str(header) for header in (self.inspection.get("headers") or [])]
+        detected = self.inspection.get("mapping") if isinstance(self.inspection.get("mapping"), dict) else {}
+        self.mapping_combos = {}
+
+        grid_host = QWidget()
+        grid = QGridLayout(grid_host)
+        grid.setContentsMargins(0, 0, 0, 0)
+        grid.setHorizontalSpacing(12)
+        grid.setVerticalSpacing(6)
+
+        for row, (canonical, label, required) in enumerate(_CANONICAL_FIELDS):
+            label_text = QLabel(("* " if required else "") + label)
+            label_text.setObjectName("mutedLabel")
+            combo = QComboBox()
+            combo.addItem("— Not mapped —", "")
+            for header in headers:
+                combo.addItem(header, header)
+            selected = str(detected.get(canonical, "") or "")
+            if selected:
+                index = combo.findData(selected)
+                if index >= 0:
+                    combo.setCurrentIndex(index)
+                else:
+                    combo.addItem(selected, selected)
+                    combo.setCurrentIndex(combo.count() - 1)
+            self.mapping_combos[canonical] = combo
+            grid.addWidget(label_text, row, 0)
+            grid.addWidget(combo, row, 1)
+
+        grid.setColumnStretch(1, 1)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setWidget(grid_host)
+        map_outer.addWidget(scroll, 1)
+        outer.addWidget(map_card, 1)
+        return page
+
+    def _refresh_preview_with_layout(self) -> None:
+        path = str(self.inspection.get("path") or "").strip()
+        if not path:
+            QMessageBox.information(self, "Refresh Preview", "No source path is available for this preview.")
+            return
+        self._layout_skip_rows_value = self.skip_rows
+        self._layout_skip_columns_value = ", ".join(self.skip_columns)
+        try:
+            options: dict[str, Any] = {
+                "skip_rows": self._layout_skip_rows_value,
+                "skip_columns": self.skip_columns,
+            }
+            if self.importing_base:
+                options.update({"role": "base", "survey_type": "base_station"})
+            updated = MagneticReader().inspect(path, **options)
+        except Exception as exc:
+            QMessageBox.critical(self, "Magnetic Preview Error", str(exc))
+            return
+        updated["skip_rows"] = self._layout_skip_rows_value
+        updated["skip_columns"] = self._layout_skip_columns_value
+        self.inspection = dict(updated)
+        self._populate_tabs()
+        self.tabs.setCurrentIndex(1)
 
     def _build_preview_tab(self) -> QWidget:
         page = QWidget()

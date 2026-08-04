@@ -105,6 +105,7 @@ PROVIDER_FEATURE_MAP = {
     "segd_scanner": "seismic.scanner",
     "uphole": "seismic.uphole",
     "receiver_qc": "seismic.receiver",
+    "smt": "seismic.receiver",
     "segy_viewer": "seismic.viewer",
     "converter": "seismic.converter",
     "visualization": "seismic.viewer",
@@ -138,6 +139,7 @@ PROVIDER_FEATURE_MAP = {
 ACTION_FEATURE_PREFIXES = (
     ("segd_scanner_", "seismic.scanner"),
     ("receiver_", "seismic.receiver"),
+    ("smt_", "seismic.receiver"),
     ("uphole_", "seismic.uphole"),
     ("segd_", "seismic.segd"),
     ("segy_", "seismic.qc"),

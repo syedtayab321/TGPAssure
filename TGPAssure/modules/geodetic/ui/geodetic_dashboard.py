@@ -5,8 +5,8 @@ import traceback
 from typing import Any, Callable
 
 import numpy as np
-from PySide6.QtCore import QObject, QRunnable, QThreadPool, Qt, Signal, Slot
-from PySide6.QtGui import QColor, QFont
+from PySide6.QtCore import QObject, QRunnable, QThreadPool, Qt, Signal, Slot, QRectF, QSize
+from PySide6.QtGui import QColor, QFont, QPainter, QPen
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
@@ -59,6 +59,77 @@ def _get_pg():
         import pyqtgraph.exporters
         _pg_module = pg
     return _pg_module
+
+
+
+
+class ProfessionalCheckBox(QCheckBox):
+    """Compact painted checkbox with a visible tick on light geodetic pages."""
+
+    _accent = QColor("#22AEEA")
+    _accent_dark = QColor("#0A86C7")
+    _text = QColor("#102A3D")
+    _muted = QColor("#8B9BA8")
+    _border = QColor("#6F8393")
+    _border_disabled = QColor("#C3CED7")
+    _white = QColor("#FFFFFF")
+    _hover = QColor("#EEF8FD")
+
+    def __init__(self, text: str = "", parent=None) -> None:
+        super().__init__(text, parent)
+        self.setMouseTracking(True)
+        self._hovered = False
+        self.setCursor(Qt.PointingHandCursor)
+        self.setMinimumHeight(22)
+
+    def enterEvent(self, event):  # noqa: N802 - Qt override
+        self._hovered = True
+        self.update()
+        return super().enterEvent(event)
+
+    def leaveEvent(self, event):  # noqa: N802 - Qt override
+        self._hovered = False
+        self.update()
+        return super().leaveEvent(event)
+
+    def sizeHint(self) -> QSize:  # noqa: N802 - Qt override
+        fm = self.fontMetrics()
+        return QSize(max(58, fm.horizontalAdvance(self.text()) + 28), 22)
+
+    def minimumSizeHint(self) -> QSize:  # noqa: N802 - Qt override
+        return self.sizeHint()
+
+    def paintEvent(self, event):  # noqa: N802 - Qt override
+        del event
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing, True)
+
+        if self.hasFocus():
+            painter.setPen(QPen(self._accent_dark, 1, Qt.DashLine))
+            painter.setBrush(Qt.NoBrush)
+            painter.drawRoundedRect(QRectF(0.5, 0.5, self.width() - 1, self.height() - 1), 4, 4)
+
+        d = 14.0
+        y = (self.height() - d) / 2.0
+        rect = QRectF(2.0, y, d, d)
+        if self.isChecked() and self.isEnabled():
+            painter.setBrush(self._accent)
+            painter.setPen(QPen(self._accent_dark, 1.2))
+            painter.drawRoundedRect(rect, 3, 3)
+            painter.setPen(QPen(self._white, 2.0, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+            painter.drawLine(rect.left() + 3.1, rect.top() + 7.3, rect.left() + 6.1, rect.bottom() - 3.4)
+            painter.drawLine(rect.left() + 6.1, rect.bottom() - 3.4, rect.right() - 2.7, rect.top() + 3.7)
+        else:
+            fill = self._hover if self._hovered and self.isEnabled() else self._white
+            painter.setBrush(fill)
+            painter.setPen(QPen(self._border if self.isEnabled() else self._border_disabled, 1.2))
+            painter.drawRoundedRect(rect, 3, 3)
+
+        painter.setPen(self._text if self.isEnabled() else self._muted)
+        font = self.font()
+        font.setBold(False)
+        painter.setFont(font)
+        painter.drawText(QRectF(23, 0, self.width() - 23, self.height()), Qt.AlignVCenter | Qt.AlignLeft, self.text())
 
 
 _QSS = """
@@ -1275,13 +1346,13 @@ class GeodeticDashboard(QWidget):
         action_layout.addWidget(open_btn)
 
         action_layout.addWidget(QLabel("Export:"))
-        self.output_text_check = QCheckBox("Text")
+        self.output_text_check = ProfessionalCheckBox("Text")
         self.output_text_check.setChecked(True)
-        self.output_xls_check = QCheckBox("XLSX")
+        self.output_xls_check = ProfessionalCheckBox("XLSX")
         self.output_xls_check.setChecked(True)
-        self.select_all_fields_check = QCheckBox("All fields")
+        self.select_all_fields_check = ProfessionalCheckBox("All fields")
         self.select_all_fields_check.setChecked(True)
-        self.select_all_fields_check.setToolTip("Tick/untick all examiner field checkboxes in every record-family tab.")
+        self.select_all_fields_check.setToolTip("Tick/untick every examiner field checkbox on this page.")
         self.select_all_fields_check.toggled.connect(self._set_all_field_checks)
         action_layout.addWidget(self.output_text_check)
         action_layout.addWidget(self.output_xls_check)
@@ -1299,46 +1370,32 @@ class GeodeticDashboard(QWidget):
         action_layout.addStretch(1)
         layout.addWidget(action_bar)
 
-        intro = QLabel("Field selection is separated by DC record family. Use each tab to choose exactly what should be included in text/XLSX examiner output.")
+        intro = QLabel("All selectable DC examiner fields are now on this single page. Use the section All/None buttons to control a record family without changing the rest of the page.")
         intro.setObjectName("geoInfoText")
         intro.setWordWrap(True)
         layout.addWidget(intro)
 
-        self.record_tabs = QTabWidget()
-        self.record_tabs.setObjectName("geoRecordTabs")
-        self.record_tabs.setDocumentMode(True)
-        self.record_tabs.setUsesScrollButtons(True)
-        self.record_tabs.setElideMode(Qt.TextElideMode.ElideRight)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
 
-        def compact_tab_title(schema) -> str:
-            record_label = "/".join(schema.record_ids)
-            compact_titles = {
-                "Header and Job": "Header",
-                "Horizontal Adjust": "H-Adjust",
-                "Survey (Masks) and Antenna": "Survey",
-                "Local Ellipsoid": "Ellipsoid",
-                "GPS Position": "GPS Pos",
-                "GPS Vector": "GPS Vec",
-                "Local Position": "Local Pos",
-                "Vertical Adjust": "V-Adjust",
-                "Quality Control 1": "QC",
-                "Coordinate System": "CRS",
-                "Local Site Settings": "Site",
-            }
-            return f"{record_label} {compact_titles.get(schema.title, schema.title)}"
+        host = QWidget()
+        host_layout = QVBoxLayout(host)
+        host_layout.setContentsMargins(0, 0, 4, 0)
+        host_layout.setSpacing(7)
 
         for schema in RECORD_SCHEMAS:
-            page = QWidget()
-            page_layout = QVBoxLayout(page)
-            page_layout.setContentsMargins(7, 7, 7, 7)
-            page_layout.setSpacing(5)
+            section = QFrame()
+            section.setObjectName("geoPanel")
+            section_layout = QVBoxLayout(section)
+            section_layout.setContentsMargins(7, 6, 7, 7)
+            section_layout.setSpacing(5)
 
-            header = QFrame()
-            header.setObjectName("geoPanel")
-            header_layout = QHBoxLayout(header)
-            header_layout.setContentsMargins(7, 5, 7, 5)
+            header_layout = QHBoxLayout()
+            header_layout.setContentsMargins(0, 0, 0, 0)
             header_layout.setSpacing(6)
-            title = QLabel(f"Record ID {' and '.join(schema.record_ids)} — {schema.title}")
+            title = QLabel(f"Record ID {' / '.join(schema.record_ids)} — {schema.title}")
             title.setObjectName("geoSection")
             header_layout.addWidget(title, 1)
             all_btn = QPushButton("All")
@@ -1349,51 +1406,39 @@ class GeodeticDashboard(QWidget):
             none_btn.setFixedWidth(52)
             header_layout.addWidget(all_btn)
             header_layout.addWidget(none_btn)
-            page_layout.addWidget(header)
+            section_layout.addLayout(header_layout)
 
-            scroll = QScrollArea()
-            scroll.setWidgetResizable(True)
-            scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-            field_host = QWidget()
-            field_layout = QGridLayout(field_host)
-            field_layout.setContentsMargins(2, 2, 2, 2)
-            field_layout.setHorizontalSpacing(8)
-            field_layout.setVerticalSpacing(4)
-
-            checks: list[QCheckBox] = []
-            field_count = len(schema.fields)
-            columns = 3 if field_count >= 7 else 2
+            fields_grid = QGridLayout()
+            fields_grid.setContentsMargins(0, 0, 0, 0)
+            fields_grid.setHorizontalSpacing(7)
+            fields_grid.setVerticalSpacing(4)
+            checks: list[ProfessionalCheckBox] = []
+            columns = 4 if len(schema.fields) >= 8 else 3
             for field_index, (key, label) in enumerate(schema.fields):
                 cell = QFrame()
                 cell.setObjectName("geoQcTile")
                 cell_layout = QHBoxLayout(cell)
                 cell_layout.setContentsMargins(6, 3, 6, 3)
-                cell_layout.setSpacing(5)
-                check = QCheckBox(label)
+                cell_layout.setSpacing(4)
+                check = ProfessionalCheckBox(label)
                 check.setChecked(True)
                 check.setToolTip(f"{key} • Record {', '.join(schema.record_ids)}")
                 self._field_checks[key] = check
                 checks.append(check)
                 check.toggled.connect(self._refresh_text_preview)
                 cell_layout.addWidget(check, 1)
-                field_layout.addWidget(cell, field_index // columns, field_index % columns)
+                fields_grid.addWidget(cell, field_index // columns, field_index % columns)
+            for column in range(columns):
+                fields_grid.setColumnStretch(column, 1)
+            section_layout.addLayout(fields_grid)
 
-            field_layout.setColumnStretch(0, 1)
-            field_layout.setColumnStretch(1, 1)
-            if columns == 3:
-                field_layout.setColumnStretch(2, 1)
             all_btn.clicked.connect(lambda _=False, items=checks: [item.setChecked(True) for item in items])
             none_btn.clicked.connect(lambda _=False, items=checks: [item.setChecked(False) for item in items])
-            scroll.setWidget(field_host)
-            page_layout.addWidget(scroll, 1)
-            self.record_tabs.addTab(page, compact_tab_title(schema))
+            host_layout.addWidget(section)
 
-        try:
-            self.record_tabs.tabBar().setExpanding(False)
-            self.record_tabs.tabBar().setUsesScrollButtons(True)
-        except Exception:
-            pass
-        layout.addWidget(self.record_tabs, 1)
+        host_layout.addStretch(1)
+        scroll.setWidget(host)
+        layout.addWidget(scroll, 1)
         return widget
 
     def _set_all_field_checks(self, checked: bool) -> None:
