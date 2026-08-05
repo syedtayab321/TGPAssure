@@ -1518,7 +1518,7 @@ class SeismicVisualizationDashboard(QWidget):
         merged: dict[int, QcTraceFlag] = {flag.trace_index: flag for flag in self.qc_flags}
         for flag in detected:
             existing = merged.get(flag.trace_index)
-            if existing is None or existing.source != "SEG-Y QC":
+            if existing is None or existing.source != "SEG-Y Review":
                 merged[flag.trace_index] = flag
         self.qc_flags = sorted(merged.values(), key=lambda item: item.trace_index)
         self.view_2d.set_qc_flags(self.qc_flags)

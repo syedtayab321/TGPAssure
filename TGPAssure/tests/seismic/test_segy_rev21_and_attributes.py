@@ -21,7 +21,7 @@ def _load_module(name: str, relative: str):
     return module
 
 
-reader_module = _load_module("tgpassure_test_segy_reader", "modules/seismic/segy_qc/segy_reader.py")
+reader_module = _load_module("tgpassure_test_segy_reader", "modules/seismic/segy_reader.py")
 attributes_module = _load_module("tgpassure_test_seismic_attributes", "modules/seismic/visualization/seismic_attributes.py")
 SegyReader = reader_module.SegyReader
 

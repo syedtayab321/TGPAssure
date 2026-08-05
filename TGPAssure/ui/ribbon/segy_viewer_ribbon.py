@@ -1,13 +1,57 @@
 from __future__ import annotations
+
 from typing import List
+
 from ui.ribbon.ribbon_provider import RibbonAction, RibbonGroup, RibbonProvider
 
 
-class SegyViewerRibbonProvider(RibbonProvider):
-    """Combined SEG-Y viewer + SEG-Y QC ribbon.
+def large(label: str, action_id: str, icon: str = "", *, accent: bool = False) -> RibbonAction:
+    return RibbonAction(label, action_id, icon=icon, presentation="large", accent=accent)
 
-    The separate SEG-Y QC ribbon subtab is intentionally folded into this provider
-    so users have one SEG-Y workspace, similar to the SEG-D workflow.
+
+def small(
+    label: str,
+    action_id: str,
+    icon: str = "",
+    *,
+    checkable: bool = False,
+    checked: bool = False,
+) -> RibbonAction:
+    return RibbonAction(
+        label,
+        action_id,
+        icon=icon,
+        presentation="small",
+        checkable=checkable,
+        checked=checked,
+    )
+
+
+def ico(
+    label: str,
+    action_id: str,
+    icon: str = "",
+    *,
+    checkable: bool = False,
+    checked: bool = False,
+) -> RibbonAction:
+    """Icon-only action. The full action name remains available in the tooltip."""
+    return RibbonAction(
+        label,
+        action_id,
+        icon=icon,
+        presentation="icon",
+        checkable=checkable,
+        checked=checked,
+    )
+
+
+class SegyViewerRibbonProvider(RibbonProvider):
+    """SEG-Y viewer-only ribbon with mixed text and compact icon controls.
+
+    Main viewer commands keep readable text labels. Dense repeat actions such as
+    trace/time zoom, gain +/- and canvas tools are icon-only to prevent ribbon
+    overflow while preserving every command and tooltip.
     """
 
     def ribbon_tab_id(self) -> str:
@@ -15,34 +59,88 @@ class SegyViewerRibbonProvider(RibbonProvider):
 
     def build_ribbon_groups(self) -> List[RibbonGroup]:
         return [
-            RibbonGroup("File / View", [
-                RibbonAction("Open SEG-Y", "segy_open_file", icon="seg-y", accent=True),
-                RibbonAction("Open 2D/3D", "segy_open_2d3d", icon="view-3d"),
-                RibbonAction("Fit", "segy_viewer_fit", icon="zoom-fit-best"),
-                RibbonAction("Export PNG", "segy_viewer_export_image", icon="document-save"),
-            ]),
-            RibbonGroup("Display", [
-                RibbonAction("Wiggle", "segy_viewer_wiggle", icon="office-chart-line"),
-                RibbonAction("Variable Area", "segy_viewer_va", icon="view-grid"),
-                RibbonAction("Variable Density", "segy_viewer_vd", icon="view-grid"),
-                RibbonAction("Color Density", "segy_viewer_color", icon="view-grid"),
-            ]),
-            RibbonGroup("Inspect", [
-                RibbonAction("Headers", "segy_viewer_headers", icon="document-properties"),
-                RibbonAction("Trace Analysis", "segy_viewer_trace_analysis", icon="view-statistics"),
-                RibbonAction("View Raw", "segy_view_raw", icon="view-preview"),
-                RibbonAction("Compare", "segy_compare_pre_post", icon="view-split-left-right"),
-            ]),
-            RibbonGroup("QC", [
-                RibbonAction("Run QC", "segy_run_qc", icon="media-playback-start", accent=True),
-                RibbonAction("Cancel", "segy_cancel_qc", icon="process-stop"),
-                RibbonAction("Results", "segy_view_results", icon="view-statistics"),
-                RibbonAction("Profiles", "segy_edit_profile", icon="preferences-system"),
-            ]),
-            RibbonGroup("Post-QC / Reports", [
-                RibbonAction("Select Post-QC", "segy_select_post_qc", icon="document-open-recent"),
-                RibbonAction("View Post-QC", "segy_view_post_qc", icon="view-preview"),
-                RibbonAction("PDF", "segy_generate_pdf", icon="application-pdf"),
-                RibbonAction("XLSX", "segy_generate_xlsx", icon="x-office-spreadsheet"),
-            ]),
+            RibbonGroup(
+                "SEG-Y File",
+                [
+                    large("Open SEG-Y", "segy_open_file", icon="seg-y", accent=True),
+                    small("Fit", "segy_viewer_fit", "zoom-fit-best"),
+                    small("Copy", "segy_viewer_copy_view", "edit-copy"),
+                    small("PNG", "segy_viewer_export_image", "image-x-generic"),
+                    small("BMP", "segy_viewer_export_bmp", "document-save"),
+                ],
+            ),
+            RibbonGroup(
+                "Display",
+                [
+                    small("Wiggle", "segy_viewer_toggle_wiggle", "office-chart-line", checkable=True, checked=True),
+                    small("Gray", "segy_viewer_toggle_gray", "view-grid", checkable=True, checked=True),
+                    small("Colour", "segy_viewer_toggle_color", "color-picker", checkable=True),
+                    small("Timelines", "segy_viewer_toggle_timelines", "grid", checkable=True, checked=True),
+                    small("Wiggle Only", "segy_viewer_wiggle", "office-chart-line"),
+                    small("Var Density", "segy_viewer_vd", "view-grid"),
+                    small("Colour View", "segy_viewer_color", "color-picker"),
+                ],
+            ),
+            RibbonGroup(
+                "Wiggle Fill",
+                [
+                    small("No Fill", "segy_viewer_fill_none", "view-list-details"),
+                    small("Positive", "segy_viewer_fill_positive", "list-add"),
+                    small("Negative", "segy_viewer_fill_negative", "draw-line"),
+                    small("Var Area", "segy_viewer_va", "view-grid"),
+                    small("Delay Hdr", "segy_viewer_delay_header", "document-properties", checkable=True),
+                ],
+            ),
+            RibbonGroup(
+                "Colours",
+                [
+                    small("Wiggle", "segy_viewer_color_wiggle", "color-picker"),
+                    small("Fill", "segy_viewer_color_fill", "color"),
+                    small("Selected", "segy_viewer_color_selected", "appearance"),
+                ],
+            ),
+            RibbonGroup(
+                "Scale",
+                [
+                    ico("Fewer Traces / Zoom In X", "segy_viewer_traces_minus", "zoom-in"),
+                    ico("More Traces / Zoom Out X", "segy_viewer_traces_plus", "zoom-out"),
+                    ico("Time Zoom In", "segy_viewer_time_minus", "zoom-in"),
+                    ico("Time Zoom Out", "segy_viewer_time_plus", "zoom-out"),
+                    ico("Wiggle Gain Down", "segy_viewer_gain_w_minus", "audio-volume-muted"),
+                    ico("Wiggle Gain Up", "segy_viewer_gain_w_plus", "audio-volume-high"),
+                    ico("Colour Gain Down", "segy_viewer_gain_c_minus", "audio-volume-muted"),
+                    ico("Colour Gain Up", "segy_viewer_gain_c_plus", "audio-volume-high"),
+                ],
+            ),
+            RibbonGroup(
+                "Direction",
+                [
+                    small("Normal", "segy_viewer_direction_normal", "select"),
+                    small("Reversed", "segy_viewer_direction_reversed", "reset-view"),
+                ],
+            ),
+            RibbonGroup(
+                "Processing",
+                [
+                    small("Invert", "segy_viewer_proc_inversion", "invert", checkable=True),
+                    small("Filter", "segy_viewer_proc_filter", "view-filter", checkable=True),
+                    small("AGC", "segy_viewer_proc_agc", "office-chart-line", checkable=True),
+                    small("Normalize", "segy_viewer_proc_norm", "view-refresh", checkable=True),
+                    small("Weight", "segy_viewer_proc_weight", "transform-scale", checkable=True),
+                    small("Params", "segy_viewer_processing_params", "preferences-system"),
+                ],
+            ),
+            RibbonGroup(
+                "Viewer Tools",
+                [
+                    ico("Zoom Box", "segy_viewer_tool_zoom", "zoom-original", checkable=True),
+                    ico("Pan", "segy_viewer_tool_pan", "pan", checkable=True),
+                    ico("Pick", "segy_viewer_tool_pick", "select", checkable=True),
+                    ico("Measure", "segy_viewer_tool_measure", "measure", checkable=True),
+                    ico("Clear Marks", "segy_viewer_clear_marks", "edit-clear"),
+                    small("Headers", "segy_viewer_headers", "document-properties"),
+                    small("Hardcopy", "segy_viewer_hardcopy", "document-export"),
+                    ico("Help", "segy_viewer_help", "help-about"),
+                ],
+            ),
         ]

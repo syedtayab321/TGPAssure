@@ -62,7 +62,7 @@ class HomePage(QWidget):
             ("Uphole", "SEG-2/OYO import, file-depth assignment, first-break picks and velocity curves.", "uphole", "seg-2", "#6B5BA7"),
             ("Receiver SMT QC", "SMT-200/300 geophone tests, limits, failures, serial history and export.", "receiver_qc", "dialog-ok-apply", "#2F8A76"),
             ("SMT Results Database", "SQLite archive for SMT200/300/400/SGT-II imports, plots, statistics and pending retests.", "smt", "package-x-generic", "#0A86C7"),
-            ("SEG-Y QC & Viewer", "Standards-aware headers, trace QC, seismic display and frequency analysis.", "segy_viewer", "office-chart-line", "#315E9C"),
+            ("SEG-Y Viewer", "Classic manual SEG-Y viewing, headers, picks, measurement, display and hardcopy export.", "segy_viewer", "office-chart-line", "#315E9C"),
             ("SEG-Y → SEG-D", "Controlled format conversion with timing, resampling and output validation.", "converter", "document-export", "#7656A5"),
             ("Vibroseis", "Sweep design, VAPS/H26 field QC, pilot correlation, ground-force and productivity.", "vibroseis", "media-playback-start", "#B26A21"),
             ("2D / 3D Seismic", "Sections, volume/slice views, geometry map, picking and interpretation support.", "visualization", "applications-graphics", "#0F7A72"),

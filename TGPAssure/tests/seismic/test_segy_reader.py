@@ -8,7 +8,7 @@ import psutil
 import time
 from pathlib import Path
 
-from modules.seismic.segy_qc.segy_reader import SegyReader, UnsupportedSampleFormatError
+from modules.seismic.segy_reader import SegyReader, UnsupportedSampleFormatError
 
 @pytest.fixture
 def temp_dir() -> Path:

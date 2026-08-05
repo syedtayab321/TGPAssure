@@ -8,7 +8,7 @@ import psutil
 import time
 from pathlib import Path
 
-from modules.seismic.segy_qc.segy_reader import SegyReader
+from modules.seismic.segy_reader import SegyReader
 
 @pytest.fixture
 def temp_dir() -> Path:

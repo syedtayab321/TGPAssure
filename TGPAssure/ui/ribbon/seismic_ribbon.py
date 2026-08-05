@@ -22,21 +22,6 @@ class SeismicRibbonProvider(RibbonProvider):
             label="Quality Control",
             actions=[
                 RibbonAction("SEG-D QC", "segd_run_qc", icon="view-statistics"),
-                RibbonAction("SEG-Y QC", "segy_run_qc", icon="media-playback-start", accent=True),
-                RibbonAction("QC Results", "segy_view_results", icon="view-statistics"),
-                RibbonAction("Data Quality", "segy_open_dashboard", icon="view-dashboard"),
-            ],
-        )
-        processing_group = RibbonGroup(
-            label="Processing QC",
-            actions=[
-                RibbonAction("Residual Statics", "segy_stage_residual_statics", icon="transform-move"),
-                RibbonAction("Velocity", "segy_stage_velocity", icon="office-chart-line"),
-                RibbonAction("NMO", "segy_stage_nmo", icon="transform-scale"),
-                RibbonAction("Stack", "segy_stage_stack", icon="view-list-tree"),
-                RibbonAction("Migration", "segy_stage_migration", icon="view-3d"),
-                RibbonAction("Attributes", "segy_stage_attribute", icon="view-statistics"),
-                RibbonAction("4D QC", "segy_stage_repeatability", icon="view-refresh"),
             ],
         )
         display_group = RibbonGroup(
@@ -50,4 +35,4 @@ class SeismicRibbonProvider(RibbonProvider):
                 RibbonAction("Fit", "segd_zoom_fit", icon="zoom-fit-best"),
             ],
         )
-        return [data_group, qc_group, processing_group, display_group]
+        return [data_group, qc_group, display_group]

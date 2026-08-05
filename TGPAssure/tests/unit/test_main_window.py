@@ -146,7 +146,7 @@ def test_home_ribbon_visible(main_window: MainWindow) -> None:
 
 def test_professional_ribbon_navigation(main_window: MainWindow) -> None:
     labels = [main_window.ribbon_tab_bar.tabText(index) for index in range(main_window.ribbon_tab_bar.count())]
-    assert labels == ["Home", "Seismic", "SEG-D", "SEG-Y QC", "2D/3D", "Magnetic", "Gravity", "Electrical", "Layout", "Tools", "Help"]
+    assert labels == ["Home", "Seismic", "SEG-D", "SEG-Y", "2D/3D", "Magnetic", "Gravity", "Electrical", "Layout", "Tools", "Help"]
     assert main_window.ribbon_tab_bar.expanding() is False
 
 

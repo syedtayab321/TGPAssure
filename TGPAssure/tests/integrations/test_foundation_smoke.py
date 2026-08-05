@@ -163,21 +163,14 @@ def test_foundation_smoke(app: QApplication, temp_dir: Path) -> None:
     viewer.canvas.zoom_to_fit()
     QTest.qWait(100)
 
-    from modules.seismic.segy_qc.segy_qc_controller import SegyQcController
-    from modules.seismic.segy_qc.segy_qc_view import SegyQcView
+    from modules.seismic.segy_viewer.segy_viewer_widget import SegyViewerWidget
 
-    job_manager = container.resolve(JobManager)
-    controller = SegyQcController(db_engine, job_manager, project_repo)
-    qc_view = SegyQcView(controller)
-    main_window.tab_widget.addTab(qc_view, "SEG-Y QC")
+    segy_view = SegyViewerWidget(str(sgy_file), main_window)
+    segy_view.setProperty("module_id", "segy_viewer")
+    main_window.tab_widget.addTab(segy_view, "SEG-Y Viewer")
     main_window.tab_widget.setCurrentIndex(main_window.tab_widget.count() - 1)
     QTest.qWait(100)
-
-    controller.set_file(sgy_file)
-    qc_view.run_qc()
-    assert job_manager.wait_for_all_jobs(15_000)
-    QTest.qWait(200)
-    assert qc_view.current_run_uuid is not None
+    assert segy_view.property("module_id") == "segy_viewer"
 
     main_window.close()
     QTest.qWait(100)

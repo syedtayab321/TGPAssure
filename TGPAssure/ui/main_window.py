@@ -26,7 +26,6 @@ from ui.icons import get_icon
 from ui.animations import fade_widget
 from ui.docks.project_explorer import ProjectExplorer
 from ui.ribbon.home_ribbon import HomeRibbonProvider
-from ui.ribbon.segy_qc_ribbon import SegyQcRibbonProvider
 from ui.ribbon.segy_viewer_ribbon import SegyViewerRibbonProvider
 from ui.ribbon.segd_ribbon import SegdRibbonProvider
 from ui.ribbon.module_ribbons import standard_providers
@@ -326,10 +325,6 @@ class MainWindow(QMainWindow):
             ],
         }
         self._responsive_mode = ""
-        self._segy_qc_view = None
-        self._segy_qc_tab_title = "SEG-Y QC"
-        self._segy_qc_tab_icon = QIcon()
-        self._data_quality_dashboard = None
         self._magnetic_dashboard = None
         self._gravity_dashboard = None
         self._electrical_dashboard = None
@@ -351,7 +346,6 @@ class MainWindow(QMainWindow):
             "home": ("Home", "Home", "Home"),
             "seismic": ("Seismic", "Seismic", "Seismic"),
             "segd": ("SEG-D", "SEG-D", "SEG-D"),
-            "segy_qc": ("SEG-Y QC", "SEG-Y QC", "QC"),
             "segy_viewer": ("SEG-Y Viewer", "SEG-Y View", "SEG-Y"),
             "visualization": ("2D/3D View", "2D/3D", "View"),
             "converter": ("Converter", "Converter", "Convert"),
@@ -391,7 +385,6 @@ class MainWindow(QMainWindow):
         self._register_ribbon_provider(SegyViewerRibbonProvider())
         self._register_ribbon_provider(ConverterRibbonProvider())
         self._register_ribbon_provider(SeismicVisualizationRibbonProvider())
-        self._register_ribbon_provider(SegyQcRibbonProvider())
         for provider in workflow_providers():
             self._register_ribbon_provider(provider)
         for provider in geodetic_providers():
@@ -1260,7 +1253,7 @@ class MainWindow(QMainWindow):
 
             # Each seismic subtab now owns its actual workspace.  Previously all
             # four contexts were routed to Data Quality, so clicking SEG-D, SEG-Y
-            # Viewer or SEG-Y QC appeared to open the same pair of documents.
+            # Viewer previously shared the old SEG-Y viewer workspace; it is now viewer-only.
             if context in {"seismic", "segd"}:
                 if self._activate_existing_workspace("segd") is None:
                     self._open_segd_viewer()
@@ -1268,10 +1261,6 @@ class MainWindow(QMainWindow):
             if context == "segy_viewer":
                 if self._activate_existing_workspace("segy_viewer") is None:
                     self._open_segy_file()
-                return
-            if context == "segy_qc":
-                if not self.activate_segy_qc_view():
-                    self._warn_segy_qc_unavailable()
                 return
             if context == "segd_scanner":
                 self._open_segd_scanner_dashboard()
@@ -1417,7 +1406,6 @@ class MainWindow(QMainWindow):
             "electrical": "electrical",
             "vibroseis": "vibroseis",
             "geodetic": "geodetic",
-            "segy_qc": "seismic",
             "segy_viewer": "seismic",
             "segd": "seismic",
             "converter": "seismic",
@@ -1461,10 +1449,6 @@ class MainWindow(QMainWindow):
         requested = str(module_id or "home")
         if requested == "home":
             main_id, provider_id = "home", "home"
-        elif requested == "segy_qc":
-            # SEG-Y QC commands are now combined into the single SEG-Y ribbon tab.
-            # The document can still carry module_id=segy_qc for workspace logic.
-            main_id, provider_id = "seismic", "segy_viewer"
         elif requested in {"seismic", "magnetic", "electrical", "gravity", "vibroseis", "geodetic"}:
             main_id = requested
             provider_id = self._default_provider_for_main(main_id)
@@ -1583,7 +1567,7 @@ class MainWindow(QMainWindow):
             "documentation", "report_issue", "reset_layout", "toggle_explorer",
             "subscription_modules", "logout_account",
             "toggle_properties", "toggle_console", "save_layout", "load_layout",
-            "segd_open_file", "segd_open_viewer", "segd_open_2d3d", "segy_open_file", "segy_open_2d3d",
+            "segd_open_file", "segd_open_viewer", "segd_open_2d3d", "segy_open_file",
             "visualization_open",
             "magnetic_open", "magnetic_open_rover", "magnetic_open_base", "magnetic_open_boundary",
             "gravity_open", "gravity_open_observations", "gravity_open_base",
@@ -1632,22 +1616,12 @@ class MainWindow(QMainWindow):
             return self._active_segd_viewer() is not None
 
         if action_id.startswith("segy_"):
-            view = self._get_segy_qc_view()
-            controller = getattr(view, "controller", None) if view is not None else None
-            has_file = bool(getattr(controller, "file_path", None))
-            has_run = bool(getattr(view, "current_run_uuid", None) or getattr(controller, "current_run_uuid", None))
-            has_post = bool(getattr(view, "post_qc_file_path", None)) if view is not None else False
-            if action_id in {"segy_select_base", "segy_view_raw", "segy_select_post_qc"}:
-                return has_file
-            if action_id in {"segy_view_post_qc", "segy_compare_pre_post"}:
-                return has_file and has_post
-            if action_id == "segy_run_qc":
-                return has_file and getattr(controller, "current_job_id", None) is None
-            if action_id == "segy_cancel_qc":
-                return bool(controller and getattr(controller, "current_job_id", None) is not None)
-            if action_id in {"segy_view_results", "segy_generate_pdf", "segy_generate_xlsx"} or action_id.startswith("segy_stage_"):
-                return has_run
-            return True
+            if action_id == "segy_open_file":
+                return True
+            if action_id.startswith("segy_viewer_"):
+                return self._active_segy_viewer() is not None
+            # Old automated SEG-Y actions were removed.
+            return False
 
         if action_id.startswith("visualization_"):
             return self._active_visualization() is not None
@@ -1781,52 +1755,110 @@ class MainWindow(QMainWindow):
                 self.status_bar.showMessage("Open a SEG-Y viewer first", 2500)
             elif action_id == "segy_viewer_export_image":
                 viewer.export_image()
+            elif action_id == "segy_viewer_export_bmp":
+                if hasattr(viewer, "export_bmp"):
+                    viewer.export_bmp()
+            elif action_id == "segy_viewer_copy_view":
+                if hasattr(viewer, "copy_view_to_clipboard"):
+                    viewer.copy_view_to_clipboard()
             elif action_id == "segy_viewer_fit":
                 viewer.fit()
             elif action_id == "segy_viewer_wiggle":
-                viewer.mode.setCurrentIndex(viewer.mode.findData("wiggle"))
+                if hasattr(viewer, "set_display_preset"):
+                    viewer.set_display_preset("wiggle")
+                else:
+                    viewer.mode.setCurrentIndex(viewer.mode.findData("wiggle"))
             elif action_id == "segy_viewer_va":
-                viewer.mode.setCurrentIndex(viewer.mode.findData("va"))
+                if hasattr(viewer, "set_display_preset"):
+                    viewer.set_display_preset("va")
+                else:
+                    viewer.mode.setCurrentIndex(viewer.mode.findData("va"))
             elif action_id == "segy_viewer_vd":
-                viewer.mode.setCurrentIndex(viewer.mode.findData("vd"))
+                if hasattr(viewer, "set_display_preset"):
+                    viewer.set_display_preset("vd")
+                else:
+                    viewer.mode.setCurrentIndex(viewer.mode.findData("vd"))
             elif action_id == "segy_viewer_color":
-                viewer.mode.setCurrentIndex(viewer.mode.findData("color"))
+                if hasattr(viewer, "set_display_preset"):
+                    viewer.set_display_preset("color")
+                else:
+                    viewer.mode.setCurrentIndex(viewer.mode.findData("color"))
+            elif action_id == "segy_viewer_toggle_wiggle":
+                viewer.set_display_layer("wiggle")
+            elif action_id == "segy_viewer_toggle_gray":
+                viewer.set_display_layer("gray")
+            elif action_id == "segy_viewer_toggle_color":
+                viewer.set_display_layer("color")
+            elif action_id == "segy_viewer_toggle_timelines":
+                viewer.set_display_layer("timelines")
+            elif action_id == "segy_viewer_fill_none":
+                viewer.set_fill_mode("none")
+            elif action_id == "segy_viewer_fill_positive":
+                viewer.set_fill_mode("positive")
+            elif action_id == "segy_viewer_fill_negative":
+                viewer.set_fill_mode("negative")
+            elif action_id == "segy_viewer_delay_header":
+                viewer.toggle_use_delay_header()
+            elif action_id == "segy_viewer_color_wiggle":
+                viewer.choose_display_color("wiggle")
+            elif action_id == "segy_viewer_color_fill":
+                viewer.choose_display_color("fill")
+            elif action_id == "segy_viewer_color_selected":
+                viewer.choose_display_color("selected")
+            elif action_id == "segy_viewer_traces_minus":
+                viewer.adjust_scale_control("traces", -10)
+            elif action_id == "segy_viewer_traces_plus":
+                viewer.adjust_scale_control("traces", 10)
+            elif action_id == "segy_viewer_time_minus":
+                viewer.adjust_scale_control("time", -10)
+            elif action_id == "segy_viewer_time_plus":
+                viewer.adjust_scale_control("time", 10)
+            elif action_id == "segy_viewer_gain_w_minus":
+                viewer.adjust_scale_control("gain_w", -5)
+            elif action_id == "segy_viewer_gain_w_plus":
+                viewer.adjust_scale_control("gain_w", 5)
+            elif action_id == "segy_viewer_gain_c_minus":
+                viewer.adjust_scale_control("gain_c", -5)
+            elif action_id == "segy_viewer_gain_c_plus":
+                viewer.adjust_scale_control("gain_c", 5)
+            elif action_id == "segy_viewer_direction_normal":
+                viewer.set_direction("normal")
+            elif action_id == "segy_viewer_direction_reversed":
+                viewer.set_direction("reversed")
+            elif action_id == "segy_viewer_proc_inversion":
+                viewer.toggle_processing_option("inversion")
+            elif action_id == "segy_viewer_proc_filter":
+                viewer.toggle_processing_option("filter")
+            elif action_id == "segy_viewer_proc_agc":
+                viewer.toggle_processing_option("agc")
+            elif action_id == "segy_viewer_proc_norm":
+                viewer.toggle_processing_option("norm")
+            elif action_id == "segy_viewer_proc_weight":
+                viewer.toggle_processing_option("weight")
+            elif action_id == "segy_viewer_processing_params":
+                viewer.show_processing_dialog()
+            elif action_id == "segy_viewer_tool_zoom":
+                viewer.set_viewer_tool("zoom")
+            elif action_id == "segy_viewer_tool_pan":
+                viewer.set_viewer_tool("pan")
+            elif action_id == "segy_viewer_tool_pick":
+                viewer.set_viewer_tool("pick")
+            elif action_id == "segy_viewer_tool_measure":
+                viewer.set_viewer_tool("measure")
+            elif action_id == "segy_viewer_clear_marks":
+                viewer.clear_picks_and_measurements()
             elif action_id == "segy_viewer_headers":
                 if hasattr(viewer, "show_headers_page"):
                     viewer.show_headers_page()
+            elif action_id == "segy_viewer_hardcopy":
+                if hasattr(viewer, "show_hardcopy_page"):
+                    viewer.show_hardcopy_page()
+            elif action_id == "segy_viewer_help":
+                if hasattr(viewer, "_show_short_help"):
+                    viewer._show_short_help()
             elif action_id == "segy_viewer_trace_analysis":
                 if hasattr(viewer, "show_trace_analysis_page"):
                     viewer.show_trace_analysis_page()
-        elif action_id == "segy_open_2d3d":
-            self._open_visualization()
-        elif action_id == "segy_view_raw":
-            self._view_segy_raw()
-        elif action_id == "segy_select_post_qc":
-            self._select_segy_post_qc()
-        elif action_id == "segy_view_post_qc":
-            self._view_segy_post_qc()
-        elif action_id == "segy_compare_pre_post":
-            self._compare_segy_pre_post()
-        elif action_id == "segy_select_base":
-            self._select_segy_repeatability_base()
-        elif action_id.startswith("segy_stage_"):
-            self._focus_segy_processing_stage(action_id.removeprefix("segy_stage_"))
-        elif action_id == "segy_run_qc":
-            self._run_segy_qc()
-        elif action_id == "segy_cancel_qc":
-            self._cancel_segy_qc()
-        elif action_id == "segy_view_results":
-            self._view_segy_results()
-        elif action_id == "segy_edit_profile":
-            self._edit_segy_qc_profile()
-        elif action_id == "segy_open_dashboard":
-            self._open_data_quality_dashboard()
-        elif action_id == "segy_generate_pdf":
-            self._generate_report("pdf")
-        elif action_id == "segy_generate_xlsx":
-            self._generate_report("xlsx")
-        elif action_id == "segy_convert_to_segd":
-            self._open_converter_page()
         elif action_id == "segd_scanner_open":
             self._open_segd_scanner_dashboard().scan_file()
         elif action_id == "segd_scanner_folder":
@@ -2422,43 +2454,45 @@ class MainWindow(QMainWindow):
 
     def _open_segy_file(self) -> None:
         file_path, _ = QFileDialog.getOpenFileName(
-            self, "Open SEG-Y File", str(Path.home()),
+            self,
+            "Open SEG-Y File",
+            str(Path.home()),
             "SEG-Y Files (*.sgy *.segy);;All Files (*.*)",
         )
-        if not file_path:
-            return
-        resolved = str(Path(file_path).resolve())
+        if file_path:
+            self._open_segy_path(file_path)
+
+    def _open_segy_path(self, file_path: str | Path) -> None:
+        resolved = str(Path(file_path).expanduser().resolve())
         task_id = f"file-open:segy:{Path(resolved).name}"
-        self.begin_busy_task(task_id, "Opening SEG-Y File", f"Preparing {Path(resolved).name}", 5)
+        self.begin_busy_task(task_id, "Opening SEG-Y Viewer", f"Preparing {Path(resolved).name}", 5)
         try:
             for index in range(self.tab_widget.count()):
                 widget = self.tab_widget.widget(index)
                 if widget is not None and widget.property("segy_viewer_file_path") == resolved:
-                    self.update_busy_task(task_id, 45, "Activating existing SEG-Y viewer")
+                    self.update_busy_task(task_id, 70, "Activating existing SEG-Y viewer")
                     self.tab_widget.setCurrentIndex(index)
                     self._set_active_module("segy_viewer")
-                    qc_view = self._get_segy_qc_view()
-                    if qc_view is not None and getattr(qc_view, "current_file_path", None) != Path(resolved):
-                        self.update_busy_task(task_id, 75, "Synchronizing SEG-Y QC workspace")
-                        qc_view.set_file_path(resolved)
                     self.update_busy_task(task_id, 100, "SEG-Y viewer is ready")
                     return
+
             from modules.seismic.segy_viewer.segy_viewer_widget import SegyViewerWidget
-            self.update_busy_task(task_id, 35, "Building SEG-Y trace viewer")
+
+            self.update_busy_task(task_id, 35, "Building SEG-Y manual trace viewer")
             QApplication.processEvents()
             viewer = SegyViewerWidget(resolved, self)
+            viewer.setProperty("module_id", "segy_viewer")
             viewer.setProperty("segy_viewer_file_path", resolved)
-            self.update_busy_task(task_id, 60, "Opening SEG-Y document tab")
-            index = self._add_document_tab(viewer, f"SEG-Y: {Path(resolved).name}", icon=get_icon("seg-y", color="#FFFFFF", size=15))
+            self.update_busy_task(task_id, 60, "Opening SEG-Y viewer tab")
+            index = self._add_document_tab(
+                viewer,
+                f"SEG-Y: {Path(resolved).name}",
+                icon=get_icon("seg-y", color="#FFFFFF", size=15),
+            )
             self.tab_widget.setCurrentIndex(index)
             self._set_active_module("segy_viewer")
-            # Keep the QC workspace synchronized so Run SEG-Y QC works immediately.
-            qc_view = self._get_segy_qc_view()
-            if qc_view is not None:
-                self.update_busy_task(task_id, 82, "Synchronizing SEG-Y QC workspace")
-                qc_view.set_file_path(resolved)
             self.update_busy_task(task_id, 100, "SEG-Y file is open")
-            self.log(f"Opened SEG-Y viewer: {resolved}")
+            self.log(f"Opened SEG-Y manual viewer: {resolved}")
         except Exception as exc:
             QMessageBox.critical(self, "SEG-Y Open Error", str(exc))
         finally:
@@ -2467,7 +2501,7 @@ class MainWindow(QMainWindow):
                     task_id,
                     "segy_viewer",
                     self.tab_widget.currentWidget() if hasattr(self, "tab_widget") else None,
-                    ready_message="SEG-Y file is ready",
+                    ready_message="SEG-Y viewer is ready",
                 )
 
     def _open_seg2_file(self) -> None:
@@ -2507,12 +2541,13 @@ class MainWindow(QMainWindow):
             QMessageBox.information(self, "Navigation", f"Navigation file loaded: {Path(file_path).name}")
 
     def _validate_seismic_data(self) -> None:
-        # Validation is the SEG-Y/SEG-D QC workflow; do not maintain a second,
-        # misleading placeholder validation implementation.
         if self._active_segd_viewer() is not None:
             self._apply_to_active_segd("run_qc", "full")
-        else:
-            self._run_segy_qc()
+            return
+        if self._active_segy_viewer() is not None:
+            self.status_bar.showMessage("SEG-Y is now manual viewer-only. Use picks, measure, headers and export from the SEG-Y tab.", 4000)
+            return
+        self._open_segy_file()
 
     def _process_seismic_data(self) -> None:
         viewer = self._active_visualization()
@@ -3713,185 +3748,16 @@ class MainWindow(QMainWindow):
         if suffix in {".segd", ".sgd", ".d"}:
             self._set_active_module("segd")
 
-    def _view_segy_raw(self) -> None:
-        view = self._get_segy_qc_view()
-        path = getattr(view, "current_file_path", None) if view is not None else None
-        if path is None:
-            self.status_bar.showMessage("Open a raw SEG-Y file in SEG-Y QC first", 3000)
-            return
-        self._open_visualization_path(str(path))
-
-    def _select_segy_post_qc(self) -> None:
-        view = self._get_segy_qc_view()
-        if view is None:
-            self._warn_segy_qc_unavailable()
-            return
-        if self.activate_segy_qc_view():
-            view.select_post_qc_file()
-            self._update_ribbon()
-
-    def _view_segy_post_qc(self) -> None:
-        view = self._get_segy_qc_view()
-        path = getattr(view, "post_qc_file_path", None) if view is not None else None
-        if path is None:
-            self.status_bar.showMessage("Select a processed/post-QC SEG-Y file first", 3000)
-            return
-        self._open_visualization_path(str(path))
-
-    def _compare_segy_pre_post(self) -> None:
-        view = self._get_segy_qc_view()
-        raw = getattr(view, "current_file_path", None) if view is not None else None
-        post = getattr(view, "post_qc_file_path", None) if view is not None else None
-        if raw is None or post is None:
-            self.status_bar.showMessage("Raw and post-QC SEG-Y files are required for comparison", 3000)
-            return
-        self._open_segy_pre_post_comparison(str(raw), str(post))
-
-    def _open_segy_pre_post_comparison(self, raw_path: str, post_path: str) -> None:
-        raw = str(Path(raw_path).expanduser().resolve())
-        post = str(Path(post_path).expanduser().resolve())
-        comparison_key = f"{raw}|{post}"
-        for index in range(self.tab_widget.count()):
-            widget = self.tab_widget.widget(index)
-            if widget is not None and widget.property("segy_comparison_key") == comparison_key:
-                self.tab_widget.setCurrentIndex(index)
-                self._set_active_module("segy_qc")
-                return
-        try:
-            from modules.seismic.segy_viewer.pre_post_comparison import SegyPrePostComparison
-
-            comparison = SegyPrePostComparison(raw, post, self)
-            comparison.setProperty("segy_comparison_key", comparison_key)
-            comparison.setProperty("module_id", "segy_qc")
-            index = self._add_document_tab(
-                comparison,
-                f"SEG-Y Compare: {Path(raw).stem} ↔ {Path(post).stem}",
-                icon=get_icon("view-split-left-right", size=15),
-            )
-            self.tab_widget.setCurrentIndex(index)
-            self._set_active_module("segy_qc")
-            self.log(f"Opened SEG-Y raw/post-QC comparison: {raw} | {post}")
-        except Exception as exc:
-            QMessageBox.critical(self, "SEG-Y Comparison", f"Unable to open comparison:\n{exc}")
-
-    def _select_segy_repeatability_base(self) -> None:
-        view = self._get_segy_qc_view()
-        if view is None:
-            self._warn_segy_qc_unavailable()
-            return
-        if self.activate_segy_qc_view():
-            view.select_repeatability_base_file()
-
-    def _focus_segy_processing_stage(self, stage_key: str) -> None:
-        view = self._get_segy_qc_view()
-        if view is None:
-            self._warn_segy_qc_unavailable()
-            return
-        if self.activate_segy_qc_view():
-            view.focus_stage(stage_key)
-
-    def _run_segy_qc(self) -> None:
-        view = self._get_segy_qc_view()
-        if view is None:
-            self._warn_segy_qc_unavailable()
-            return
-        if self.activate_segy_qc_view():
-            view.run_qc()
-
-    def _cancel_segy_qc(self) -> None:
-        view = self._get_segy_qc_view()
-        if view is None:
-            self._warn_segy_qc_unavailable()
-            return
-        if self.activate_segy_qc_view():
-            view.cancel_qc()
-
-    def _view_segy_results(self) -> None:
-        view = self._get_segy_qc_view()
-        if view is None:
-            self._warn_segy_qc_unavailable()
-            return
-        if self.activate_segy_qc_view():
-            view.show_results()
-
-    def _edit_segy_qc_profile(self) -> None:
-        view = self._get_segy_qc_view()
-        if view is None:
-            self._warn_segy_qc_unavailable()
-            return
-        if self.activate_segy_qc_view():
-            view.edit_thresholds()
-
-    def _open_data_quality_dashboard(self) -> None:
-        self.activate_data_quality_dashboard()
-
-    def attach_data_quality_dashboard(self, dashboard: QWidget, open_now: bool = False) -> None:
-        if dashboard is None:
-            return
-        self._data_quality_dashboard = dashboard
-        dashboard.setProperty("module_id", "segy_qc")
-        dashboard.destroyed.connect(self._clear_data_quality_dashboard_reference)
-        if open_now:
-            self.activate_data_quality_dashboard()
-        elif self.tab_widget.indexOf(dashboard) < 0:
-            dashboard.hide()
-
-    def _clear_data_quality_dashboard_reference(self, *_args) -> None:
-        self._data_quality_dashboard = None
-        self._update_ribbon()
-
-    def activate_data_quality_dashboard(self) -> None:
-        dashboard = self._data_quality_dashboard
-        if dashboard is None:
-            try:
-                from core.domain.data_quality_service import DataQualityService
-                from ui.docks.data_quality_dashboard import DataQualityDashboard
-
-                service = self.container.resolve(DataQualityService)
-                dashboard = DataQualityDashboard(service, self)
-                self.attach_data_quality_dashboard(dashboard)
-            except Exception as exc:
-                QMessageBox.warning(
-                    self,
-                    "Data Quality Dashboard",
-                    f"Unable to open the Data Quality dashboard:\n{exc}",
-                )
-                return
-
-        index = self.tab_widget.indexOf(dashboard)
-        if index < 0:
-            index = self._add_document_tab(
-                dashboard,
-                "Data Quality",
-                icon=get_icon("view-dashboard", size=15),
-                closable=True,
-            )
-
-        self.tab_widget.setCurrentIndex(index)
-        self._set_active_module("segy_qc")
-        task_id = "data-quality:refresh"
-        self.begin_busy_task(task_id, "Refreshing Data Quality", "Updating QC metrics, findings and summaries")
-        try:
-            if hasattr(dashboard, "show_overview"):
-                dashboard.show_overview()
-            elif hasattr(dashboard, "refresh"):
-                dashboard.refresh()
-            self.update_busy_task(task_id, 100, "Data Quality dashboard is ready")
-        except Exception as exc:
-            self.log(f"Data Quality dashboard refresh failed: {exc}")
-        finally:
-            self.end_busy_task(task_id)
-        dashboard.show()
-        dashboard.raise_()
-        dashboard.setFocus(Qt.OtherFocusReason)
-
     def open_imported_file(self, file_path: str | Path) -> None:
         path = Path(file_path).expanduser().resolve()
         if not path.is_file():
             QMessageBox.warning(self, "File Not Found", f"The selected file does not exist:\n{path}")
             return
         suffix = path.suffix.lower()
-        if suffix in {".sgy", ".segy", ".segd", ".sgd", ".d"}:
+        if suffix in {".sgy", ".segy"}:
+            self._open_segy_path(str(path))
+            return
+        if suffix in {".segd", ".sgd", ".d"}:
             self._open_visualization_path(str(path))
             return
         if suffix in {".csv", ".tsv", ".txt", ".dat", ".log", ".xyz", ".asc", ".xlsx", ".xlsm"}:
@@ -4057,14 +3923,6 @@ class MainWindow(QMainWindow):
             self.log(f"Failed to open SEG-D file: {e}")
             QMessageBox.critical(self, "SEG-D Open Error", f"Failed to open SEG-D file:\n{file_path}\n\n{e}")
 
-    def _generate_report(self, format_type: str) -> None:
-        view = self._get_segy_qc_view()
-        if view is None:
-            self._warn_segy_qc_unavailable()
-            return
-        if self.activate_segy_qc_view():
-            view.request_report(format_type)
-
     @staticmethod
     def _is_qobject_alive(obj: object | None) -> bool:
         if obj is None:
@@ -4072,91 +3930,6 @@ class MainWindow(QMainWindow):
         try:
             return bool(is_qobject_valid(obj))
         except RuntimeError:
-            return False
-
-    def _get_segy_qc_view(self) -> QWidget | None:
-        view = self._segy_qc_view
-        if not self._is_qobject_alive(view):
-            self._segy_qc_view = None
-            return None
-        return view
-
-    def _warn_segy_qc_unavailable(self) -> None:
-        QMessageBox.warning(
-            self,
-            "SEG-Y QC",
-            "The SEG-Y QC workspace is not available. Reopen the project or restart the application.",
-        )
-
-    def _clear_segy_qc_view_reference(self, *_args) -> None:
-        self._segy_qc_view = None
-        self._update_ribbon()
-
-    def attach_segy_qc_view(self, view: QWidget) -> None:
-        if not self._is_qobject_alive(view):
-            self._segy_qc_view = None
-            return
-
-        self._segy_qc_view = view
-        view.setProperty("module_id", "segy_qc")
-        view.destroyed.connect(self._clear_segy_qc_view_reference)
-        if hasattr(view, "view_file_requested"):
-            view.view_file_requested.connect(self._open_visualization_path)
-        if hasattr(view, "compare_files_requested"):
-            view.compare_files_requested.connect(self._open_segy_pre_post_comparison)
-        if hasattr(view, "review_targets_changed"):
-            view.review_targets_changed.connect(self._update_ribbon)
-        if hasattr(view, "activity_started"):
-            view.activity_started.connect(
-                lambda title, message: self.begin_busy_task("segy:file", title, message)
-            )
-            view.activity_progress.connect(
-                lambda value, message: self.update_busy_task("segy:file", value, message)
-            )
-            view.activity_finished.connect(lambda: (self.end_busy_task("segy:file"), self._update_ribbon()))
-            view.destroyed.connect(lambda *_: self.end_busy_task("segy:file"))
-        controller = getattr(view, "controller", None)
-        if controller is not None:
-            for signal_name in ("file_loaded", "run_started", "run_completed", "run_failed", "run_cancelled", "run_loaded"):
-                signal = getattr(controller, signal_name, None)
-                if signal is not None:
-                    try:
-                        signal.connect(lambda *_: self._update_ribbon())
-                    except Exception:
-                        pass
-
-        index = self.tab_widget.indexOf(view)
-        if index >= 0:
-            self._segy_qc_tab_title = self.tab_widget.tabText(index) or "SEG-Y QC"
-            self._segy_qc_tab_icon = self.tab_widget.tabIcon(index)
-
-    def activate_segy_qc_view(self) -> bool:
-        view = self._get_segy_qc_view()
-        if view is None:
-            return False
-
-        try:
-            index = self.tab_widget.indexOf(view)
-            if index < 0:
-                index = self._add_document_tab(
-                    view,
-                    self._segy_qc_tab_title,
-                    icon=self._segy_qc_tab_icon if not self._segy_qc_tab_icon.isNull() else get_icon(
-                        "seismic",
-                        color="#FFFFFF",
-                        size=15,
-                    ),
-                    closable=True,
-                )
-            self.tab_widget.setCurrentIndex(index)
-            view.show()
-            view.raise_()
-            view.setFocus(Qt.OtherFocusReason)
-            self._set_active_module("segy_qc")
-            return True
-        except RuntimeError as exc:
-            self.log(f"SEG-Y QC view is no longer valid: {exc}")
-            self._clear_segy_qc_view_reference()
             return False
 
     def _show_about(self):
@@ -4179,14 +3952,6 @@ class MainWindow(QMainWindow):
         if widget is None:
             return
 
-        segy_view = self._get_segy_qc_view()
-        if segy_view is not None and widget is segy_view:
-            self._segy_qc_tab_title = self.tab_widget.tabText(index) or "SEG-Y QC"
-            self._segy_qc_tab_icon = self.tab_widget.tabIcon(index)
-            self.tab_widget.removeTab(index)
-            widget.hide()
-            self._sync_document_workspace()
-            return
 
         if hasattr(widget, "close_file"):
             try:
@@ -4246,14 +4011,6 @@ class MainWindow(QMainWindow):
             if widget is None or widget.property('workspace_tab_id') != tab_id:
                 continue
 
-            segy_view = self._get_segy_qc_view()
-            if segy_view is not None and widget is segy_view:
-                self._segy_qc_tab_title = self.tab_widget.tabText(index) or "SEG-Y QC"
-                self._segy_qc_tab_icon = self.tab_widget.tabIcon(index)
-                self.tab_widget.removeTab(index)
-                widget.hide()
-                self._sync_document_workspace()
-                return
 
             self.tab_widget.removeTab(index)
             widget.deleteLater()

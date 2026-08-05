@@ -1,19 +1,18 @@
 """Seismic package with lazy entry points.
 
-Core SEG-Y/SEG-D readers and numerical utilities must remain importable in
-headless QC/batch environments where Qt/OpenGL are intentionally unavailable.
-GUI and controller dependencies are therefore loaded only when requested.
+The SEG-Y manual viewer, SEG-D viewer, converter and 2D/3D visualization are
+kept independent from the removed automated SEG-Y pipeline.
 """
 from __future__ import annotations
 
-__all__ = ["SegyQcController", "SeismicInterpretationStore"]
+__all__ = ["SegyReader", "SeismicInterpretationStore"]
 
 
 def __getattr__(name: str):
-    if name == "SegyQcController":
-        from modules.seismic.segy_qc.segy_qc_controller import SegyQcController
+    if name == "SegyReader":
+        from modules.seismic.segy_reader import SegyReader
 
-        return SegyQcController
+        return SegyReader
     if name == "SeismicInterpretationStore":
         from modules.seismic.interpretation_store import SeismicInterpretationStore
 

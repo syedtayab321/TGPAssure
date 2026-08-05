@@ -8,8 +8,7 @@ from typing import TYPE_CHECKING, Any, Hashable
 import numpy as np
 
 from core.data_access.db_engine import DatabaseEngine
-from modules.seismic.segy_qc.qc_repository import SegyQcRepository
-from modules.seismic.segy_qc.segy_reader import SegyReader, SegyTraceIndex
+from modules.seismic.segy_reader import SegyReader, SegyTraceIndex
 from modules.seismic.segy_viewer.segy_display import (
     DisplayGrid,
     align_traces_to_time_grid,
@@ -511,37 +510,8 @@ class UnifiedSeismicDataSource:
         return volume.amplitudes[:, :, position]
 
     def load_existing_qc_flags(self) -> list[QcTraceFlag]:
-        if not self.is_segy or self.database_engine is None:
-            return []
-        try:
-            repository = SegyQcRepository(self.database_engine)
-            runs = repository.list_runs(limit=1, file_path=self.file_path)
-            if not runs:
-                return []
-            findings = repository.get_findings(runs[0]["run_uuid"])
-            flags: list[QcTraceFlag] = []
-            for finding in findings:
-                trace_index = finding.get("trace_index")
-                if trace_index is None:
-                    trace_index = finding.get("context", {}).get("trace_index")
-                if trace_index is None:
-                    continue
-                flags.append(
-                    QcTraceFlag(
-                        trace_index=max(0, int(trace_index) - 1),
-                        severity=str(finding.get("severity") or "warning"),
-                        reason=str(finding.get("title") or finding.get("description") or "QC finding"),
-                        rms=float(finding.get("observed_value") or 0.0),
-                        peak=0.0,
-                        zero_fraction=0.0,
-                        clipping_fraction=0.0,
-                        spike_score=0.0,
-                        source="SEG-Y QC",
-                    )
-                )
-            return flags
-        except Exception:
-            return []
+        """Manual viewer build: old automated repository integration removed."""
+        return []
 
     def close(self) -> None:
         self._cache.clear()

@@ -54,7 +54,7 @@ class DataQualityDashboard(QWidget):
         self._svc = data_quality_service
         self._last_layout_mode = ""
         self.setObjectName("dataQualityDashboard")
-        self.setProperty("module_id", "segy_qc")
+        self.setProperty("module_id", "tools")
         self.setMinimumSize(430, 260)
         self._build_ui()
         self._apply_style()
@@ -74,7 +74,7 @@ class DataQualityDashboard(QWidget):
         title_block.setSpacing(0)
         self.title_label = QLabel("Data Quality Dashboard")
         self.title_label.setObjectName("dqTitle")
-        self.subtitle_label = QLabel("SEG-Y QC overview, stages and run history")
+        self.subtitle_label = QLabel("Project data quality overview and run history")
         self.subtitle_label.setObjectName("dqSubtitle")
         title_block.addWidget(self.title_label)
         title_block.addWidget(self.subtitle_label)

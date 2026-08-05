@@ -59,6 +59,9 @@ class RibbonGroupWidget(QFrame):
                 "large_font": 7,
                 "small_font": 7,
                 "caption_font": 7,
+                "icon_size": 13,
+                "icon_button": 22,
+                "icon_column_width": 24,
             }
         if mode == "medium":
             return {
@@ -73,6 +76,9 @@ class RibbonGroupWidget(QFrame):
                 "large_font": 8,
                 "small_font": 8,
                 "caption_font": 7,
+                "icon_size": 13,
+                "icon_button": 22,
+                "icon_column_width": 24,
             }
         return {
             "large_icon": 27,
@@ -86,6 +92,9 @@ class RibbonGroupWidget(QFrame):
             "large_font": 8,
             "small_font": 8,
             "caption_font": 8,
+            "icon_size": 15,
+            "icon_button": 25,
+            "icon_column_width": 27,
         }
 
     def _build_ui(self) -> None:
@@ -101,7 +110,9 @@ class RibbonGroupWidget(QFrame):
         row.setAlignment(Qt.AlignLeft | Qt.AlignTop)
 
         for actions in self._arranged_columns().values():
-            if len(actions) == 1 and actions[0].presentation != "small":
+            if actions and all(action.presentation == "icon" for action in actions):
+                row.addWidget(self._create_icon_column(actions), 0, Qt.AlignTop)
+            elif len(actions) == 1 and actions[0].presentation not in {"small", "icon"}:
                 row.addWidget(self._create_large_button(actions[0]), 0, Qt.AlignTop)
             else:
                 row.addWidget(self._create_small_column(actions), 0, Qt.AlignTop)
@@ -127,7 +138,7 @@ class RibbonGroupWidget(QFrame):
         # which made those tabs oversized and inconsistent. Apply the same
         # large-primary + stacked-secondary layout automatically to all such groups.
         has_explicit_layout = any(
-            action.column is not None or (action.presentation or "large").lower() == "small"
+            action.column is not None or (action.presentation or "large").lower() in {"small", "icon", "icon_only", "mini"}
             for action in actions
         )
         if not has_explicit_layout:
@@ -148,10 +159,16 @@ class RibbonGroupWidget(QFrame):
         auto_small_column: int | None = None
         for action in actions:
             presentation = (action.presentation or "large").lower()
-            action.presentation = "small" if presentation == "small" else "large"
+            if presentation in {"icon", "icon_only", "mini"}:
+                action.presentation = "icon"
+            elif presentation == "small":
+                action.presentation = "small"
+            else:
+                action.presentation = "large"
+
             if action.column is not None:
                 column = action.column
-            elif action.presentation == "small":
+            elif action.presentation in {"small", "icon"}:
                 if auto_small_column is None or len(columns.get(auto_small_column, [])) >= 3:
                     while next_column in columns:
                         next_column += 1
@@ -211,6 +228,46 @@ class RibbonGroupWidget(QFrame):
         self._attach_context_menu(button, action)
         self._attach_badge(button, action.badge)
         return button
+
+    def _create_icon_column(self, actions: list[RibbonAction]) -> QWidget:
+        """Create a very compact icon-only stack for dense technical ribbons.
+
+        The full label remains available as the tooltip. This is used by the
+        SEG-Y viewer ribbon so that display, scale, processing and picking
+        controls do not overflow horizontally on normal laptop screens.
+        """
+        column_widget = QWidget(self)
+        column_widget.setObjectName("ribbonIconColumn")
+        column_widget.setFixedWidth(self._metrics["icon_column_width"])
+        column_layout = QVBoxLayout(column_widget)
+        column_layout.setContentsMargins(0, 0, 0, 0)
+        column_layout.setSpacing(0)
+        column_layout.setAlignment(Qt.AlignTop | Qt.AlignHCenter)
+
+        for action in actions[:3]:
+            button = QToolButton(column_widget)
+            button.setObjectName("ribbonIconAction")
+            button.setProperty("accent", action.accent)
+            button.setProperty("hasMenu", action.has_menu)
+            button.setToolButtonStyle(Qt.ToolButtonIconOnly)
+            button.setText("")
+            button.setToolTip(self._tooltip(action))
+            button.setIcon(get_icon(action.icon, size=self._metrics["icon_size"]))
+            button.setIconSize(QSize(self._metrics["icon_size"], self._metrics["icon_size"]))
+            button.setFixedSize(self._metrics["icon_button"], self._metrics["icon_button"])
+            button.setCursor(Qt.PointingHandCursor)
+            button.setCheckable(action.checkable)
+            button.setChecked(action.checked)
+            button.setEnabled(self._action_enabled(action))
+            button.clicked.connect(
+                lambda checked=False, action_id=action.action_id: self.action_triggered.emit(action_id)
+            )
+            self._attach_context_menu(button, action)
+            column_layout.addWidget(button, 0, Qt.AlignHCenter)
+            self._attach_badge(button, action.badge, compact=True)
+
+        column_layout.addStretch(1)
+        return column_widget
 
     def _create_small_column(self, actions: list[RibbonAction]) -> QWidget:
         column_widget = QWidget(self)

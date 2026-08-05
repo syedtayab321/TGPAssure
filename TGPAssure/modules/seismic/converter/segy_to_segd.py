@@ -12,7 +12,7 @@ from typing import Callable, Iterable, Optional
 
 import numpy as np
 
-from ..segy_qc.segy_reader import SegyReader, SegyTraceIndex
+from ..segy_reader import SegyReader, SegyTraceIndex
 
 try:
     from scipy.signal import resample_poly

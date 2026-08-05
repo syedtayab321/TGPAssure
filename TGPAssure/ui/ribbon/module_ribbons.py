@@ -27,8 +27,7 @@ def standard_providers() -> list[RibbonProvider]:
             RibbonGroup("Zoom", actions(("Fit", "zoom_fit", "zoom-fit-best", None),)),
         ]),
         StaticRibbonProvider("tools", [
-            RibbonGroup("Geophysical Modules", actions(("2D/3D Viewer", "visualization_open", "view-3d", None), ("Magnetic QC", "magnetic_open", "office-chart-line", None), ("Gravity QC", "gravity_open", "view-statistics", None), ("Electrical QC", "electrical_open", "electrical", None), ("Data Quality", "segy_open_dashboard", "view-dashboard", None))),
-            RibbonGroup("QC Control", actions(("Run SEG-Y QC", "segy_run_qc", "media-playback-start", None), ("QC Results", "segy_view_results", "view-statistics", None), ("Profiles", "segy_edit_profile", "preferences-system", None))),
+            RibbonGroup("Geophysical Modules", actions(("2D/3D Viewer", "visualization_open", "view-3d", None), ("Magnetic QC", "magnetic_open", "office-chart-line", None), ("Gravity QC", "gravity_open", "view-statistics", None), ("Electrical QC", "electrical_open", "electrical", None))),
             RibbonGroup("Settings", actions(("Preferences", "preferences", "preferences-system", None), ("Shortcuts", "shortcuts", "input-keyboard", None), ("About", "about", "help-about", None))),
         ]),
         StaticRibbonProvider("help", [

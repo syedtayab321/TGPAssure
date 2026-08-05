@@ -20,17 +20,13 @@ from core.infrastructure.command_bus import CommandBus
 from core.infrastructure.resource_paths import resource_path
 from core.auth import AuthEnvironment, LicenseService
 from modules.workspace.workspace_manager import WorkspaceManager
-from modules.seismic.segy_qc.segy_qc_controller import SegyQcController
-from modules.seismic.segy_qc.segy_qc_view import SegyQcView
 from ui.main_window import MainWindow
-from ui.ribbon.segy_qc_ribbon import SegyQcRibbonProvider
 from ui.ribbon.segd_ribbon import SegdRibbonProvider
 from ui.ribbon.home_ribbon import HomeRibbonProvider
 from core.domain.processing_history import ProcessingHistoryManager
 from core.infrastructure.task_scheduler import TaskScheduler
 from modules.collaboration.collaboration_service import CollaborationService
 from core.domain.data_quality_service import DataQualityService
-from ui.docks.data_quality_dashboard import DataQualityDashboard
 from ui.launch import StartupSplash, TutorialDialog
 from ui.dialogs.auth_dialog import AuthDialog
 from ui.dialogs.subscription_dialog import SubscriptionDialog
@@ -473,69 +469,6 @@ def setup_container(db_engine: DatabaseEngine, app_data_dir: Path, license_servi
     return container
 
 
-def on_generate_report(run_uuid: str, format_type: str, controller: SegyQcController,
-                       project_repo: ProjectRepository, main_window: MainWindow) -> None:
-    from report.report_builders.segy_qc_report_builder import SegyQcReportBuilder
-    from report.renderers.pdf_renderer import PdfRenderer
-    from report.renderers.xlsx_renderer import XlsxRenderer
-
-    task_id: str | None = None
-    try:
-        payload = controller.report_payload(run_uuid)
-        run = payload["run"]
-        source_name = Path(run.get("source_file_name") or run.get("source_file_path") or "segy").stem
-        normalized_format = format_type.lower()
-        default_ext = ".pdf" if normalized_format == "pdf" else ".xlsx"
-        default_name = f"{source_name}_SEG-Y_QC_{run_uuid[:8]}{default_ext}"
-        from ui.dialogs.report_dialog import ReportDialog
-        dialog = ReportDialog(
-            main_window, default_format=normalized_format, default_title="SEG-Y Quality-Control Report",
-            suggested_path=Path.home() / default_name, allow_format_change=False,
-        )
-        if not dialog.exec():
-            return
-        output = dialog.get_report_config().output_path
-
-        task_id = f"segy-report:{run_uuid}:{normalized_format}"
-        main_window.begin_busy_task(
-            task_id,
-            f"Generating SEG-Y QC {normalized_format.upper()} Report",
-            "Building report sections, tables, findings and graphs",
-            5,
-        )
-        QApplication.processEvents()
-        main_window.update_busy_task(task_id, 20, "Building QC report model")
-        model = SegyQcReportBuilder().build(payload)
-        QApplication.processEvents()
-        main_window.update_busy_task(task_id, 55, f"Rendering {normalized_format.upper()} report with charts")
-        renderer = PdfRenderer() if normalized_format == "pdf" else XlsxRenderer()
-        output_path = renderer.render(model, output)
-        QApplication.processEvents()
-        main_window.update_busy_task(task_id, 90, "Registering report in QC history")
-        controller.register_report(
-            run_uuid,
-            normalized_format,
-            output_path,
-            metadata={
-                "overall_result": run.get("overall_result"),
-                "score": run.get("score"),
-                "source_file": run.get("source_file_path"),
-            },
-        )
-        main_window.update_busy_task(task_id, 100, "SEG-Y QC report is ready")
-        main_window.log(f"SEG-Y QC report generated: {output_path}")
-        main_window.end_busy_task(task_id)
-        task_id = None
-        QMessageBox.information(main_window, "Report Generated", f"Report saved to:\n{output_path}")
-    except Exception as exc:
-        if task_id is not None:
-            main_window.end_busy_task(task_id)
-            task_id = None
-        QMessageBox.critical(main_window, "Report Generation Failed", f"Error: {exc}")
-    finally:
-        if task_id is not None:
-            main_window.end_busy_task(task_id)
-
 
 def main() -> int:
     app_data_dir = setup_app_data_dir()
@@ -599,47 +532,6 @@ def main() -> int:
     app.processEvents()
 
     job_manager = container.resolve(JobManager)
-    project_repo = container.resolve(ProjectRepository)
-
-    controller = SegyQcController(db_engine, job_manager, project_repo)
-    qc_view = SegyQcView(controller)
-    main_window.tab_widget.addTab(qc_view, "SEG-Y QC")
-    main_window.attach_segy_qc_view(qc_view)
-
-    dq_dashboard = None
-    try:
-        dq_dashboard = DataQualityDashboard(container.resolve(DataQualityService))
-        main_window.attach_data_quality_dashboard(dq_dashboard, open_now=False)
-        controller.data_changed.connect(dq_dashboard.refresh)
-    except Exception as exc:
-        logger.warning(f"Data Quality dashboard unavailable: {exc}")
-
-    qc_view.generate_report_requested.connect(
-        lambda run_uuid, fmt: on_generate_report(
-            run_uuid, fmt, controller, project_repo, main_window
-        )
-    )
-
-    def suspend_loader_for_stage_approval(_stage_key: str, _stage_name: str) -> None:
-        job_id = controller.current_job_id
-        if job_id is not None:
-            main_window.end_job_loader(job_id)
-
-    def resume_loader_for_qc_stage(_stage_key: str, _stage_name: str, _order: int) -> None:
-        job_id = controller.current_job_id
-        if job_id is not None and not main_window.has_busy_task(f"job:{job_id}"):
-            main_window.begin_job_loader(
-                job_id,
-                cancel_callback=lambda active_job_id=job_id: job_manager.cancel(active_job_id),
-            )
-
-    controller.stage_approval_required.connect(suspend_loader_for_stage_approval)
-    controller.stage_started.connect(resume_loader_for_qc_stage)
-    controller.job_progress.connect(
-        lambda job_id, overall, _stage_key, _stage_progress, message: main_window.update_busy_task(
-            f"job:{job_id}", int(max(0.0, min(1.0, float(overall))) * 100), message
-        )
-    )
 
     def handle_file_import(file_path: str) -> None:
         try:
