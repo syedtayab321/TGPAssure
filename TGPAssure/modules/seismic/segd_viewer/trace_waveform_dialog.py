@@ -11,7 +11,7 @@ try:
 except Exception:
     pass
 from PySide6.QtCore import Qt, QRectF, Signal
-from PySide6.QtGui import QColor, QFont, QMouseEvent, QPainter, QPainterPath, QPen
+from PySide6.QtGui import QColor, QFont, QImage, QMouseEvent, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -34,6 +34,7 @@ from PySide6.QtWidgets import (
     QTableWidgetItem,
     QVBoxLayout,
     QWidget,
+    QApplication,
 )
 
 from modules.seismic.segd_viewer.segd_reader import SegdReader
@@ -225,6 +226,98 @@ def _range_lut(ranges: list[tuple[float, float, str]]) -> np.ndarray:
     return np.asarray(colors, dtype=np.ubyte)
 
 
+def _range_gradient_lut(ranges: list[tuple[float, float, str]], steps: int = 512) -> np.ndarray:
+    """Continuous LUT built from user-editable value ranges.
+
+    The legacy FT panel used hard classes, which makes the spectrogram look
+    blocky.  This LUT keeps the same user-defined range colours but blends them
+    smoothly across the dB scale for a more realistic seismic frequency-time
+    display.
+    """
+    if not ranges:
+        return _colors_to_lut(_PALETTES["TGP Spectral"])
+    valid_ranges = _normalise_ranges(ranges)
+    if not valid_ranges:
+        return _colors_to_lut(_PALETTES["TGP Spectral"])
+    steps = max(16, int(steps))
+    values = np.linspace(valid_ranges[0][0], valid_ranges[-1][1], steps)
+    centers: list[float] = []
+    rgb: list[list[float]] = []
+    for low, high, color_text in valid_ranges:
+        color = QColor(color_text)
+        if not color.isValid():
+            color = QColor("#000000")
+        centers.append((low + high) / 2.0)
+        rgb.append([float(color.red()), float(color.green()), float(color.blue())])
+    if len(centers) == 1:
+        return np.tile(np.asarray(rgb[0], dtype=np.ubyte), (steps, 1))
+    centers_array = np.asarray(centers, dtype=float)
+    rgb_array = np.asarray(rgb, dtype=float)
+    lut = np.vstack([np.interp(values, centers_array, rgb_array[:, c]) for c in range(3)]).T
+    return np.clip(lut, 0, 255).astype(np.ubyte)
+
+
+def _prepare_ft_trace(samples: np.ndarray, sample_interval_ms: float, max_samples: int = 160_000) -> tuple[np.ndarray, float]:
+    """Return an FT-safe display trace and the matching sample interval.
+
+    FT analysis must never freeze the UI on long records.  This keeps the full
+    time span, but gently block-averages very long traces before the spectrogram
+    is calculated.
+    """
+    trace = np.asarray(samples, dtype=np.float64).reshape(-1)
+    trace = np.nan_to_num(trace, nan=0.0, posinf=0.0, neginf=0.0)
+    interval = max(float(sample_interval_ms), 1e-12)
+    if trace.size <= int(max_samples):
+        return trace, interval
+    step = int(np.ceil(trace.size / float(max_samples)))
+    usable = (trace.size // step) * step
+    if usable < 16:
+        return trace[:max_samples], interval * max(1, int(np.ceil(trace.size / float(max_samples))))
+    reduced = trace[:usable].reshape(-1, step).mean(axis=1)
+    return np.asarray(reduced, dtype=np.float64), interval * step
+
+
+def _limit_ft_matrix(
+    frequency: np.ndarray,
+    time_seconds: np.ndarray,
+    matrix: np.ndarray,
+    max_frequency_bins: int = 640,
+    max_time_bins: int = 950,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Cap FT image dimensions so pyqtgraph remains responsive."""
+    f = np.asarray(frequency, dtype=float)
+    t = np.asarray(time_seconds, dtype=float)
+    z = np.asarray(matrix, dtype=float)
+    if z.ndim != 2 or not f.size or not t.size:
+        return f, t, z
+    if f.size > max_frequency_bins:
+        f_idx = np.unique(np.linspace(0, f.size - 1, max_frequency_bins).astype(int))
+        f = f[f_idx]
+        z = z[f_idx, :]
+    if t.size > max_time_bins:
+        t_idx = np.unique(np.linspace(0, t.size - 1, max_time_bins).astype(int))
+        t = t[t_idx]
+        z = z[:, t_idx]
+    return f, t, z
+
+
+def _safe_smooth_ft(matrix: np.ndarray) -> np.ndarray:
+    """Lightweight smoothing for a realistic FT image without making the dialog hang."""
+    z = np.asarray(matrix, dtype=float)
+    if z.ndim != 2 or min(z.shape) < 3:
+        return z
+    try:
+        from scipy.ndimage import gaussian_filter
+
+        return gaussian_filter(z, sigma=(0.65, 0.45), mode="nearest")
+    except Exception:
+        # Cheap separable 3-point smoothing fallback.
+        out = z.copy()
+        out[1:-1, :] = (z[:-2, :] + 2.0 * z[1:-1, :] + z[2:, :]) * 0.25
+        out[:, 1:-1] = (out[:, :-2] + 2.0 * out[:, 1:-1] + out[:, 2:]) * 0.25
+        return out
+
+
 def _legend_html(ranges: list[tuple[float, float, str]], units: str) -> str:
     parts = []
     for low, high, color in ranges[:8]:
@@ -363,7 +456,7 @@ class _RangeEditorDialog(QDialog):
         self.setStyleSheet(DIALOG_STYLE)
         self._defaults = _copy_ranges(defaults)
         self.table = QTableWidget(0, 3, self)
-        self.table.setHorizontalHeaderLabels(["Min", "Max", "Color"])
+        self.table.setHorizontalHeaderLabels(["Min", "Max", "Colour"])
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         self.table.verticalHeader().setVisible(False)
         self.table.setAlternatingRowColors(True)
@@ -376,10 +469,10 @@ class _RangeEditorDialog(QDialog):
         layout.addWidget(self.table, 1)
 
         buttons = QHBoxLayout()
-        add_btn = QPushButton("Add")
+        add_btn = QPushButton("Add Range")
         add_btn.setObjectName("analysisButton")
-        add_btn.clicked.connect(lambda: self._add_row(0.0, 1.0, "#000000"))
-        remove_btn = QPushButton("Remove")
+        add_btn.clicked.connect(self._add_default_row)
+        remove_btn = QPushButton("Remove Selected")
         remove_btn.setObjectName("dangerButton")
         remove_btn.clicked.connect(self._remove_selected)
         default_btn = QPushButton("Load Default")
@@ -408,26 +501,77 @@ class _RangeEditorDialog(QDialog):
         self.table.setItem(row, 0, QTableWidgetItem(f"{float(low):g}"))
         self.table.setItem(row, 1, QTableWidgetItem(f"{float(high):g}"))
         item = QTableWidgetItem(str(color))
-        qcolor = QColor(str(color))
-        if qcolor.isValid():
-            item.setBackground(qcolor)
         self.table.setItem(row, 2, item)
+        button = QPushButton(self.table)
+        button.setCursor(Qt.CursorShape.PointingHandCursor)
+        button.clicked.connect(lambda _checked=False, btn=button: self._choose_button_color(btn))
+        self._set_button_color(button, color)
+        self.table.setCellWidget(row, 2, button)
+
+    def _add_default_row(self) -> None:
+        if self.table.rowCount() == 0:
+            self._add_row(0.0, 1.0, "#000000")
+            return
+        try:
+            low = float(self.table.item(self.table.rowCount() - 1, 1).text())
+        except Exception:
+            low = float(self.table.rowCount())
+        span = 1.0
+        if self.table.rowCount() >= 2:
+            try:
+                prev_low = float(self.table.item(self.table.rowCount() - 2, 0).text())
+                prev_high = float(self.table.item(self.table.rowCount() - 2, 1).text())
+                span = max(1e-6, prev_high - prev_low)
+            except Exception:
+                pass
+        self._add_row(low, low + span, "#000000")
+
+    @staticmethod
+    def _contrast_color(color: QColor) -> str:
+        luminance = (0.299 * color.red() + 0.587 * color.green() + 0.114 * color.blue()) / 255.0
+        return "#FFFFFF" if luminance < 0.45 else "#111827"
+
+    def _set_button_color(self, button: QPushButton, color_text: str) -> None:
+        color = QColor(str(color_text))
+        if not color.isValid():
+            color = QColor("#000000")
+        button.setProperty("range_color", color.name())
+        button.setText(color.name().upper())
+        button.setStyleSheet(
+            "QPushButton{"
+            f"background:{color.name()};color:{self._contrast_color(color)};"
+            f"border:1px solid {color.darker(150).name()};border-radius:4px;"
+            "padding:3px 6px;font-size:8pt;font-weight:900;"
+            "}"
+            "QPushButton:hover{border:2px solid #111827;}"
+        )
+        for row in range(self.table.rowCount()):
+            if self.table.cellWidget(row, 2) is button:
+                item = self.table.item(row, 2)
+                if item is not None:
+                    item.setText(color.name())
+                    item.setBackground(color)
+                break
 
     def _remove_selected(self) -> None:
         rows = sorted({idx.row() for idx in self.table.selectedIndexes()}, reverse=True)
+        if not rows and self.table.currentRow() >= 0:
+            rows = [self.table.currentRow()]
         for row in rows:
             self.table.removeRow(row)
 
     def _choose_cell_color(self, row: int, column: int) -> None:
         if column != 2:
             return
-        item = self.table.item(row, column)
-        if item is None:
+        button = self.table.cellWidget(row, column)
+        if not isinstance(button, QPushButton):
             return
-        color = QColorDialog.getColor(QColor(item.text()), self, "Choose range color")
+        self._choose_button_color(button)
+
+    def _choose_button_color(self, button: QPushButton) -> None:
+        color = QColorDialog.getColor(QColor(str(button.property("range_color") or "#000000")), self, "Choose range colour")
         if color.isValid():
-            item.setText(color.name())
-            item.setBackground(color)
+            self._set_button_color(button, color.name())
 
     def ranges(self) -> list[tuple[float, float, str]]:
         ranges: list[tuple[float, float, str]] = []
@@ -435,7 +579,11 @@ class _RangeEditorDialog(QDialog):
             try:
                 low = float(self.table.item(row, 0).text())
                 high = float(self.table.item(row, 1).text())
-                color = self.table.item(row, 2).text().strip()
+                button = self.table.cellWidget(row, 2)
+                if isinstance(button, QPushButton):
+                    color = str(button.property("range_color") or "#000000")
+                else:
+                    color = self.table.item(row, 2).text().strip()
                 ranges.append((low, high, color))
             except Exception:
                 continue
@@ -458,13 +606,13 @@ class _RangeSelector(QWidget):
         for name in presets:
             self.combo.addItem(name, name)
         self.combo.currentIndexChanged.connect(self._preset_changed)
-        self.edit_button = QPushButton("Edit Ranges", self)
+        self.edit_button = QPushButton("Edit Colours", self)
         self.edit_button.setObjectName("analysisButton")
         self.edit_button.clicked.connect(self._edit_ranges)
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(5)
-        layout.addWidget(QLabel("Color by value:"))
+        layout.addWidget(QLabel("Range palette:"))
         layout.addWidget(self.combo)
         layout.addWidget(self.edit_button)
 
@@ -591,6 +739,207 @@ def _metric_card(title: str, value: str, accent: str = "#0A86C7") -> QFrame:
     layout.addWidget(value_label)
     return card
 
+
+
+class _FTImagePlot(QWidget):
+    """Crash-safe Qt-only spectrogram display for SEG-D FT analysis.
+
+    This avoids pyqtgraph ImageItem for the FT image because some field
+    machines/drivers freeze or close the application while rendering large
+    image items inside modal dialogs.  The data are converted to a small RGB
+    QImage and painted by Qt directly.
+    """
+
+    cursor_moved = Signal(float, float)
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setMouseTracking(True)
+        self.setMinimumHeight(410)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self._db_matrix = np.zeros((0, 0), dtype=np.float32)
+        self._time_ms = np.zeros(0, dtype=float)
+        self._frequency_hz = np.zeros(0, dtype=float)
+        self._ranges: list[tuple[float, float, str]] = []
+        self._image = QImage()
+        self._plot_rect = QRectF()
+        self._cursor_time: float | None = None
+        self._cursor_frequency: float | None = None
+        self._cursor_color = QColor("#FFFFFF")
+
+    def set_data(
+        self,
+        db_matrix: np.ndarray,
+        time_ms: np.ndarray,
+        frequency_hz: np.ndarray,
+        ranges: list[tuple[float, float, str]],
+    ) -> None:
+        z = np.asarray(db_matrix, dtype=np.float32)
+        if z.ndim != 2:
+            z = np.zeros((0, 0), dtype=np.float32)
+        self._db_matrix = np.nan_to_num(z, nan=-200.0, posinf=0.0, neginf=-200.0)
+        self._time_ms = np.asarray(time_ms, dtype=float).reshape(-1)
+        self._frequency_hz = np.asarray(frequency_hz, dtype=float).reshape(-1)
+        self.set_ranges(ranges)
+        if self._time_ms.size and self._frequency_hz.size:
+            self.set_cursor(float(self._time_ms[0]), float(self._frequency_hz[min(len(self._frequency_hz) - 1, max(0, len(self._frequency_hz) // 4))]))
+
+    def set_ranges(self, ranges: list[tuple[float, float, str]]) -> None:
+        self._ranges = _normalise_ranges(ranges)
+        self._image = self._build_qimage()
+        self.update()
+
+    def set_cursor(self, time_ms: float, frequency_hz: float, color: str | QColor = "#FFFFFF") -> None:
+        if not self._time_ms.size or not self._frequency_hz.size:
+            return
+        self._cursor_time = max(float(self._time_ms[0]), min(float(time_ms), float(self._time_ms[-1])))
+        self._cursor_frequency = max(float(self._frequency_hz[0]), min(float(frequency_hz), float(self._frequency_hz[-1])))
+        qcolor = QColor(color) if not isinstance(color, QColor) else color
+        self._cursor_color = qcolor if qcolor.isValid() else QColor("#FFFFFF")
+        self.update()
+
+    def _plot_margins(self) -> tuple[int, int, int, int]:
+        return 72, 34, 20, 52
+
+    def _compute_plot_rect(self) -> QRectF:
+        left, top, right, bottom = self._plot_margins()
+        return QRectF(left, top, max(1, self.width() - left - right), max(1, self.height() - top - bottom))
+
+    def _level_limits(self) -> tuple[float, float]:
+        if self._ranges:
+            low, high = float(self._ranges[0][0]), float(self._ranges[-1][1])
+            if np.isfinite(low) and np.isfinite(high) and high > low:
+                return low, high
+        z = self._db_matrix
+        if z.size:
+            low = float(np.nanpercentile(z, 2.0))
+            high = float(np.nanpercentile(z, 99.0))
+            if np.isfinite(low) and np.isfinite(high) and high > low:
+                return low, high
+        return -120.0, 0.0
+
+    def _build_qimage(self) -> QImage:
+        z = self._db_matrix
+        if z.ndim != 2 or not z.size:
+            return QImage()
+        # Flip frequency axis so low frequency is at the bottom and high is at the top.
+        display_z = np.flipud(np.asarray(z, dtype=np.float32))
+        low, high = self._level_limits()
+        lut = _range_gradient_lut(self._ranges, steps=768) if self._ranges else _spectral_lut()
+        scale = max(high - low, 1e-12)
+        idx = np.clip(((display_z - low) / scale) * float(len(lut) - 1), 0, len(lut) - 1).astype(np.int32)
+        rgb = np.ascontiguousarray(lut[idx], dtype=np.uint8)
+        height, width = int(rgb.shape[0]), int(rgb.shape[1])
+        if height <= 0 or width <= 0:
+            return QImage()
+        return QImage(rgb.data, width, height, width * 3, QImage.Format.Format_RGB888).copy()
+
+    def _x_from_time(self, time_ms: float) -> float:
+        rect = self._plot_rect if self._plot_rect.width() > 0 else self._compute_plot_rect()
+        if self._time_ms.size < 2:
+            return rect.left()
+        return rect.left() + ((float(time_ms) - float(self._time_ms[0])) / max(float(self._time_ms[-1] - self._time_ms[0]), 1e-12)) * rect.width()
+
+    def _y_from_frequency(self, frequency_hz: float) -> float:
+        rect = self._plot_rect if self._plot_rect.height() > 0 else self._compute_plot_rect()
+        if self._frequency_hz.size < 2:
+            return rect.bottom()
+        return rect.bottom() - ((float(frequency_hz) - float(self._frequency_hz[0])) / max(float(self._frequency_hz[-1] - self._frequency_hz[0]), 1e-12)) * rect.height()
+
+    def _data_from_position(self, x: float, y: float) -> tuple[float, float]:
+        rect = self._plot_rect if self._plot_rect.width() > 0 else self._compute_plot_rect()
+        x = max(rect.left(), min(float(x), rect.right()))
+        y = max(rect.top(), min(float(y), rect.bottom()))
+        if self._time_ms.size < 2 or self._frequency_hz.size < 2:
+            return 0.0, 0.0
+        time_value = float(self._time_ms[0]) + ((x - rect.left()) / max(rect.width(), 1e-12)) * float(self._time_ms[-1] - self._time_ms[0])
+        freq_value = float(self._frequency_hz[0]) + ((rect.bottom() - y) / max(rect.height(), 1e-12)) * float(self._frequency_hz[-1] - self._frequency_hz[0])
+        return time_value, freq_value
+
+    def paintEvent(self, event) -> None:
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
+        painter.fillRect(self.rect(), QColor("#FFFFFF"))
+        self._plot_rect = self._compute_plot_rect()
+        rect = self._plot_rect
+
+        painter.setFont(QFont("Arial", 10, QFont.Weight.Bold))
+        painter.setPen(QColor("#111827"))
+        painter.drawText(QRectF(0, 4, self.width(), 24), Qt.AlignmentFlag.AlignCenter, "Frequency–Time Analysis")
+
+        if self._image.isNull() or not self._time_ms.size or not self._frequency_hz.size:
+            painter.setPen(QColor("#404040"))
+            painter.drawRect(rect)
+            painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, "No valid FT image")
+            return
+
+        painter.drawImage(rect, self._image)
+
+        # Soft grid over the image.
+        grid_pen = QPen(QColor(255, 255, 255, 70), 1)
+        painter.setPen(grid_pen)
+        for frac in np.linspace(0.2, 0.8, 4):
+            x = rect.left() + frac * rect.width()
+            painter.drawLine(x, rect.top(), x, rect.bottom())
+            y = rect.top() + frac * rect.height()
+            painter.drawLine(rect.left(), y, rect.right(), y)
+
+        painter.setPen(QPen(QColor("#344054"), 1.2))
+        painter.drawRect(rect)
+        painter.setFont(QFont("Arial", 8))
+        painter.setPen(QColor("#344054"))
+
+        # Bottom time ticks.
+        if self._time_ms.size >= 2:
+            for value in np.linspace(float(self._time_ms[0]), float(self._time_ms[-1]), 6):
+                x = self._x_from_time(value)
+                painter.drawLine(x, rect.bottom(), x, rect.bottom() + 5)
+                text = f"{value:.0f}"
+                painter.drawText(int(x - 20), int(rect.bottom() + 20), 40, 14, Qt.AlignmentFlag.AlignCenter, text)
+            painter.setFont(QFont("Arial", 9, QFont.Weight.Bold))
+            painter.drawText(QRectF(rect.left(), rect.bottom() + 28, rect.width(), 18), Qt.AlignmentFlag.AlignCenter, "Time (ms)")
+
+        # Left frequency ticks.
+        painter.setFont(QFont("Arial", 8))
+        if self._frequency_hz.size >= 2:
+            for value in np.linspace(float(self._frequency_hz[0]), float(self._frequency_hz[-1]), 6):
+                y = self._y_from_frequency(value)
+                painter.drawLine(rect.left() - 5, y, rect.left(), y)
+                text = f"{value:.0f}"
+                painter.drawText(int(rect.left() - 62), int(y - 7), 54, 14, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter, text)
+            painter.save()
+            painter.translate(16, rect.center().y())
+            painter.rotate(-90)
+            painter.setFont(QFont("Arial", 9, QFont.Weight.Bold))
+            painter.drawText(QRectF(-rect.height() / 2.0, -10, rect.height(), 20), Qt.AlignmentFlag.AlignCenter, "Frequency (Hz)")
+            painter.restore()
+
+        if self._cursor_time is not None and self._cursor_frequency is not None:
+            x = self._x_from_time(self._cursor_time)
+            y = self._y_from_frequency(self._cursor_frequency)
+            cursor_pen = QPen(self._cursor_color, 1.4, Qt.PenStyle.DashLine)
+            painter.setPen(cursor_pen)
+            painter.drawLine(x, rect.top(), x, rect.bottom())
+            painter.drawLine(rect.left(), y, rect.right(), y)
+            painter.setPen(QPen(QColor(0, 0, 0, 120), 3))
+            painter.drawEllipse(QRectF(x - 3.5, y - 3.5, 7, 7))
+            painter.setPen(QPen(self._cursor_color, 1.4))
+            painter.drawEllipse(QRectF(x - 3.5, y - 3.5, 7, 7))
+
+    def mouseMoveEvent(self, event: QMouseEvent) -> None:
+        if not self._plot_rect.contains(event.position()):
+            return
+        time_value, freq_value = self._data_from_position(event.position().x(), event.position().y())
+        self.cursor_moved.emit(time_value, freq_value)
+
+    def mousePressEvent(self, event: QMouseEvent) -> None:
+        if event.button() == Qt.MouseButton.LeftButton and self._plot_rect.contains(event.position()):
+            time_value, freq_value = self._data_from_position(event.position().x(), event.position().y())
+            self.cursor_moved.emit(time_value, freq_value)
+            event.accept()
+            return
+        super().mousePressEvent(event)
 
 class WaveformPlotWidget(QWidget):
     """Single-trace amplitude-vs-time plot with gain, cursor and sample navigation."""
@@ -1638,42 +1987,83 @@ class TraceWaveformDialog(QDialog):
         dlg.exec()
 
     def _show_ft_analysis(self) -> None:
-        """Legacy FT Analysis: classified colour frequency-time amplitude panel."""
+        """Open a robust frequency-time analysis dialog.
+
+        The FT image is rendered by a lightweight Qt widget instead of
+        pyqtgraph.ImageItem.  This prevents the white/non-responding dialog and
+        avoids GPU/driver-related crashes seen on some Windows machines.
+        """
         if self._samples.size < 16:
+            QMessageBox.information(self, "FT Analysis", "The trace is too short for frequency-time analysis.")
             return
         try:
             from scipy.signal import spectrogram
         except Exception as error:
             QMessageBox.warning(self, "FT Analysis", f"SciPy spectrogram support is unavailable: {error}")
             return
-        fs = 1000.0 / max(self.plot.sample_interval_ms, 1e-12)
-        base = max(32, self._samples.size // 10)
-        nperseg = min(512, max(32, 2 ** int(np.floor(np.log2(base)))))
-        nperseg = min(nperseg, self._samples.size)
-        noverlap = min(nperseg - 1, int(nperseg * 0.80))
-        f, t, power = spectrogram(
-            self._samples - np.mean(self._samples),
-            fs=fs,
-            window="hann",
-            nperseg=nperseg,
-            noverlap=noverlap,
-            detrend="constant",
-            scaling="density",
-            mode="psd",
-        )
-        db = 10.0 * np.log10(np.maximum(power, np.finfo(float).tiny))
-        if not db.size:
+
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        try:
+            ft_trace, ft_interval_ms = _prepare_ft_trace(self._samples, self.plot.sample_interval_ms, max_samples=80_000)
+            if ft_trace.size < 16:
+                QMessageBox.information(self, "FT Analysis", "No valid samples are available for frequency-time analysis.")
+                return
+
+            fs = 1000.0 / max(ft_interval_ms, 1e-12)
+            # Conservative, fixed limits keep the dialog responsive on field PCs.
+            base = max(64, min(512, int(ft_trace.size // 20)))
+            nperseg = 2 ** int(np.floor(np.log2(max(16, base))))
+            nperseg = max(32, min(512, int(nperseg), int(ft_trace.size)))
+            if nperseg >= ft_trace.size:
+                nperseg = max(16, int(ft_trace.size // 2))
+            noverlap = max(0, min(nperseg - 1, int(nperseg * 0.75)))
+            nfft = max(256, 2 ** int(np.ceil(np.log2(max(nperseg * 2, 256)))))
+            nfft = min(1024, int(nfft))
+
+            centered = np.asarray(ft_trace, dtype=np.float64)
+            centered = centered - float(np.mean(centered))
+            f, t, power = spectrogram(
+                centered,
+                fs=fs,
+                window="hann",
+                nperseg=nperseg,
+                noverlap=noverlap,
+                nfft=nfft,
+                detrend="constant",
+                scaling="density",
+                mode="psd",
+            )
+            if not power.size or not t.size or not f.size:
+                QMessageBox.information(self, "FT Analysis", "No valid frequency-time samples were produced for this trace.")
+                return
+
+            db = 10.0 * np.log10(np.maximum(power, np.finfo(float).tiny))
+            max_db = float(np.nanmax(db)) if db.size else 0.0
+            db_relative = np.asarray(db - max_db, dtype=np.float32)
+            f, t, db_relative = _limit_ft_matrix(f, t, db_relative, max_frequency_bins=420, max_time_bins=620)
+            db_display = np.asarray(_safe_smooth_ft(db_relative), dtype=np.float32)
+            time_axis_ms = np.asarray(t, dtype=float) * 1000.0
+            frequency_axis_hz = np.asarray(f, dtype=float)
+        except Exception as error:
+            QMessageBox.critical(self, "FT Analysis", f"Could not build FT analysis view:\n{error}")
             return
-        max_db = float(np.nanmax(db))
-        db_relative = db - max_db
+        finally:
+            QApplication.restoreOverrideCursor()
 
         dlg = QDialog(self)
         dlg.setWindowTitle("FT Analysis")
-        dlg.resize(960, 390)
-        dlg.setStyleSheet(DIALOG_STYLE)
+        dlg.resize(1120, 640)
+        dlg.setMinimumSize(860, 520)
+        dlg.setStyleSheet(DIALOG_STYLE + """
+            QDialog { background:#EEF2F6; }
+            QDoubleSpinBox,QSpinBox,QComboBox {
+                background:#FFFFFF; border:1px solid #7E8A97; border-radius:3px;
+                padding:1px 3px; min-height:22px; color:#111827; font-size:8.5pt; font-weight:700;
+            }
+        """)
         lay = QVBoxLayout(dlg)
-        lay.setContentsMargins(8, 8, 8, 8)
-        lay.setSpacing(6)
+        lay.setContentsMargins(10, 10, 10, 10)
+        lay.setSpacing(8)
 
         top = QHBoxLayout()
         cursor_readout = QLabel("Cursor Time — ms    Frequency — Hz    Level — dB")
@@ -1683,52 +2073,28 @@ class TraceWaveformDialog(QDialog):
         range_selector = _RangeSelector("fft_db", "dB", dlg)
         top.addWidget(range_selector)
         lay.addLayout(top)
+
         legend = _RangeLegend("dB Colour Ranges", dlg)
         lay.addWidget(legend)
 
-        plot = pg.PlotWidget()
-        plot.setBackground("#BFBFBF")
-        plot.setTitle("<span style='color:#202020;font-weight:700'>Frequency-Time Analysis</span>")
-        plot.setLabel("bottom", "Time", units="ms")
-        plot.setLabel("left", "Frequency", units="Hz")
-        plot.showGrid(x=True, y=True, alpha=0.30)
-        image = pg.ImageItem()
-        try:
-            image.setOpts(axisOrder="row-major")
-            image.setOpts(autoDownsample=False)
-        except Exception:
-            pass
-        if f.size > 1 and t.size > 1:
-            image.setRect(
-                QRectF(
-                    float(t[0] * 1000.0),
-                    float(f[0]),
-                    max(float((t[-1] - t[0]) * 1000.0), self.plot.sample_interval_ms),
-                    max(float(f[-1] - f[0]), 1.0),
-                )
-            )
-        plot.addItem(image)
-        time_line = pg.InfiniteLine(angle=90, pen=pg.mkPen("#FFFFFF", width=1.2, style=Qt.PenStyle.DashLine))
-        freq_line = pg.InfiniteLine(angle=0, pen=pg.mkPen("#FFFFFF", width=1.2, style=Qt.PenStyle.DashLine))
-        time_line.setZValue(20)
-        freq_line.setZValue(20)
-        plot.addItem(time_line)
-        plot.addItem(freq_line)
-        lay.addWidget(plot, 1)
+        ft_plot = _FTImagePlot(dlg)
+        lay.addWidget(ft_plot, 1)
 
         row = QHBoxLayout()
+        row.setSpacing(8)
         row.addWidget(QLabel("Time"))
-        self.ft_time_readout = QDoubleSpinBox()
-        self.ft_time_readout.setRange(0.0, max(0.0, (self._samples.size - 1) * self.plot.sample_interval_ms))
-        self.ft_time_readout.setValue(float(self.sample_spin.value()) * self.plot.sample_interval_ms)
-        self.ft_time_readout.setFixedWidth(90)
-        row.addWidget(self.ft_time_readout)
+        ft_time_readout = QDoubleSpinBox()
+        ft_time_readout.setRange(0.0, max(0.0, (self._samples.size - 1) * self.plot.sample_interval_ms))
+        ft_time_readout.setValue(float(self.sample_spin.value()) * self.plot.sample_interval_ms)
+        ft_time_readout.setDecimals(2)
+        ft_time_readout.setFixedWidth(96)
+        row.addWidget(ft_time_readout)
         row.addWidget(QLabel("Sample"))
-        self.ft_sample_readout = QSpinBox()
-        self.ft_sample_readout.setRange(0, max(0, self._samples.size - 1))
-        self.ft_sample_readout.setValue(int(self.sample_spin.value()))
-        self.ft_sample_readout.setFixedWidth(74)
-        row.addWidget(self.ft_sample_readout)
+        ft_sample_readout = QSpinBox()
+        ft_sample_readout.setRange(0, max(0, self._samples.size - 1))
+        ft_sample_readout.setValue(int(self.sample_spin.value()))
+        ft_sample_readout.setFixedWidth(80)
+        row.addWidget(ft_sample_readout)
         row.addStretch(1)
         close = QPushButton("Close")
         close.setObjectName("dangerButton")
@@ -1736,60 +2102,73 @@ class TraceWaveformDialog(QDialog):
         row.addWidget(close)
         lay.addLayout(row)
 
-        time_axis_ms = t * 1000.0
+        updating = {"active": False}
+
+        def cursor_level(time_value: float, freq_value: float) -> tuple[float, int, int]:
+            if not time_axis_ms.size or not frequency_axis_hz.size or not db_relative.size:
+                return 0.0, 0, 0
+            time_idx = int(np.argmin(np.abs(time_axis_ms - float(time_value))))
+            freq_idx = int(np.argmin(np.abs(frequency_axis_hz - float(freq_value))))
+            time_idx = max(0, min(time_idx, db_relative.shape[1] - 1))
+            freq_idx = max(0, min(freq_idx, db_relative.shape[0] - 1))
+            return float(db_relative[freq_idx, time_idx]), time_idx, freq_idx
+
+        def update_cursor(time_value: float, freq_value: float) -> None:
+            if not time_axis_ms.size or not frequency_axis_hz.size:
+                return
+            time_value = max(float(time_axis_ms[0]), min(float(time_value), float(time_axis_ms[-1])))
+            freq_value = max(float(frequency_axis_hz[0]), min(float(freq_value), float(frequency_axis_hz[-1])))
+            level, _time_idx, _freq_idx = cursor_level(time_value, freq_value)
+            color = _range_color(level, range_selector.ranges(), "#FFFFFF")
+            ft_plot.set_cursor(time_value, freq_value, color)
+            sample = int(round(time_value / max(self.plot.sample_interval_ms, 1e-12)))
+            sample = max(0, min(sample, max(0, self._samples.size - 1)))
+            updating["active"] = True
+            ft_time_readout.setValue(time_value)
+            ft_sample_readout.setValue(sample)
+            updating["active"] = False
+            cursor_readout.setText(f"Cursor Time {time_value:.1f} ms    Frequency {freq_value:.2f} Hz    Level {level:.1f} dB")
 
         def apply_ranges() -> None:
             ranges = range_selector.ranges()
-            classified = _range_index_map(db_relative, ranges)
-            image.setLookupTable(_range_lut(ranges))
-            image.setImage(classified.T, autoLevels=False, levels=(0.0, max(1.0, float(len(ranges) - 1))))
             legend.set_ranges(ranges, "dB")
-            plot.repaint()
-
-        def update_cursor(time_value: float, freq_value: float) -> None:
-            if not time_axis_ms.size or not f.size:
-                return
-            time_value = max(float(time_axis_ms[0]), min(float(time_value), float(time_axis_ms[-1])))
-            freq_value = max(float(f[0]), min(float(freq_value), float(f[-1])))
-            time_idx = int(np.argmin(np.abs(time_axis_ms - time_value)))
-            freq_idx = int(np.argmin(np.abs(f - freq_value)))
-            level = float(db_relative[freq_idx, time_idx])
-            color = _range_color(level, range_selector.ranges(), "#FFFFFF")
-            line_pen = pg.mkPen(color, width=1.4, style=Qt.PenStyle.DashLine)
-            time_line.setPen(line_pen)
-            freq_line.setPen(line_pen)
-            time_line.setPos(time_value)
-            freq_line.setPos(freq_value)
-            sample = int(round(time_value / max(self.plot.sample_interval_ms, 1e-12)))
-            sample = max(0, min(sample, max(0, self._samples.size - 1)))
-            self.ft_time_readout.blockSignals(True)
-            self.ft_sample_readout.blockSignals(True)
-            self.ft_time_readout.setValue(time_value)
-            self.ft_sample_readout.setValue(sample)
-            self.ft_time_readout.blockSignals(False)
-            self.ft_sample_readout.blockSignals(False)
-            cursor_readout.setText(f"Cursor Time {time_value:.1f} ms    Frequency {freq_value:.2f} Hz    Level {level:.1f} dB")
-
-        def mouse_moved(pos) -> None:
-            if plot.sceneBoundingRect().contains(pos):
-                mapped = plot.plotItem.vb.mapSceneToView(pos)
-                update_cursor(mapped.x(), mapped.y())
+            ft_plot.set_ranges(ranges)
+            if ft_plot._cursor_time is not None and ft_plot._cursor_frequency is not None:
+                update_cursor(float(ft_plot._cursor_time), float(ft_plot._cursor_frequency))
 
         def time_spin_changed(value: float) -> None:
-            update_cursor(value, float(freq_line.value()))
+            if updating["active"]:
+                return
+            freq_value = ft_plot._cursor_frequency
+            if freq_value is None:
+                freq_value = float(frequency_axis_hz[min(len(frequency_axis_hz) - 1, max(0, len(frequency_axis_hz) // 4))])
+            update_cursor(float(value), float(freq_value))
 
         def sample_spin_changed(value: int) -> None:
-            update_cursor(float(value) * self.plot.sample_interval_ms, float(freq_line.value()))
+            if updating["active"]:
+                return
+            freq_value = ft_plot._cursor_frequency
+            if freq_value is None:
+                freq_value = float(frequency_axis_hz[min(len(frequency_axis_hz) - 1, max(0, len(frequency_axis_hz) // 4))])
+            update_cursor(float(value) * self.plot.sample_interval_ms, float(freq_value))
 
-        plot.scene().sigMouseMoved.connect(mouse_moved)
-        self.ft_time_readout.valueChanged.connect(time_spin_changed)
-        self.ft_sample_readout.valueChanged.connect(sample_spin_changed)
-        range_selector.changed.connect(lambda: (apply_ranges(), update_cursor(float(time_line.value()), float(freq_line.value()))))
-        apply_ranges()
+        ft_plot.cursor_moved.connect(update_cursor)
+        ft_time_readout.valueChanged.connect(time_spin_changed)
+        ft_sample_readout.valueChanged.connect(sample_spin_changed)
+        range_selector.changed.connect(apply_ranges)
+
+        ranges = range_selector.ranges()
+        legend.set_ranges(ranges, "dB")
+        ft_plot.set_data(db_display, time_axis_ms, frequency_axis_hz, ranges)
         initial_time = float(self.sample_spin.value()) * self.plot.sample_interval_ms
-        initial_freq = float(f[min(len(f) - 1, max(0, int(len(f) * 0.25)))])
+        if time_axis_ms.size:
+            initial_time = max(float(time_axis_ms[0]), min(initial_time, float(time_axis_ms[-1])))
+        initial_freq = float(frequency_axis_hz[min(len(frequency_axis_hz) - 1, max(0, len(frequency_axis_hz) // 4))])
         update_cursor(initial_time, initial_freq)
-        dlg.exec()
+        try:
+            dlg.exec()
+        except Exception as error:
+            QMessageBox.critical(self, "FT Analysis", f"FT Analysis dialog failed:\n{error}")
 
     def _save_plot(self, suffix: str, filter_text: str) -> None:
         path, _ = QFileDialog.getSaveFileName(

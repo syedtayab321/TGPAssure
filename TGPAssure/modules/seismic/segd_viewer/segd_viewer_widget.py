@@ -62,6 +62,31 @@ STATUS_COLORS = {
 }
 
 
+TRACE_ATTRIBUTE_TEXT_COLORS = {
+    # Legacy SEG-D attribute panel colours.  These mirror the field-viewer
+    # convention shown in the receiver attribute card while leaving the data
+    # values and layout unchanged.
+    "channel_set": QColor(158, 158, 0),
+    "line": QColor(158, 158, 0),
+    "point": QColor(158, 158, 0),
+    "x": QColor(158, 158, 0),
+    "y": QColor(158, 158, 0),
+    "z": QColor(158, 158, 0),
+    "channel_type": QColor(255, 255, 0),
+    "sensor": QColor(255, 255, 0),
+    "resistance": QColor(0, 0, 255),
+    "capacitance": QColor(0, 0, 255),
+    "tilt": QColor(0, 0, 255),
+    "leakage": QColor(0, 0, 255),
+    "receiver_index": QColor(0, 160, 0),
+    "trace": QColor(0, 160, 0),
+    "status": QColor(255, 0, 0),
+    "sample": QColor(175, 175, 175),
+    "time": QColor(175, 175, 175),
+    "amplitude": QColor(175, 175, 175),
+}
+
+
 @dataclass(frozen=True)
 class RenderParameters:
     trace_start: int
@@ -316,6 +341,28 @@ class RenderWorker(QRunnable):
             return STATUS_COLORS["Normal"]
         return STATUS_COLORS.get(status, STATUS_COLORS["Normal"])
 
+    @staticmethod
+    def _crowded_trace_scale(spacing: float) -> float:
+        """Reduce wiggle deflection automatically when traces are very close."""
+        if spacing >= 3.25:
+            return 1.0
+        return max(0.28, float(spacing) / 3.25)
+
+    @staticmethod
+    def _trace_pen_width(spacing: float) -> float:
+        """Thin, stable line width for dense SEG-D trace windows."""
+        return max(0.32, min(1.20, float(spacing) * 0.28))
+
+    @staticmethod
+    def _display_color(color: QColor, spacing: float, *, fill: bool = False) -> QColor:
+        """Apply transparency in dense displays so adjacent traces remain readable."""
+        output = QColor(color)
+        if fill:
+            output.setAlpha(72 if spacing < 2.0 else 118)
+        elif spacing < 1.50:
+            output.setAlpha(205)
+        return output
+
     def _render_wiggle(self, data: np.ndarray, statuses: list[str]) -> QImage:
         trace_count, sample_count = data.shape
         width = max(2, self.params.width)
@@ -324,9 +371,9 @@ class RenderWorker(QRunnable):
         image.fill(Qt.white)
         painter = QPainter(image)
         spacing = width / max(1, trace_count)
-        painter.setRenderHint(QPainter.Antialiasing, spacing >= 3.0)
-        amplitude_scale = spacing * self.params.wiggle_scale
-        line_width = max(0.55, min(1.15, spacing * 0.32))
+        painter.setRenderHint(QPainter.Antialiasing, trace_count <= 2200)
+        amplitude_scale = spacing * self.params.wiggle_scale * self._crowded_trace_scale(spacing)
+        line_width = self._trace_pen_width(spacing)
         y_scale = (height - 1) / max(1, sample_count - 1)
 
         for trace_index in range(trace_count):
@@ -342,7 +389,7 @@ class RenderWorker(QRunnable):
                     baseline + float(trace[sample_index]) * amplitude_scale,
                     sample_index * y_scale,
                 )
-            pen = QPen(self._trace_color(statuses[trace_index]))
+            pen = QPen(self._display_color(self._trace_color(statuses[trace_index]), spacing))
             pen.setWidthF(line_width)
             painter.setPen(pen)
             painter.drawPath(path)
@@ -358,9 +405,9 @@ class RenderWorker(QRunnable):
         image.fill(Qt.white)
         painter = QPainter(image)
         spacing = width / max(1, trace_count)
-        painter.setRenderHint(QPainter.Antialiasing, spacing >= 3.0)
-        amplitude_scale = spacing * self.params.wiggle_scale
-        line_width = max(0.5, min(1.05, spacing * 0.28))
+        painter.setRenderHint(QPainter.Antialiasing, trace_count <= 2200)
+        amplitude_scale = spacing * self.params.wiggle_scale * self._crowded_trace_scale(spacing)
+        line_width = self._trace_pen_width(spacing)
         y_scale = (height - 1) / max(1, sample_count - 1)
 
         for trace_index in range(trace_count):
@@ -369,7 +416,8 @@ class RenderWorker(QRunnable):
                 return QImage()
             trace = data[trace_index]
             baseline = (trace_index + 0.5) * spacing
-            color = self._trace_color(statuses[trace_index])
+            color = self._display_color(self._trace_color(statuses[trace_index]), spacing)
+            fill_color = self._display_color(color, spacing, fill=True)
             
             wiggle = QPainterPath()
             wiggle.moveTo(baseline + float(trace[0]) * amplitude_scale, 0.0)
@@ -391,7 +439,7 @@ class RenderWorker(QRunnable):
             fill.closeSubpath()
             
             painter.setPen(Qt.NoPen)
-            painter.fillPath(fill, color)
+            painter.fillPath(fill, fill_color)
             
             pen = QPen(color)
             pen.setWidthF(line_width)
@@ -482,10 +530,10 @@ class RenderWorker(QRunnable):
         height = max(2, self.params.height)
         painter = QPainter(image)
         spacing = width / max(1, trace_count)
-        painter.setRenderHint(QPainter.Antialiasing, spacing >= 3.0)
-        amplitude_scale = spacing * self.params.wiggle_scale
+        painter.setRenderHint(QPainter.Antialiasing, trace_count <= 2200)
+        amplitude_scale = spacing * self.params.wiggle_scale * self._crowded_trace_scale(spacing)
         y_scale = (height - 1) / max(1, sample_count - 1)
-        line_width = max(0.55, min(1.10, spacing * 0.28))
+        line_width = self._trace_pen_width(spacing)
 
         for trace_index in range(trace_count):
             if self.cancelled:
@@ -497,7 +545,8 @@ class RenderWorker(QRunnable):
             path.moveTo(baseline + float(trace[0]) * amplitude_scale, 0.0)
             for sample_index in range(1, sample_count):
                 path.lineTo(baseline + float(trace[sample_index]) * amplitude_scale, sample_index * y_scale)
-            pen = QPen(self._trace_color(statuses[trace_index]) if self.params.qc_colors else QColor(20, 20, 20))
+            trace_color = self._trace_color(statuses[trace_index]) if self.params.qc_colors else QColor(20, 20, 20)
+            pen = QPen(self._display_color(trace_color, spacing))
             pen.setWidthF(line_width)
             painter.setPen(pen)
             painter.drawPath(path)
@@ -717,6 +766,8 @@ class TraceAttributesPanel(QGroupBox):
         form = QFormLayout(self)
         form.setContentsMargins(4, 4, 4, 4)
         form.setVerticalSpacing(1)
+        form.setHorizontalSpacing(3)
+        self._captions: dict[str, QLabel] = {}
         self._labels: dict[str, QLabel] = {}
         self.setStyleSheet(
             "QGroupBox{font-weight:700;color:#202020;border:1px solid #C8C8C8;margin-top:8px;background:#EFEFEF;}"
@@ -744,15 +795,36 @@ class TraceAttributesPanel(QGroupBox):
             ("amplitude", "Amp"),
         ]
         for key, caption in rows:
+            caption_label = QLabel(caption)
+            caption_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
             value = QLabel("—")
             value.setTextInteractionFlags(Qt.TextSelectableByMouse)
+            self._captions[key] = caption_label
             self._labels[key] = value
-            form.addRow(caption, value)
+            self._apply_attribute_color(key)
+            form.addRow(caption_label, value)
+
+    @staticmethod
+    def _attribute_style(color: QColor) -> str:
+        return (
+            f"color:rgb({color.red()},{color.green()},{color.blue()});"
+            "background:transparent;font-size:8pt;font-weight:700;"
+        )
+
+    def _apply_attribute_color(self, key: str) -> None:
+        color = TRACE_ATTRIBUTE_TEXT_COLORS.get(key, QColor(32, 32, 32))
+        style = self._attribute_style(color)
+        caption = self._captions.get(key)
+        if caption is not None:
+            caption.setStyleSheet(style)
+        value = self._labels.get(key)
+        if value is not None:
+            value.setStyleSheet(style)
 
     def clear_values(self) -> None:
-        for label in self._labels.values():
+        for key, label in self._labels.items():
             label.setText("—")
-            label.setStyleSheet("")
+            self._apply_attribute_color(key)
 
     def set_trace(
         self,
@@ -815,11 +887,8 @@ class TraceAttributesPanel(QGroupBox):
         self._labels["time"].setText(f"{time_ms:.2f} ms")
         self._labels["amplitude"].setText(f"{amplitude:.6g}")
         self._labels["status"].setText(status)
-        color = STATUS_COLORS.get(status, STATUS_COLORS["Normal"])
-        text_color = "#FFFFFF" if color.red() + color.green() + color.blue() < 300 else "#111111"
-        self._labels["status"].setStyleSheet(
-            f"background:rgb({color.red()},{color.green()},{color.blue()});color:{text_color};padding:2px 5px;font-weight:700;"
-        )
+        for key in self._labels:
+            self._apply_attribute_color(key)
 
 
 class SegdImageView(QWidget):
@@ -841,6 +910,7 @@ class SegdImageView(QWidget):
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self.setMouseTracking(True)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setMinimumSize(420, 280)
         self._image = QImage()
         self._trace_start = 0
@@ -904,6 +974,8 @@ class SegdImageView(QWidget):
         self._mode = mode
         self._measure_start = None
         self._measure_end = None
+        if mode == self.MODE_MEASURE:
+            self._measurement = None
         self.setCursor(Qt.OpenHandCursor if mode == self.MODE_PAN else Qt.CrossCursor)
         self.update()
 
@@ -1012,20 +1084,66 @@ class SegdImageView(QWidget):
         point = self._data_to_widget(self._pick[0], self._pick[1], plot)
         if point is None:
             return
-        painter.setPen(QPen(QColor(255, 180, 0), 2.0))
-        painter.drawEllipse(point, 5.0, 5.0)
+        painter.setBrush(QColor(255, 245, 130, 95))
+        painter.setPen(QPen(QColor(255, 185, 0), 2.0))
+        painter.drawEllipse(point, 6.0, 6.0)
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.setPen(QPen(QColor(20, 20, 20, 180), 3.0))
+        painter.drawLine(QPointF(point.x() - 9, point.y()), QPointF(point.x() + 9, point.y()))
+        painter.drawLine(QPointF(point.x(), point.y() - 9), QPointF(point.x(), point.y() + 9))
+        painter.setPen(QPen(QColor(255, 220, 0), 1.5))
+        painter.drawLine(QPointF(point.x() - 9, point.y()), QPointF(point.x() + 9, point.y()))
+        painter.drawLine(QPointF(point.x(), point.y() - 9), QPointF(point.x(), point.y() + 9))
 
     def _draw_measurement(self, painter: QPainter, plot: QRectF) -> None:
-        if self._measurement is None:
+        active_measurement = self._measurement
+        if active_measurement is None and self._measure_start is not None and self._measure_end is not None:
+            active_measurement = (
+                self._measure_start[0],
+                self._measure_start[1],
+                self._measure_end[0],
+                self._measure_end[1],
+            )
+        if active_measurement is None:
+            if self._measure_start is not None:
+                start_only = self._data_to_widget(self._measure_start[0], self._measure_start[1], plot)
+                if start_only is not None:
+                    painter.setPen(QPen(QColor(255, 190, 0), 2.0))
+                    painter.setBrush(QColor(255, 235, 120, 100))
+                    painter.drawEllipse(start_only, 6.0, 6.0)
+                    painter.setBrush(Qt.BrushStyle.NoBrush)
             return
-        trace_1, sample_1, trace_2, sample_2 = self._measurement
+        trace_1, sample_1, trace_2, sample_2 = active_measurement
         start = self._data_to_widget(trace_1, sample_1, plot)
         end = self._data_to_widget(trace_2, sample_2, plot)
         if start is None or end is None:
             return
-        pen = QPen(QColor(255, 190, 0), 2.0)
+        shadow = QPen(QColor(0, 0, 0, 150), 4.0)
+        shadow.setStyle(Qt.PenStyle.DashLine if self._measurement is None else Qt.PenStyle.SolidLine)
+        painter.setPen(shadow)
+        painter.drawLine(start, end)
+        pen = QPen(QColor(255, 190, 0), 2.2)
+        pen.setStyle(Qt.PenStyle.DashLine if self._measurement is None else Qt.PenStyle.SolidLine)
         painter.setPen(pen)
         painter.drawLine(start, end)
+        painter.setBrush(QColor(255, 235, 120, 110))
+        painter.drawEllipse(start, 5.5, 5.5)
+        painter.drawEllipse(end, 5.5, 5.5)
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        delta_trace = trace_2 - trace_1
+        delta_time = (sample_2 - sample_1) * self._sample_interval_ms
+        label_rect = QRectF(
+            min(start.x(), end.x()) + abs(end.x() - start.x()) / 2.0 - 60.0,
+            min(start.y(), end.y()) - 22.0,
+            120.0,
+            18.0,
+        )
+        if label_rect.top() < plot.top() + 2:
+            label_rect.moveTop(min(plot.bottom() - 20.0, max(plot.top() + 2.0, max(start.y(), end.y()) + 6.0)))
+        painter.fillRect(label_rect, QColor(255, 255, 255, 220))
+        painter.setPen(QPen(QColor(20, 20, 20), 1.0))
+        painter.drawRect(label_rect)
+        painter.drawText(label_rect, Qt.AlignmentFlag.AlignCenter, f"ΔTr {delta_trace:+d}  ΔT {delta_time:+.2f} ms")
 
     def _widget_to_data(self, point: QPointF) -> Optional[tuple[int, int]]:
         plot = self.plot_rect()
@@ -1070,7 +1188,7 @@ class SegdImageView(QWidget):
         fy = (point.y() - plot.top()) / max(1.0, plot.height())
         horizontal_only = bool(event.modifiers() & Qt.ControlModifier)
         vertical_only = bool(event.modifiers() & Qt.ShiftModifier)
-        new_traces = trace_count if vertical_only else max(4, int(round(trace_count * factor)))
+        new_traces = trace_count if vertical_only else max(1, int(round(trace_count * factor)))
         new_samples = sample_count if horizontal_only else max(32, int(round(sample_count * factor)))
         # The loaded render window is the hard bound for zoom-out here; the
         # parent expands further using its full-file spin ranges when possible.
@@ -1098,6 +1216,7 @@ class SegdImageView(QWidget):
             event.accept()
             return
         if event.button() == Qt.LeftButton and data_point is not None:
+            self.setFocus(Qt.FocusReason.MouseFocusReason)
             if self._mode == self.MODE_PICK:
                 self._pick = data_point
                 self.picked.emit(data_point[0], data_point[1])
@@ -1105,7 +1224,8 @@ class SegdImageView(QWidget):
             elif self._mode == self.MODE_MEASURE:
                 if self._measure_start is None:
                     self._measure_start = data_point
-                    self._measure_end = None
+                    self._measure_end = data_point
+                    self._measurement = None
                 else:
                     self._measure_end = data_point
                     self._measurement = (
@@ -1142,6 +1262,8 @@ class SegdImageView(QWidget):
         data_point = self._widget_to_data(point)
         if data_point is not None:
             self._cursor = point
+            if self._mode == self.MODE_MEASURE and self._measure_start is not None:
+                self._measure_end = data_point
             self.hovered.emit(data_point[0], data_point[1])
         else:
             self._cursor = None
@@ -1160,9 +1282,18 @@ class SegdImageView(QWidget):
 
     def leaveEvent(self, event) -> None:
         self._cursor = None
+        if self._mode == self.MODE_MEASURE and self._measure_start is not None:
+            self._measure_end = None
         self.hover_cleared.emit()
         self.update()
         super().leaveEvent(event)
+
+    def keyPressEvent(self, event) -> None:
+        if event.key() == Qt.Key.Key_Escape and self._mode in {self.MODE_PICK, self.MODE_MEASURE}:
+            self.clear_picks()
+            event.accept()
+            return
+        super().keyPressEvent(event)
 
     def contextMenuEvent(self, event: QContextMenuEvent) -> None:
         data_point = self._widget_to_data(QPointF(event.pos()))
@@ -1568,13 +1699,26 @@ class SegdViewerWidget(QWidget):
         from modules.seismic.segd_viewer import segd_tools
 
         widget = QWidget()
+        widget.setStyleSheet(
+            "QWidget{background:#F3F6F9;color:#173B53;}"
+            "QTabWidget::pane{border:1px solid #C7D3DD;border-radius:6px;background:#FFFFFF;top:-1px;}"
+            "QTabBar::tab{background:#E8EEF4;color:#263746;border:1px solid #C7D3DD;"
+            "border-bottom:0;border-top-left-radius:5px;border-top-right-radius:5px;"
+            "padding:6px 16px;font-weight:800;min-width:78px;}"
+            "QTabBar::tab:selected{background:#FFFFFF;color:#0B4F76;}"
+            "QTabBar::tab:hover{background:#F9FCFF;}"
+            "QPushButton#segdToolAction{background:#FFFFFF;color:#102A3D;border:1px solid #B9C8D3;"
+            "border-radius:6px;min-height:30px;padding:5px 10px;text-align:left;font-weight:850;}"
+            "QPushButton#segdToolAction:hover{background:#EAF6FF;border-color:#2D9CDB;color:#073B5A;}"
+            "QPushButton#segdToolAction:pressed{background:#D9EDF9;}"
+        )
         layout = QVBoxLayout(widget)
-        layout.setContentsMargins(6, 6, 6, 6)
-        layout.setSpacing(5)
+        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setSpacing(8)
 
         title = QLabel("SEG-D Field Tools")
-        title.setStyleSheet("font-size:11px;font-weight:900;color:#173b53;background:transparent;")
-        subtitle = QLabel("Receiver spread, trace diagnostics and file utilities. Tools are read-only unless export is requested.")
+        title.setStyleSheet("font-size:13px;font-weight:900;color:#0F3D5D;background:transparent;")
+        subtitle = QLabel("Receiver spread, trace diagnostics and file utilities. Use the main SEG-D Pick/Measure controls for canvas picking and measurement.")
         subtitle.setWordWrap(True)
         subtitle.setStyleSheet("color:#657B8A;font-size:8pt;background:transparent;")
         layout.addWidget(title)
@@ -1586,12 +1730,6 @@ class SegdViewerWidget(QWidget):
         layout.addWidget(tabs, 1)
 
         pages = [
-            ("Pick/Measure", "Point picking and distance/time measurement actions", [
-                ("Pick Point", "Click one trace/sample point, then choose inspect, headers, copy or clear.", lambda viewer: viewer.set_interaction_mode("pick")),
-                ("Measure", "Click the start point and then the end point to calculate trace/sample/time deltas.", lambda viewer: viewer.set_interaction_mode("measure")),
-                ("Pan", "Return the canvas to normal pan and hover inspection mode.", lambda viewer: viewer.set_interaction_mode("pan")),
-                ("Clear Marks", "Clear current pick and measurement markers.", lambda viewer: viewer.clear_picks()),
-            ]),
             ("Spread", "Receiver and field-spread QC", [
                 ("Spread View", "Graphical receiver spread, sensor QC and time/frequency slices", segd_tools.spread_view),
                 ("Panels", "Inspect receiver/channel panels and channel-set grouping", segd_tools.panels),
@@ -1613,8 +1751,8 @@ class SegdViewerWidget(QWidget):
         for tab_name, caption, actions in pages:
             page = QWidget()
             page_layout = QVBoxLayout(page)
-            page_layout.setContentsMargins(6, 6, 6, 6)
-            page_layout.setSpacing(5)
+            page_layout.setContentsMargins(10, 10, 10, 10)
+            page_layout.setSpacing(8)
             cap = QLabel(caption)
             cap.setStyleSheet("color:#516A7B;font-size:8pt;font-weight:800;background:transparent;")
             page_layout.addWidget(cap)
@@ -1749,8 +1887,16 @@ class SegdViewerWidget(QWidget):
     def _open_tools_dialog(self) -> None:
         dialog = QDialog(self)
         dialog.setWindowTitle("Tools")
-        dialog.resize(420, 480)
+        dialog.resize(560, 500)
+        dialog.setStyleSheet(
+            "QDialog{background:#F3F6F9;}"
+            "QPushButton{background:#FFFFFF;color:#102A3D;border:1px solid #B9C8D3;"
+            "border-radius:5px;padding:5px 12px;font-weight:800;}"
+            "QPushButton:hover{background:#EAF6FF;border-color:#2D9CDB;}"
+        )
         layout = QVBoxLayout(dialog)
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(8)
         tools = self._create_tools_tab()
         layout.addWidget(tools, 1)
         close = QPushButton("Close", dialog)
@@ -1964,18 +2110,34 @@ class SegdViewerWidget(QWidget):
 
     def set_interaction_mode(self, mode: str) -> None:
         self.canvas.set_mode(mode)
+        self.canvas.setFocus(Qt.FocusReason.OtherFocusReason)
         if mode == "pick":
             self.position_label.setText("Pick mode: click one trace/sample point. An action menu opens after the pick.")
+            if hasattr(self, "hint_label"):
+                self.hint_label.setText("Pick mode: click any trace/sample. Press Esc to clear the mark.")
         elif mode == "measure":
-            self.position_label.setText("Measure mode: click the start point, then click the end point to calculate Δtrace and Δtime.")
+            self.position_label.setText("Measure mode: click the start point, move the cursor to preview, then click the end point.")
+            if hasattr(self, "hint_label"):
+                self.hint_label.setText("Measure mode: click start, move to preview, click end. Press Esc to clear.")
         else:
             self.position_label.setText("Pan mode: drag to pan, mouse wheel to zoom, right-click for trace options.")
+            if hasattr(self, "hint_label"):
+                self.hint_label.setText("Mouse wheel: zoom | Ctrl+wheel: horizontal | Shift+wheel: vertical | Right-click: trace waveform")
 
     def zoom_to_fit(self) -> None:
         self.canvas.fit_to_view()
 
     def clear_picks(self) -> None:
         self.canvas.clear_picks()
+        for attr in ("_pick_action_dialog", "_measure_action_dialog"):
+            dialog = getattr(self, attr, None)
+            if dialog is not None:
+                try:
+                    dialog.close()
+                except Exception:
+                    pass
+                setattr(self, attr, None)
+        self.position_label.setText("Pick and measurement marks cleared")
 
     def export_image(self) -> None:
         path, _ = QFileDialog.getSaveFileName(
@@ -2432,7 +2594,7 @@ class SegdViewerWidget(QWidget):
             return
         total_traces = self.reader.get_trace_count()
         total_samples = self.reader.get_sample_count()
-        width = max(4, min(total_traces, trace_end - trace_start))
+        width = max(1, min(total_traces, trace_end - trace_start))
         height = max(32, min(total_samples, sample_end - sample_start))
         trace_start = max(0, min(trace_start, total_traces - width))
         sample_start = max(0, min(sample_start, total_samples - height))
@@ -2475,6 +2637,12 @@ class SegdViewerWidget(QWidget):
     def _on_pick(self, trace: int, sample: int) -> None:
         if self.reader is None:
             return
+        old_dialog = getattr(self, "_pick_action_dialog", None)
+        if old_dialog is not None:
+            try:
+                old_dialog.close()
+            except Exception:
+                pass
         amplitude = self._amplitude_at(trace, sample)
         time_ms = sample * self.reader.get_sample_interval()
         status = self._trace_status(trace)
@@ -2576,21 +2744,37 @@ class SegdViewerWidget(QWidget):
 
     def _on_measurement(self, trace_1: int, sample_1: int, trace_2: int, sample_2: int) -> None:
         interval = self.reader.get_sample_interval() if self.reader is not None else 0.0
-        delta_time = abs(sample_2 - sample_1) * interval
+        start_time = sample_1 * interval
+        end_time = sample_2 * interval
+        delta_time_signed = end_time - start_time
+        delta_time = abs(delta_time_signed)
+        start_amp = self._amplitude_at(trace_1, sample_1)
+        end_amp = self._amplitude_at(trace_2, sample_2)
+        delta_amp = end_amp - start_amp
         text = (
-            f"Δtrace {abs(trace_2 - trace_1)} | Δsample {abs(sample_2 - sample_1)} | "
-            f"Δtime {delta_time:g} ms"
+            f"Measurement: T{trace_1 + 1}/S{sample_1 + 1} → T{trace_2 + 1}/S{sample_2 + 1} | "
+            f"Δtrace {trace_2 - trace_1:+d} | Δsample {sample_2 - sample_1:+d} | "
+            f"Δtime {delta_time_signed:+.3f} ms | Δamp {delta_amp:+.6g}"
         )
         self.position_label.setText(text)
+        old_dialog = getattr(self, "_measure_action_dialog", None)
+        if old_dialog is not None:
+            try:
+                old_dialog.close()
+            except Exception:
+                pass
 
         def copy_measurement() -> None:
             QApplication.clipboard().setText(
                 "SEG-D Measurement\n"
                 f"Start Trace: {trace_1 + 1}\nStart Sample: {sample_1 + 1}\n"
+                f"Start Time ms: {start_time:.6g}\nStart Amplitude: {start_amp:.6g}\n"
                 f"End Trace: {trace_2 + 1}\nEnd Sample: {sample_2 + 1}\n"
-                f"Delta Trace: {abs(trace_2 - trace_1)}\n"
-                f"Delta Sample: {abs(sample_2 - sample_1)}\n"
-                f"Delta Time ms: {delta_time:g}"
+                f"End Time ms: {end_time:.6g}\nEnd Amplitude: {end_amp:.6g}\n"
+                f"Delta Trace: {trace_2 - trace_1:+d}\n"
+                f"Delta Sample: {sample_2 - sample_1:+d}\n"
+                f"Delta Time ms: {delta_time_signed:+.6g}\n"
+                f"Delta Amplitude: {delta_amp:+.6g}"
             )
             self.position_label.setText("Measurement copied to clipboard")
 
