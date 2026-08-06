@@ -64,6 +64,7 @@ class SegyViewerRibbonProvider(RibbonProvider):
                 [
                     large("Open SEG-Y", "segy_open_file", icon="seg-y", accent=True),
                     small("Fit", "segy_viewer_fit", "zoom-fit-best"),
+                    small("Normal State", "segy_viewer_reset_normal", "view-refresh"),
                     small("Copy", "segy_viewer_copy_view", "edit-copy"),
                     small("PNG", "segy_viewer_export_image", "image-x-generic"),
                     small("BMP", "segy_viewer_export_bmp", "document-save"),
@@ -138,6 +139,7 @@ class SegyViewerRibbonProvider(RibbonProvider):
                     ico("Pick", "segy_viewer_tool_pick", "select", checkable=True),
                     ico("Measure", "segy_viewer_tool_measure", "measure", checkable=True),
                     ico("Clear Marks", "segy_viewer_clear_marks", "edit-clear"),
+                    small("Manual QC", "segy_viewer_manual_qc", "edit-find"),
                     small("Headers", "segy_viewer_headers", "document-properties"),
                     small("Hardcopy", "segy_viewer_hardcopy", "document-export"),
                     ico("Help", "segy_viewer_help", "help-about"),

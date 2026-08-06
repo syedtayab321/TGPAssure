@@ -6,9 +6,10 @@ from pathlib import Path
 from typing import Optional, Sequence
 
 import numpy as np
-from PySide6.QtCore import QPointF, QRectF, Qt, Signal
-from PySide6.QtGui import QColor, QGuiApplication, QImage, QPainter, QPainterPath, QPen, QWheelEvent
+from PySide6.QtCore import QPointF, QRectF, Qt, QSignalBlocker, Signal
+from PySide6.QtGui import QColor, QGuiApplication, QImage, QPainter, QPainterPath, QPen, QPixmap, QWheelEvent
 from PySide6.QtWidgets import (
+    QApplication,
     QAbstractItemView,
     QButtonGroup,
     QCheckBox,
@@ -28,10 +29,12 @@ from PySide6.QtWidgets import (
     QListWidgetItem,
     QMessageBox,
     QPushButton,
+    QProgressBar,
     QRadioButton,
     QSizePolicy,
     QSlider,
     QSpinBox,
+    QSplitter,
     QTabWidget,
     QTableWidget,
     QTableWidgetItem,
@@ -41,6 +44,7 @@ from PySide6.QtWidgets import (
 )
 
 from modules.seismic.segy_reader import SegyReader
+from modules.seismic.ui.interactive_trace_zoom import InteractiveTraceZoomCanvas
 from modules.seismic.segy_viewer.segy_display import (
     DisplayGrid,
     apply_display_gain,
@@ -153,6 +157,230 @@ class ProcessingDialog(QDialog):
         self.viewer.render()
 
 
+class SelectionZoomDialog(QDialog):
+    """SEG-Y zoom dialog with a clean central trace view and live side-table values."""
+
+    def __init__(
+        self,
+        title: str,
+        image: QImage,
+        details: list[tuple[str, str]],
+        trace_rows: Optional[list[tuple[str, str, str, str, str, str, str]]] = None,
+        parent: Optional[QWidget] = None,
+        trace_data: Optional[np.ndarray] = None,
+        trace_start: int = 0,
+        sample_start: int = 0,
+        sample_interval_ms: float = 1.0,
+        trace_statuses: Optional[list[str]] = None,
+    ) -> None:
+        super().__init__(parent)
+        self.open_main_requested = False
+        self.setWindowTitle(title)
+        self.setMinimumSize(880, 500)
+        base_sheet = parent._classic_stylesheet() if hasattr(parent, "_classic_stylesheet") else ""
+        self.setStyleSheet(
+            base_sheet
+            + "QDialog{background:#EEF2F6;}"
+              "QLabel{font-size:7.6pt;color:#102033;background:transparent;}"
+              "QTableWidget{font-size:7.2pt;background:white;gridline-color:#D9E3EC;alternate-background-color:#F4F9FF;}"
+              "QHeaderView::section{background:#DDEEFF;color:#073B63;font-weight:700;padding:3px;border:0;border-right:1px solid #A6BDD5;}"
+              "QPushButton{font-size:7.8pt;padding:4px 10px;border:1px solid #7E9AB8;background:#FFFFFF;border-radius:3px;}"
+              "QPushButton:hover{background:#E8F3FF;border-color:#2D77B6;}"
+        )
+        root = QVBoxLayout(self)
+        root.setContentsMargins(8, 8, 8, 8)
+        root.setSpacing(6)
+
+        header = QLabel("Selected SEG-Y area — smooth trace hover QC")
+        header.setStyleSheet("font-weight:900;color:#0B4D82;background:#EEF7FF;border:1px solid #B8D8F0;padding:5px;")
+        root.addWidget(header)
+
+        content = QSplitter(Qt.Orientation.Horizontal, self)
+
+        left = QFrame(content)
+        left.setStyleSheet("QFrame{background:#F7FBFF;border:1px solid #A9C2DC;}")
+        left_layout = QVBoxLayout(left)
+        left_layout.setContentsMargins(5, 5, 5, 5)
+        left_layout.setSpacing(5)
+        left_layout.addWidget(self._section_label("Selection"))
+        self.selection_table = self._make_key_value_table(details)
+        left_layout.addWidget(self.selection_table, 1)
+
+        preview_frame = QFrame(content)
+        preview_frame.setStyleSheet("QFrame{background:#FFFFFF;border:1px solid #8EAAC8;}")
+        preview_layout = QVBoxLayout(preview_frame)
+        preview_layout.setContentsMargins(5, 5, 5, 5)
+        self.preview = InteractiveTraceZoomCanvas(self)
+        self.preview.set_data(
+            trace_data,
+            trace_start=trace_start,
+            sample_start=sample_start,
+            sample_interval_ms=sample_interval_ms,
+            trace_statuses=trace_statuses,
+            title="SEG-Y selected-area vector trace preview",
+        )
+        preview_layout.addWidget(self.preview, 1)
+
+        right = QFrame(content)
+        right.setStyleSheet("QFrame{background:#F7FBFF;border:1px solid #A9C2DC;}")
+        right_layout = QVBoxLayout(right)
+        right_layout.setContentsMargins(5, 5, 5, 5)
+        right_layout.setSpacing(5)
+        right_layout.addWidget(self._section_label("Hover sample"))
+        self.hover_table = self._make_key_value_table([])
+        right_layout.addWidget(self.hover_table, 1)
+        self._set_hover_placeholder()
+
+        content.addWidget(left)
+        content.addWidget(preview_frame)
+        content.addWidget(right)
+        content.setSizes([230, 640, 250])
+        root.addWidget(content, 1)
+
+        self.preview.cursor_changed.connect(self._update_hover_table)
+        self.preview.cursor_cleared.connect(self._set_hover_placeholder)
+
+        buttons = QHBoxLayout()
+        buttons.addStretch(1)
+        open_btn = QPushButton("Open Area in Main View")
+        close_btn = QPushButton("Close")
+        open_btn.clicked.connect(self._open_main)
+        close_btn.clicked.connect(self.accept)
+        buttons.addWidget(open_btn)
+        buttons.addWidget(close_btn)
+        root.addLayout(buttons)
+
+    def _section_label(self, text: str) -> QLabel:
+        label = QLabel(text)
+        label.setStyleSheet("font-weight:900;color:#0B4D82;background:#EAF5FF;border:1px solid #B8D8F0;padding:4px;")
+        return label
+
+    def _make_key_value_table(self, rows: list[tuple[str, str]]) -> QTableWidget:
+        table = QTableWidget(max(1, len(rows)), 2)
+        table.setHorizontalHeaderLabels(["Item", "Value"])
+        table.verticalHeader().setVisible(False)
+        table.setAlternatingRowColors(True)
+        table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        self._fill_key_value_table(table, rows)
+        return table
+
+    def _fill_key_value_table(self, table: QTableWidget, rows: list[tuple[str, str]]) -> None:
+        table.setRowCount(max(1, len(rows)))
+        if not rows:
+            table.setItem(0, 0, QTableWidgetItem("Status"))
+            table.setItem(0, 1, QTableWidgetItem("Move cursor over traces"))
+            return
+        for row, (key, value) in enumerate(rows):
+            table.setItem(row, 0, QTableWidgetItem(str(key)))
+            table.setItem(row, 1, QTableWidgetItem(str(value)))
+        table.resizeRowsToContents()
+
+    def _ensure_hover_table_rows(self) -> None:
+        fields = ["Status", "Trace", "Sample", "Time", "Amplitude", "Trace Min", "Trace Max", "Trace RMS"]
+        self._hover_fields = fields
+        with QSignalBlocker(self.hover_table):
+            self.hover_table.setRowCount(len(fields))
+            for row, key in enumerate(fields):
+                key_item = self.hover_table.item(row, 0)
+                if key_item is None:
+                    key_item = QTableWidgetItem(key)
+                    self.hover_table.setItem(row, 0, key_item)
+                else:
+                    key_item.setText(key)
+                value_item = self.hover_table.item(row, 1)
+                if value_item is None:
+                    value_item = QTableWidgetItem("—")
+                    self.hover_table.setItem(row, 1, value_item)
+            self.hover_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+            self.hover_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+
+    def _set_hover_placeholder(self) -> None:
+        if not hasattr(self, "hover_table"):
+            return
+        self._hover_signature = None
+        self._ensure_hover_table_rows()
+        with QSignalBlocker(self.hover_table):
+            for row in range(self.hover_table.rowCount()):
+                item = self.hover_table.item(row, 1)
+                if item is not None:
+                    item.setText("—")
+                    item.setBackground(QColor(255, 255, 255))
+                    item.setForeground(QColor(20, 32, 45))
+            item = self.hover_table.item(0, 1)
+            if item is not None:
+                item.setText("Move cursor over traces")
+                item.setBackground(QColor(240, 244, 248))
+                item.setForeground(QColor(60, 70, 80))
+
+    def _fmt(self, value: object, decimals: int = 6) -> str:
+        try:
+            number = float(value)
+            if not np.isfinite(number):
+                return "—"
+            return f"{number:.{decimals}g}"
+        except Exception:
+            return "—" if value is None else str(value)
+
+    def _update_hover_table(self, info: dict) -> None:
+        if not hasattr(self, "hover_table"):
+            return
+        signature = (
+            int(info.get("local_trace", -1)),
+            int(info.get("local_sample", -1)),
+            str(info.get("status", "Normal")),
+        )
+        if getattr(self, "_hover_signature", None) == signature:
+            return
+        self._hover_signature = signature
+        self._ensure_hover_table_rows()
+        values = {
+            "Status": str(info.get("status", "Normal")),
+            "Trace": str(int(info.get("trace", 0)) + 1),
+            "Sample": str(int(info.get("sample", 0)) + 1),
+            "Time": f"{float(info.get('time_ms', 0.0)):.2f} ms",
+            "Amplitude": self._fmt(info.get("amplitude"), 7),
+            "Trace Min": self._fmt(info.get("min"), 7),
+            "Trace Max": self._fmt(info.get("max"), 7),
+            "Trace RMS": self._fmt(info.get("rms"), 7),
+        }
+        rgb = info.get("status_color", (31, 154, 85))
+        color = QColor(int(rgb[0]), int(rgb[1]), int(rgb[2])) if isinstance(rgb, tuple) and len(rgb) == 3 else QColor(31, 154, 85)
+        with QSignalBlocker(self.hover_table):
+            for row, key in enumerate(getattr(self, "_hover_fields", [])):
+                item = self.hover_table.item(row, 1)
+                if item is None:
+                    continue
+                item.setText(values.get(key, "—"))
+                if key == "Status":
+                    item.setBackground(color)
+                    item.setForeground(QColor(255, 255, 255))
+                else:
+                    item.setBackground(QColor(255, 255, 255))
+                    item.setForeground(QColor(20, 32, 45))
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        self._center_on_available_screen()
+
+    def _center_on_available_screen(self) -> None:
+        screen = self.screen() or QApplication.primaryScreen()
+        if screen is None:
+            return
+        available = screen.availableGeometry()
+        width = min(max(880, int(available.width() * 0.80)), 1260)
+        height = min(max(500, int(available.height() * 0.80)), 860)
+        self.resize(width, height)
+        frame = self.frameGeometry()
+        frame.moveCenter(available.center())
+        self.move(frame.topLeft())
+
+    def _open_main(self) -> None:
+        self.open_main_requested = True
+        self.accept()
+
+
 class SegyClassicCanvas(QWidget):
     """SEG-Y canvas using classic seismic viewer interaction, but safe Qt rendering."""
 
@@ -160,6 +388,8 @@ class SegyClassicCanvas(QWidget):
     trace_selected = Signal(int)
     cursor_changed = Signal(int, int, float, float)
     measurement_changed = Signal(str)
+    area_selected = Signal(int, int, int, int)
+    manual_qc_point_added = Signal(str, int, int, float, float, str)
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
@@ -187,6 +417,8 @@ class SegyClassicCanvas(QWidget):
         self.measure_end: Optional[tuple[int, int, float, float]] = None
         self.pick_points: list[tuple[int, int, float, float]] = []
         self._cursor_point: Optional[QPointF] = None
+        self._area_start: Optional[QPointF] = None
+        self._area_current: Optional[QPointF] = None
 
     def set_extent(self, trace_count: int, sample_count: int, sample_interval_ms: float, grid_start_ms: float) -> None:
         self._total_t = max(1, int(trace_count))
@@ -261,6 +493,7 @@ class SegyClassicCanvas(QWidget):
         self._draw_picks_and_measure(painter)
         self._draw_cursor(painter)
         self._draw_rubber_band(painter)
+        self._draw_area_selection(painter)
         painter.end()
 
     def _draw_axes(self, painter: QPainter, rect: QRectF) -> None:
@@ -347,6 +580,19 @@ class SegyClassicCanvas(QWidget):
         painter.fillRect(rect, QColor(70, 120, 220, 35))
         painter.drawRect(rect)
 
+    def _draw_area_selection(self, painter: QPainter) -> None:
+        if self._area_start is None or self._area_current is None:
+            return
+        rect = QRectF(self._area_start, self._area_current).normalized().intersected(self.plot_rect())
+        if rect.width() < 2 or rect.height() < 2:
+            return
+        painter.setPen(QPen(QColor(255, 153, 0), 2, Qt.PenStyle.DashLine))
+        painter.fillRect(rect, QColor(255, 204, 64, 45))
+        painter.drawRect(rect)
+        painter.fillRect(QRectF(rect.left(), max(self.plot_rect().top(), rect.top() - 18), 210, 16), QColor(255, 255, 230, 235))
+        painter.setPen(QPen(QColor(90, 55, 0), 1))
+        painter.drawText(QRectF(rect.left() + 5, max(self.plot_rect().top(), rect.top() - 18), 205, 16), Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, "Release right mouse for QC zoom")
+
     def wheelEvent(self, event: QWheelEvent) -> None:
         rect = self.plot_rect()
         pos = event.position()
@@ -373,6 +619,13 @@ class SegyClassicCanvas(QWidget):
     def mousePressEvent(self, event) -> None:
         rect = self.plot_rect()
         pos = event.position()
+        if event.button() == Qt.MouseButton.RightButton and rect.contains(pos):
+            self.setFocus()
+            self._area_start = pos
+            self._area_current = pos
+            self.update()
+            event.accept()
+            return
         if event.button() == Qt.MouseButton.LeftButton and rect.contains(pos):
             self.setFocus()
             if self.interaction_mode == "pan":
@@ -388,6 +641,7 @@ class SegyClassicCanvas(QWidget):
             if self.interaction_mode == "pick":
                 self.pick_points.append((trace, sample, time_ms, amp))
                 self.measurement_changed.emit(f"Pick: Trc={trace + 1} Time={time_ms:.1f} ms Smp={sample + 1} Amp={amp:.6g}")
+                self.manual_qc_point_added.emit("Pick", trace, sample, time_ms, amp, "Manual pick from seismic canvas")
             elif self.interaction_mode == "measure":
                 if self.measure_start is None or self.measure_end is not None:
                     self.measure_start = (trace, sample, time_ms, amp)
@@ -399,6 +653,7 @@ class SegyClassicCanvas(QWidget):
                     self.measurement_changed.emit(
                         f"Measure: ΔTrc={trace - start[0]} ΔT={time_ms - start[2]:.2f} ms ΔSmp={sample - start[1]}"
                     )
+                    self.manual_qc_point_added.emit("Measure", trace, sample, time_ms, amp, f"Measured from Trc {start[0] + 1}, Smp {start[1] + 1}")
             self.update()
             return
         if event.button() == Qt.MouseButton.MiddleButton:
@@ -412,6 +667,11 @@ class SegyClassicCanvas(QWidget):
         self._cursor_point = pos if rect.contains(pos) else None
         if rect.contains(pos):
             self.cursor_changed.emit(*self._position_to_trace_sample(pos))
+        if self._area_start is not None and (event.buttons() & Qt.MouseButton.RightButton):
+            self._area_current = pos
+            self.update()
+            event.accept()
+            return
         if self._drag_start is not None and (event.buttons() & Qt.MouseButton.MiddleButton or self.interaction_mode == "pan"):
             delta = pos - self._drag_start
             self._drag_start = pos
@@ -430,11 +690,33 @@ class SegyClassicCanvas(QWidget):
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event) -> None:
+        if event.button() == Qt.MouseButton.RightButton and self._area_start is not None and self._area_current is not None:
+            selected = QRectF(self._area_start, self._area_current).normalized().intersected(self.plot_rect())
+            plot = self.plot_rect()
+            self._area_start = None
+            self._area_current = None
+            if selected.width() > 12 and selected.height() > 12:
+                fx0 = (selected.left() - plot.left()) / max(1.0, plot.width())
+                fx1 = (selected.right() - plot.left()) / max(1.0, plot.width())
+                fy0 = (selected.top() - plot.top()) / max(1.0, plot.height())
+                fy1 = (selected.bottom() - plot.top()) / max(1.0, plot.height())
+                t_span = max(1, self._t1 - self._t0)
+                s_span = max(1, self._s1 - self._s0)
+                t0 = int(np.clip(math.floor(self._t0 + fx0 * t_span), 0, self._total_t - 1))
+                t1 = int(np.clip(math.ceil(self._t0 + fx1 * t_span), t0 + 1, self._total_t))
+                s0 = int(np.clip(math.floor(self._s0 + fy0 * s_span), 0, self._total_s - 1))
+                s1 = int(np.clip(math.ceil(self._s0 + fy1 * s_span), s0 + 1, self._total_s))
+                self.area_selected.emit(t0, t1, s0, s1)
+            self.update()
+            event.accept()
+            return
         if event.button() == Qt.MouseButton.LeftButton and self._rubber_start is not None and self._rubber_current is not None:
             rect = QRectF(self._rubber_start, self._rubber_current).normalized().intersected(self.plot_rect())
             plot = self.plot_rect()
             self._rubber_start = None
             self._rubber_current = None
+            self._area_start = None
+            self._area_current = None
             if rect.width() > 12 and rect.height() > 12:
                 fx0 = (rect.left() - plot.left()) / max(1.0, plot.width())
                 fx1 = (rect.right() - plot.left()) / max(1.0, plot.width())
@@ -471,6 +753,57 @@ class SegyClassicCanvas(QWidget):
         self.update()
 
 
+class SegyBusyOverlay(QFrame):
+    """Full-widget busy overlay shown while SEG-Y display operations are applied."""
+
+    def __init__(self, parent: Optional[QWidget] = None) -> None:
+        super().__init__(parent)
+        self.setObjectName("segyBusyOverlay")
+        self.setStyleSheet(
+            "QFrame#segyBusyOverlay{background:rgba(12,25,38,185);border:0;}"
+            "QLabel{color:white;background:transparent;font-size:9pt;font-weight:700;}"
+            "QProgressBar{background:#25384A;border:1px solid #57748B;border-radius:5px;color:white;text-align:center;min-height:14px;}"
+            "QProgressBar::chunk{background:#1EA7D8;border-radius:4px;}"
+        )
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.addStretch(1)
+        card = QFrame(self)
+        card.setStyleSheet("QFrame{background:rgba(16,45,66,235);border:1px solid #5A7E98;border-radius:8px;}")
+        card_layout = QVBoxLayout(card)
+        card_layout.setContentsMargins(26, 18, 26, 18)
+        card_layout.setSpacing(8)
+        self.title = QLabel("Applying SEG-Y display")
+        self.title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.message = QLabel("Please wait while traces are rendered")
+        self.message.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.progress = QProgressBar()
+        self.progress.setRange(0, 0)
+        self.progress.setFixedWidth(320)
+        card_layout.addWidget(self.title)
+        card_layout.addWidget(self.message)
+        card_layout.addWidget(self.progress)
+        row = QHBoxLayout()
+        row.addStretch(1)
+        row.addWidget(card)
+        row.addStretch(1)
+        layout.addLayout(row)
+        layout.addStretch(1)
+        self.hide()
+
+    def show_busy(self, title: str = "Applying SEG-Y display", message: str = "Rendering traces and processing display options") -> None:
+        self.title.setText(title)
+        self.message.setText(message)
+        self.setGeometry(self.parentWidget().rect() if self.parentWidget() is not None else self.geometry())
+        self.raise_()
+        self.show()
+        QApplication.processEvents()
+
+    def hide_busy(self) -> None:
+        self.hide()
+        QApplication.processEvents()
+
+
 class SegyViewerWidget(QWidget):
     """Classic compact SEG-Y viewer for manual QC and display-only processing.
 
@@ -500,9 +833,15 @@ class SegyViewerWidget(QWidget):
         self.agc_window_ms = 100.0
         self.clip_percent = 99.0
         self._building_ui = True
+        self._rendering_busy = False
         self._build_ui()
         self._building_ui = False
         self.open_file(self.file_path)
+
+    def resizeEvent(self, event) -> None:
+        if hasattr(self, "busy_overlay"):
+            self.busy_overlay.setGeometry(self.rect())
+        super().resizeEvent(event)
 
     @staticmethod
     def _classic_stylesheet() -> str:
@@ -560,6 +899,8 @@ class SegyViewerWidget(QWidget):
         self._create_ribbon_backed_state_controls()
         self._build_body(root)
         self._build_status_bar(root)
+        self.busy_overlay = SegyBusyOverlay(self)
+        self.busy_overlay.setGeometry(self.rect())
 
     def _create_ribbon_backed_state_controls(self) -> None:
         """Create non-visible controls used as the viewer state model.
@@ -895,10 +1236,105 @@ class SegyViewerWidget(QWidget):
         self.canvas.trace_selected.connect(self.select_trace)
         self.canvas.cursor_changed.connect(self._update_cursor)
         self.canvas.measurement_changed.connect(self._set_measure_status)
+        self.canvas.area_selected.connect(self._show_area_zoom_dialog)
+        self.canvas.manual_qc_point_added.connect(self._append_manual_qc_from_canvas)
         self.tabs.addTab(self.canvas, "Seismic")
+        self.tabs.addTab(self._manual_qc_page(), "Manual QC")
         self.tabs.addTab(self._trace_headers_page(), "Trace Headers")
         self.tabs.addTab(self._hardcopy_page(), "Hardcopy")
         body.addWidget(self.tabs, 1)
+
+    def _manual_qc_page(self) -> QWidget:
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(6, 6, 6, 6)
+        layout.setSpacing(5)
+        top = QHBoxLayout()
+        self.manual_status_combo = QComboBox()
+        self.manual_status_combo.addItems(["Review", "Pass", "Suspect", "Reject", "Noise", "Dead trace", "Timing", "Amplitude"])
+        self.manual_comment = QLineEdit()
+        self.manual_comment.setPlaceholderText("Manual QC comment / reason")
+        add_btn = QPushButton("Add Selected Trace")
+        export_btn = QPushButton("Export Manual QC CSV")
+        clear_btn = QPushButton("Clear Table")
+        add_btn.clicked.connect(self._add_selected_manual_mark)
+        export_btn.clicked.connect(self._export_manual_qc_csv)
+        clear_btn.clicked.connect(self._clear_manual_qc)
+        top.addWidget(QLabel("Status"))
+        top.addWidget(self.manual_status_combo)
+        top.addWidget(self.manual_comment, 1)
+        top.addWidget(add_btn)
+        top.addWidget(export_btn)
+        top.addWidget(clear_btn)
+        layout.addLayout(top)
+        self.manual_qc_table = QTableWidget(0, 7)
+        self.manual_qc_table.setHorizontalHeaderLabels(["Type", "Trace", "Sample", "Time ms", "Amplitude", "Status", "Comment"])
+        self.manual_qc_table.setAlternatingRowColors(True)
+        self.manual_qc_table.setEditTriggers(QAbstractItemView.EditTrigger.DoubleClicked | QAbstractItemView.EditTrigger.SelectedClicked)
+        self.manual_qc_table.verticalHeader().setVisible(False)
+        self.manual_qc_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
+        self.manual_qc_table.horizontalHeader().setStretchLastSection(True)
+        layout.addWidget(self.manual_qc_table, 1)
+        note = QLabel("Manual QC workflow: use Pick/Measure on the seismic canvas or right-drag a QC zoom box. Picks are stored here and can be exported for audit.")
+        note.setWordWrap(True)
+        note.setStyleSheet("color:#35566E;background:#F2F8FD;border:1px solid #C5DBED;padding:4px;")
+        layout.addWidget(note)
+        return page
+
+    def _append_manual_qc_from_canvas(self, mark_type: str, trace: int, sample: int, time_ms: float, amplitude: float, note: str) -> None:
+        status = self.manual_status_combo.currentText() if hasattr(self, "manual_status_combo") else "Review"
+        comment = self.manual_comment.text().strip() if hasattr(self, "manual_comment") and self.manual_comment.text().strip() else note
+        self._append_manual_qc(mark_type, trace, sample, time_ms, amplitude, status, comment)
+
+    def _append_manual_qc(self, mark_type: str, trace: int, sample: int, time_ms: float, amplitude: float, status: str, comment: str) -> None:
+        if not hasattr(self, "manual_qc_table"):
+            return
+        row = self.manual_qc_table.rowCount()
+        self.manual_qc_table.insertRow(row)
+        values = [mark_type, str(trace + 1), str(sample + 1), f"{time_ms:.2f}", f"{amplitude:.6g}", status, comment]
+        for col, value in enumerate(values):
+            self.manual_qc_table.setItem(row, col, QTableWidgetItem(value))
+        self.measure_status.setText(f"Manual QC mark added: {mark_type} Trc={trace + 1}")
+
+    def _add_selected_manual_mark(self) -> None:
+        if self.time_grid is None:
+            return
+        sample = int(np.clip((self._s0 + self._s1) // 2, 0, self.time_grid.sample_count - 1))
+        time_ms = self.time_grid.start_ms + sample * self.time_grid.interval_ms
+        amp = float("nan")
+        if self._last_raw_window is not None and self._last_raw_window.size and self._last_trace_indices:
+            try:
+                nearest = int(np.argmin(np.abs(np.asarray(self._last_trace_indices) - self._selected_trace)))
+                local_sample = int(np.clip(round((sample - self._s0) / max(1, self._s1 - self._s0 - 1) * (self._last_raw_window.shape[1] - 1)), 0, self._last_raw_window.shape[1] - 1))
+                amp = float(self._last_raw_window[nearest, local_sample])
+            except Exception:
+                amp = float("nan")
+        status = self.manual_status_combo.currentText()
+        comment = self.manual_comment.text().strip() or "Manual selected-trace observation"
+        self._append_manual_qc("Selected Trace", self._selected_trace, sample, time_ms, amp, status, comment)
+
+    def _clear_manual_qc(self) -> None:
+        if hasattr(self, "manual_qc_table"):
+            self.manual_qc_table.setRowCount(0)
+            self.measure_status.setText("Manual QC table cleared")
+
+    def _export_manual_qc_csv(self) -> None:
+        if not hasattr(self, "manual_qc_table") or self.manual_qc_table.rowCount() == 0:
+            QMessageBox.information(self, "Manual QC", "There are no manual QC rows to export.")
+            return
+        path, _selected = QFileDialog.getSaveFileName(self, "Export Manual SEG-Y QC", str(self.file_path.with_name(self.file_path.stem + "_manual_qc.csv")), "CSV (*.csv)")
+        if not path:
+            return
+        try:
+            headers = [self.manual_qc_table.horizontalHeaderItem(c).text() for c in range(self.manual_qc_table.columnCount())]
+            with Path(path).open("w", newline="", encoding="utf-8") as handle:
+                writer = csv.writer(handle)
+                writer.writerow(headers)
+                for row in range(self.manual_qc_table.rowCount()):
+                    writer.writerow([(self.manual_qc_table.item(row, col).text() if self.manual_qc_table.item(row, col) else "") for col in range(self.manual_qc_table.columnCount())])
+            self.measure_status.setText(f"Manual QC exported: {path}")
+        except Exception as exc:
+            QMessageBox.warning(self, "Manual QC Export", str(exc))
 
     def _trace_headers_page(self) -> QWidget:
         page = QWidget()
@@ -995,7 +1431,7 @@ class SegyViewerWidget(QWidget):
             )
             self._selected_trace = 0
             self._t0 = 0
-            self._t1 = min(self.index.trace_count, 900)
+            self._t1 = min(self.index.trace_count, 451)
             if self.time_grid is not None:
                 self._s0 = 0
                 self._s1 = min(self.time_grid.sample_count, 4200)
@@ -1057,6 +1493,65 @@ class SegyViewerWidget(QWidget):
         if self.index is None or self.time_grid is None:
             return
         self.set_window(0, self.index.trace_count, 0, self.time_grid.sample_count)
+
+    def reset_to_initial_view(self) -> None:
+        """Return the SEG-Y viewer to the same display state used after opening."""
+        if self.index is None or self.time_grid is None:
+            return
+        blockers = [
+            QSignalBlocker(self.wiggle_cb),
+            QSignalBlocker(self.gray_cb),
+            QSignalBlocker(self.color_cb),
+            QSignalBlocker(self.timelines_cb),
+            QSignalBlocker(self.fill_none),
+            QSignalBlocker(self.fill_pos),
+            QSignalBlocker(self.fill_neg),
+            QSignalBlocker(self.use_delay_cb),
+            QSignalBlocker(self.normal_rb),
+            QSignalBlocker(self.reversed_rb),
+            QSignalBlocker(self.inversion_cb),
+            QSignalBlocker(self.filter_cb),
+            QSignalBlocker(self.agc_cb),
+            QSignalBlocker(self.norm_cb),
+            QSignalBlocker(self.weight_cb),
+            QSignalBlocker(self.trace_scale),
+            QSignalBlocker(self.time_scale),
+            QSignalBlocker(self.gain_w),
+            QSignalBlocker(self.gain_c),
+        ]
+        try:
+            self.wiggle_cb.setChecked(True)
+            self.gray_cb.setChecked(True)
+            self.color_cb.setChecked(False)
+            self.timelines_cb.setChecked(True)
+            self.fill_none.setChecked(True)
+            self.use_delay_cb.setChecked(False)
+            self.normal_rb.setChecked(True)
+            self.inversion_cb.setChecked(False)
+            self.filter_cb.setChecked(False)
+            self.agc_cb.setChecked(False)
+            self.norm_cb.setChecked(False)
+            self.weight_cb.setChecked(False)
+            self.trace_scale.setValue(155)
+            self.time_scale.setValue(307)
+            self.gain_w.setValue(22)
+            self.gain_c.setValue(22)
+            self.low_cut_hz = 8.0
+            self.high_cut_hz = 70.0
+            self.agc_window_ms = 500.0
+            self.clip_percent = 98.0
+            self.canvas.clear_marks()
+            self.canvas.interaction_mode = "inspect"
+        finally:
+            del blockers
+        self._selected_trace = 0
+        self._t0 = 0
+        self._t1 = min(self.index.trace_count, 451)
+        self._s0 = 0
+        self._s1 = min(self.time_grid.sample_count, 4200)
+        self.select_trace(0, render_after=False)
+        self.measure_status.setText("Normal SEG-Y opening state restored")
+        self.render()
 
     def set_window(self, t0: int, t1: int, s0: int, s1: int) -> None:
         if self.index is None or self.time_grid is None:
@@ -1178,6 +1673,10 @@ class SegyViewerWidget(QWidget):
     def render(self) -> None:
         if self.reader is None or self.index is None or self.time_grid is None:
             return
+        show_busy = hasattr(self, "busy_overlay") and not self._rendering_busy
+        if show_busy:
+            self._rendering_busy = True
+            self.busy_overlay.show_busy("Applying SEG-Y display", "Rendering traces and applying selected QC options")
         try:
             trace_indices, raw = self._read_visible_data()
             if len(trace_indices) == 0 or raw.size == 0:
@@ -1211,6 +1710,11 @@ class SegyViewerWidget(QWidget):
         except Exception as exc:
             self.processing_status.setText(f"Render error: {exc}")
             QMessageBox.warning(self, "SEG-Y Render", str(exc))
+        finally:
+            if show_busy:
+                self.busy_overlay.hide_busy()
+                self._rendering_busy = False
+
 
     def _render_image(self, data: np.ndarray, trace_indices: Sequence[int]) -> QImage:
         nt, ns = data.shape
@@ -1371,6 +1875,83 @@ class SegyViewerWidget(QWidget):
             table.setItem(row, 1, value_item)
         table.resizeRowsToContents()
 
+    def _show_area_zoom_dialog(self, t0: int, t1: int, s0: int, s1: int) -> None:
+        if self.reader is None or self.index is None or self.time_grid is None:
+            return
+        t0 = int(np.clip(t0, 0, self.index.trace_count - 1)); t1 = int(np.clip(t1, t0 + 1, self.index.trace_count))
+        s0 = int(np.clip(s0, 0, self.time_grid.sample_count - 1)); s1 = int(np.clip(s1, s0 + 1, self.time_grid.sample_count))
+        image = QImage()
+        stats = "No samples"
+        raw = np.asarray([], dtype=np.float32)
+        try:
+            raw = self.reader.read_trace_window((t0, t1), (s0, s1))
+            raw = np.asarray(raw, dtype=np.float32)
+            processed = self._apply_processing(raw)
+            display = normalize_for_display(processed, self.clip_percent)
+            old_window = (self._t0, self._t1, self._s0, self._s1)
+            try:
+                self._t0, self._t1, self._s0, self._s1 = t0, t1, s0, s1
+                image = self._render_image(display, list(range(t0, t1)))
+            finally:
+                self._t0, self._t1, self._s0, self._s1 = old_window
+            finite = raw[np.isfinite(raw)] if raw.size else np.asarray([])
+            if finite.size:
+                stats = f"min {float(np.min(finite)):.6g} | max {float(np.max(finite)):.6g} | rms {float(np.sqrt(np.mean(np.square(finite)))):.6g}"
+        except Exception as exc:
+            image = self.canvas._image.copy() if not self.canvas._image.isNull() else QImage()
+            stats = f"Preview fallback: {exc}"
+        start_ms = self.time_grid.start_ms + s0 * self.time_grid.interval_ms
+        end_ms = self.time_grid.start_ms + (s1 - 1) * self.time_grid.interval_ms
+
+        def _fmt(value: object, decimals: int = 5) -> str:
+            try:
+                number = float(value)
+                if not np.isfinite(number):
+                    return "—"
+                return f"{number:.{decimals}g}"
+            except Exception:
+                return "—" if value is None else str(value)
+
+        trace_rows: list[tuple[str, str, str, str, str, str, str]] = []
+        max_trace_rows = 160
+        for local_idx, trace_index in enumerate(range(t0, min(t1, t0 + max_trace_rows))):
+            row_data = raw[local_idx] if raw.ndim == 2 and local_idx < raw.shape[0] else np.asarray([])
+            finite_row = row_data[np.isfinite(row_data)] if row_data.size else np.asarray([])
+            if finite_row.size:
+                mn = float(np.min(finite_row)); mx = float(np.max(finite_row)); rms = float(np.sqrt(np.mean(np.square(finite_row))))
+                peak_idx = int(np.argmax(np.abs(row_data))) if row_data.size else 0
+                amp = float(row_data[peak_idx]) if row_data.size else float("nan")
+                smp = s0 + peak_idx
+                tms = self.time_grid.start_ms + smp * self.time_grid.interval_ms
+            else:
+                mn = mx = rms = amp = float("nan"); smp = s0; tms = self.time_grid.start_ms + s0 * self.time_grid.interval_ms
+            trace_rows.append((str(trace_index + 1), str(smp + 1), f"{tms:.2f}", _fmt(amp), _fmt(mn), _fmt(mx), _fmt(rms)))
+
+        details = [
+            ("File", str(self.file_path)),
+            ("Trace range", f"{t0 + 1} – {t1} ({t1 - t0} traces)"),
+            ("Sample range", f"{s0 + 1} – {s1} ({s1 - s0} samples)"),
+            ("Time range", f"{start_ms:.2f} – {end_ms:.2f} ms"),
+            ("Amplitude statistics", stats),
+            ("Display mode", "Wiggle" if self.wiggle_cb.isChecked() else "Colour" if self.color_cb.isChecked() else "Gray"),
+            ("Trace detail rows", f"{len(trace_rows)} row(s) shown" + (f" of {t1 - t0}" if t1 - t0 > len(trace_rows) else "")),
+            ("Manual QC", "Use the side trace values to check noisy/dead traces, high amplitude bursts, polarity reversals and timing continuity."),
+        ]
+        dialog = SelectionZoomDialog(
+            "SEG-Y Selected Area QC Zoom",
+            image,
+            details,
+            trace_rows,
+            self,
+            trace_data=raw if isinstance(raw, np.ndarray) and raw.ndim == 2 else None,
+            trace_start=t0,
+            sample_start=s0,
+            sample_interval_ms=self.time_grid.interval_ms,
+        )
+        dialog.exec()
+        if dialog.open_main_requested:
+            self.set_window(t0, t1, s0, s1)
+
     # ------------------------------------------------------------------
     # Tools and export
     # ------------------------------------------------------------------
@@ -1395,23 +1976,26 @@ class SegyViewerWidget(QWidget):
         QMessageBox.information(
             self,
             "SEG-Y Viewer Help",
-            "Wheel: zoom trace/time\nCtrl+Wheel: traces only\nShift+Wheel: time only\nMiddle-drag or Pan tool: pan\nZoom tool: draw a zoom box\nPick tool: store manual picks\nMeasure tool: click start and end points\nEsc: clear active measurement",
+            "Wheel: zoom trace/time\nCtrl+Wheel: traces only\nShift+Wheel: time only\nRight-drag: selected area QC zoom dialog\nMiddle-drag or Pan tool: pan\nZoom tool: draw a zoom box\nPick tool: store manual QC picks\nMeasure tool: click start and end points\nEsc: clear active measurement",
         )
 
     def show_display_page(self) -> None:
         self.tabs.setCurrentIndex(0)
 
     def show_file_info_page(self) -> None:
-        self.tabs.setCurrentIndex(2)
+        self.tabs.setCurrentIndex(3)
+
+    def show_manual_qc_page(self) -> None:
+        self.tabs.setCurrentIndex(1)
 
     def show_headers_page(self) -> None:
-        self.tabs.setCurrentIndex(1)
+        self.tabs.setCurrentIndex(2)
 
     def show_trace_analysis_page(self) -> None:
-        self.tabs.setCurrentIndex(1)
+        self.tabs.setCurrentIndex(2)
 
     def show_hardcopy_page(self) -> None:
-        self.tabs.setCurrentIndex(2)
+        self.tabs.setCurrentIndex(3)
 
     # ------------------------------------------------------------------
     # Main ribbon integration

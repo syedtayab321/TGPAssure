@@ -33,6 +33,7 @@ class SeismicRibbonProvider(RibbonProvider):
                 RibbonAction("Wiggle + Color", "segd_display_wiggle_color", icon="office-chart-line"),
                 RibbonAction("Variable Area", "segd_display_va", icon="view-grid"),
                 RibbonAction("Fit", "segd_zoom_fit", icon="zoom-fit-best"),
+                RibbonAction("Normal State", "seismic_reset_active_view", icon="view-refresh"),
             ],
         )
         return [data_group, qc_group, display_group]

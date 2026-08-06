@@ -28,6 +28,7 @@ class SegdRibbonProvider(RibbonProvider):
                 RibbonAction("Wiggle + Color", "segd_display_wiggle_color", icon="office-chart-line"),
                 RibbonAction("Variable Area", "segd_display_va", icon="view-grid"),
                 RibbonAction("Fit", "segd_zoom_fit", icon="zoom-fit-best"),
+                RibbonAction("Normal State", "segd_reset_normal", icon="view-refresh"),
             ],
         )
         gain_group = RibbonGroup(

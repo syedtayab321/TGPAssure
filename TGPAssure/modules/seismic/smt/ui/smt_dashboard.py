@@ -39,170 +39,129 @@ from modules.seismic.smt.ui.dialogs import (
 # cannot produce white-on-white labels or oversized inherited typography.
 _COMPACT_DASHBOARD_QSS = """
 QWidget#smtDashboard {
-    background:#E7ECF1;
-    color:#18232D;
+    background:#EEF3F6;
+    color:#142536;
+    font-family: Arial, Helvetica, sans-serif;
     font-size:8pt;
 }
-QWidget#smtDashboard QLabel {
-    background:transparent;
-    color:#18232D;
-}
+QWidget#smtDashboard QLabel { background:transparent; color:#142536; }
 QFrame#classicWindow {
-    background:#E7ECF1;
-    border:1px solid #A8B4BF;
+    background:#F5F8FA;
+    border:1px solid #B4C3CD;
+    border-radius:7px;
 }
 QFrame#classicTitleBar {
-    min-height:24px;
-    max-height:24px;
+    min-height:30px;
+    max-height:34px;
     background:qlineargradient(x1:0,y1:0,x2:1,y2:0,
-        stop:0 #163D69, stop:0.58 #28729B, stop:1 #60A8C8);
-    border:1px solid #123555;
+        stop:0 #082B45, stop:0.55 #0D7190, stop:1 #1E9CB4);
+    border:0;
+    border-radius:6px;
 }
 QLabel#classicTitle {
     background:transparent;
     color:#FFFFFF;
-    font-size:8.5pt;
-    font-weight:700;
+    font-size:10pt;
+    font-weight:900;
 }
 QFrame#launcherPanel {
-    background:#D9E2E9;
-    border:1px solid #A7B5C0;
-    border-radius:4px;
+    background:#E7EEF3;
+    border:1px solid #BCD0DB;
+    border-radius:6px;
 }
 QPushButton#launcherButton {
-    min-height:42px;
-    max-height:42px;
-    padding:2px 7px;
-    border:1px solid #A7B5C0;
-    border-radius:3px;
-    background:#F1F5F8;
-    color:#172530;
+    min-height:44px;
+    max-height:46px;
+    padding:3px 8px;
+    border:1px solid #B4C5CF;
+    border-radius:5px;
+    background:qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 #FFFFFF, stop:1 #E1EBF1);
+    color:#172A39;
     font-size:8pt;
-    font-weight:650;
+    font-weight:750;
     text-align:left;
 }
-QPushButton#launcherButton:hover {
-    background:#E2F0FA;
-    border-color:#5897BE;
-}
-QPushButton#launcherButton:pressed {
-    background:#CFE4F2;
-    border-color:#397EA8;
-}
-QPushButton#launcherButton:disabled {
-    background:#E2E7EB;
-    border-color:#C3CCD3;
-    color:#7B8790;
-}
+QPushButton#launcherButton:hover { background:#E7F7FC; border-color:#5CA8C4; }
+QPushButton#launcherButton:pressed { background:#CCE3EE; border-color:#2F7F9B; }
+QPushButton#launcherButton:disabled { background:#E2E8EC; border-color:#C5CFD6; color:#7B8790; }
 QPushButton#exitButton {
-    min-height:42px;
-    max-height:42px;
-    padding:2px 7px;
+    min-height:44px;
+    max-height:46px;
+    padding:3px 8px;
     border:1px solid #C8A9A9;
-    border-radius:3px;
-    background:#F8EEEE;
+    border-radius:5px;
+    background:#FFF0F0;
     color:#8B2222;
     font-size:8pt;
-    font-weight:700;
+    font-weight:800;
     text-align:left;
 }
-QPushButton#exitButton:hover { background:#F5DDDD; border-color:#B56A6A; }
-QPushButton#exitButton:pressed { background:#ECCACA; }
+QPushButton#exitButton:hover { background:#F8DDDD; border-color:#B56A6A; }
 QFrame#displayPanel {
-    background:#F4F7F9;
-    border:1px solid #A7B5C0;
-    border-radius:4px;
+    background:#FFFFFF;
+    border:1px solid #BCD0DB;
+    border-radius:6px;
 }
 QLabel#projectName {
-    min-height:29px;
-    max-height:33px;
-    background:#DDECF8;
-    color:#123F68;
-    border:1px solid #8DB3CF;
-    border-radius:3px;
-    padding:2px 7px;
+    min-height:30px;
+    max-height:34px;
+    background:#E7F4FB;
+    color:#0A4A6C;
+    border:1px solid #9BC2D6;
+    border-radius:5px;
+    padding:2px 8px;
     font-size:11pt;
-    font-weight:700;
+    font-weight:850;
 }
 QLabel#moduleHeading {
-    min-height:27px;
-    max-height:31px;
-    background:#EAF4E6;
-    color:#376C2F;
-    border:1px solid #A8C69F;
-    border-radius:3px;
+    min-height:28px;
+    max-height:32px;
+    background:#EDF8F0;
+    color:#246B39;
+    border:1px solid #B2D1BA;
+    border-radius:5px;
     padding:1px 6px;
-    font-size:13pt;
-    font-weight:700;
+    font-size:12pt;
+    font-weight:850;
 }
 QFrame#metricCard {
     background:#FFFFFF;
-    border:1px solid #BAC6D0;
-    border-radius:4px;
+    border:1px solid #D2DDE5;
+    border-radius:6px;
 }
-QFrame#metricCard[tone="blue"] { border-left:5px solid #2D83B5; background:#F4FAFE; }
+QFrame#metricCard[tone="blue"] { border-left:5px solid #1785B3; background:#F3FAFE; }
 QFrame#metricCard[tone="purple"] { border-left:5px solid #7156B8; background:#F8F5FE; }
 QFrame#metricCard[tone="green"] { border-left:5px solid #2B9961; background:#F2FBF6; }
 QFrame#metricCard[tone="red"] { border-left:5px solid #C64A55; background:#FFF5F6; }
-QLabel#metricCaption {
-    color:#51616E;
-    font-size:7.5pt;
+QLabel#metricCaption { color:#536777; font-size:7.5pt; font-weight:750; }
+QLabel#metricValue { color:#123D5A; font-size:16pt; font-weight:900; }
+QLabel#metricSubValue { color:#6B3A3F; font-size:7pt; font-weight:650; }
+QFrame#infoCard {
+    background:#EFF7FB;
+    border:1px solid #BED4E0;
+    border-radius:6px;
+}
+QLabel#infoTitle { color:#0E547B; font-size:9.3pt; font-weight:850; }
+QLabel#infoText { color:#344956; font-size:7.7pt; }
+QFrame#readyPanel {
+    background:#EDF8F0;
+    border:1px solid #B2D1BA;
+    border-radius:6px;
+}
+QLabel#ready { color:#28713C; font-size:13pt; font-weight:900; }
+QLabel#buildLabel { color:#667581; font-size:7pt; }
+QLabel#statusLine {
+    min-height:22px;
+    max-height:25px;
+    background:#E3ECF2;
+    color:#263743;
+    border:1px solid #B7C5CE;
+    border-radius:4px;
+    padding:1px 7px;
+    font-size:7.7pt;
     font-weight:650;
 }
-QLabel#metricValue {
-    color:#163A57;
-    font-size:15pt;
-    font-weight:750;
-}
-QLabel#metricSubValue {
-    color:#6B3A3F;
-    font-size:7pt;
-    font-weight:600;
-}
-QFrame#infoCard {
-    background:#EAF2F8;
-    border:1px solid #AEC6D8;
-    border-radius:4px;
-}
-QLabel#infoTitle {
-    color:#164C76;
-    font-size:9pt;
-    font-weight:700;
-}
-QLabel#infoText {
-    color:#344956;
-    font-size:7.5pt;
-}
-QFrame#readyPanel {
-    background:#EAF5E8;
-    border:1px solid #A9C9A2;
-    border-radius:4px;
-}
-QLabel#ready {
-    color:#3F772F;
-    font-size:13pt;
-    font-weight:700;
-}
-QLabel#buildLabel {
-    color:#5C6973;
-    font-size:7pt;
-}
-QLabel#statusLine {
-    min-height:21px;
-    max-height:24px;
-    background:#DCE5EC;
-    color:#263743;
-    border:1px solid #AAB7C1;
-    border-radius:2px;
-    padding:1px 6px;
-    font-size:7.5pt;
-}
-QToolTip {
-    background:#FFFBE6;
-    color:#16212A;
-    border:1px solid #9A8F56;
-    padding:3px;
-}
+QToolTip { background:#FFFBE6; color:#16212A; border:1px solid #9A8F56; padding:3px; }
 """
 
 
@@ -234,6 +193,7 @@ class SmtDashboard(QWidget):
         title_layout.setContentsMargins(7, 1, 7, 1)
         title = QLabel("SMTAN2 — SMT Results Database")
         title.setObjectName("classicTitle")
+        title.setStyleSheet("background: transparent; color: #FFFFFF; font-weight: 900;")
         title_layout.addWidget(title)
         title_layout.addStretch(1)
         window_layout.addWidget(title_bar)

@@ -285,6 +285,7 @@ class MainWindow(QMainWindow):
                 ("uphole", "Uphole"),
                 ("receiver_qc", "Receiver QC"),
                 ("smt", "SMT"),
+                ("vibroseis", "Vibroseis QC"),
                 ("segy_viewer", "SEGY"),
                 ("converter", "Converter"),
                 ("visualization", "2D/3D Viewer"),
@@ -309,12 +310,6 @@ class MainWindow(QMainWindow):
                 ("gravity_processing", "Reduction"),
                 ("gravity_viewer", "2D/3D & Satellite"),
                 ("gravity_reports", "Reports"),
-            ],
-            "vibroseis": [
-                ("vibroseis_data", "Data & Source Design"),
-                ("vibroseis_qc", "QC"),
-                ("vibroseis_viewer", "2D/3D & Satellite"),
-                ("vibroseis_planning", "Planning & Export"),
             ],
             "geodetic": [
                 ("geodetic_data", "DC Examiner"),
@@ -383,6 +378,8 @@ class MainWindow(QMainWindow):
         self._register_ribbon_provider(HomeRibbonProvider())
         self._register_ribbon_provider(SegdRibbonProvider())
         self._register_ribbon_provider(SegyViewerRibbonProvider())
+        self._vibroseis_ribbon_context = "vaps"
+        self._register_ribbon_provider(VibroseisRibbonProvider(lambda: getattr(self, "_vibroseis_ribbon_context", "vaps")))
         self._register_ribbon_provider(ConverterRibbonProvider())
         self._register_ribbon_provider(SeismicVisualizationRibbonProvider())
         for provider in workflow_providers():
@@ -477,8 +474,10 @@ class MainWindow(QMainWindow):
         context = str(context_id or "home")
         if context == "home":
             return True
-        if context in {"seismic", "magnetic", "electrical", "gravity", "vibroseis", "geodetic"}:
+        if context in {"seismic", "magnetic", "electrical", "gravity", "geodetic"}:
             return self._is_main_tab_licensed(context)
+        if context.startswith("vibroseis"):
+            return self._is_provider_licensed(context) or self._is_main_tab_licensed("seismic")
         return self._is_provider_licensed(context)
 
     def _first_feature_for_module(self, module_id: str | None) -> str | None:
@@ -1331,16 +1330,14 @@ class MainWindow(QMainWindow):
             if context.startswith("vibroseis"):
                 dashboard = self._open_vibroseis_dashboard()
                 if dashboard is not None:
-                    # The main Vibroseis tab and the Data subtab both open the
-                    # actual dashboard, not just the ribbon command strip.
-                    if context in {"vibroseis", "vibroseis_data", "vibroseis_sweep"}:
+                    if context in {"vibroseis", "vibroseis_data", "vibroseis_viewer"}:
+                        dashboard.show_classic_vaps()
+                    elif context == "vibroseis_sweep":
                         dashboard.show_sweep()
                     elif context == "vibroseis_qc":
-                        dashboard.show_signal_qc()
-                    elif context == "vibroseis_viewer":
-                        dashboard.show_geospatial_view("2d")
+                        dashboard.show_manual_qc()
                     elif context == "vibroseis_planning":
-                        dashboard.show_productivity()
+                        dashboard.show_sweep()
                 return
 
             if context.startswith("geodetic"):
@@ -1388,7 +1385,6 @@ class MainWindow(QMainWindow):
             ("magnetic", "Magnetic"),
             ("electrical", "Electrical"),
             ("gravity", "Gravity"),
-            ("vibroseis", "Vibroseis"),
             ("geodetic", "Geodetic"),
         ):
             self._add_ribbon_tab(tab_id, label)
@@ -1404,7 +1400,11 @@ class MainWindow(QMainWindow):
             "magnetic": "magnetic",
             "gravity": "gravity",
             "electrical": "electrical",
-            "vibroseis": "vibroseis",
+            "vibroseis": "seismic",
+            "vibroseis_data": "seismic",
+            "vibroseis_qc": "seismic",
+            "vibroseis_viewer": "seismic",
+            "vibroseis_planning": "seismic",
             "geodetic": "geodetic",
             "segy_viewer": "seismic",
             "segd": "seismic",
@@ -1449,7 +1449,7 @@ class MainWindow(QMainWindow):
         requested = str(module_id or "home")
         if requested == "home":
             main_id, provider_id = "home", "home"
-        elif requested in {"seismic", "magnetic", "electrical", "gravity", "vibroseis", "geodetic"}:
+        elif requested in {"seismic", "magnetic", "electrical", "gravity", "geodetic"}:
             main_id = requested
             provider_id = self._default_provider_for_main(main_id)
         else:
@@ -1459,6 +1459,8 @@ class MainWindow(QMainWindow):
         self._active_main_tab = main_id
         self._active_module = provider_id
         self._last_subtab_by_main[main_id] = provider_id
+        if provider_id != "home":
+            self._auto_close_project_explorer()
 
         index = self._ribbon_tabs.get(main_id)
         if index is not None and self.ribbon_tab_bar.currentIndex() != index:
@@ -1664,7 +1666,7 @@ class MainWindow(QMainWindow):
         if action_id.startswith("vibroseis_"):
             dashboard = self._vibroseis_dashboard
             if dashboard is None:
-                return action_id in {"vibroseis_open", "vibroseis_load", "vibroseis_sweep", "vibroseis_generate", "vibroseis_productivity", "vibroseis_load_vaps", "vibroseis_signal_qc", "vibroseis_ground_force", "vibroseis_vaps_qc"}
+                return True
             resolver = getattr(dashboard, "can_execute", None)
             return bool(resolver(action_id)) if callable(resolver) else True
 
@@ -1709,6 +1711,15 @@ class MainWindow(QMainWindow):
             self._logout_account()
         elif action_id in {"segd_open_file", "segd_open_viewer"}:
             self._open_segd_viewer()
+        elif action_id == "seismic_reset_active_view":
+            segd_viewer = self._active_segd_viewer()
+            segy_viewer = self._active_segy_viewer()
+            if segd_viewer is not None and hasattr(segd_viewer, "reset_to_initial_view"):
+                segd_viewer.reset_to_initial_view()
+            elif segy_viewer is not None and hasattr(segy_viewer, "reset_to_initial_view"):
+                segy_viewer.reset_to_initial_view()
+            else:
+                self.status_bar.showMessage("Open a SEG-D or SEG-Y viewer before restoring normal state.", 3000)
         elif action_id == "segd_open_2d3d":
             self._open_visualization()
         elif action_id == "segd_reload":
@@ -1741,6 +1752,8 @@ class MainWindow(QMainWindow):
             self._apply_to_active_segd("set_interaction_mode", "measure")
         elif action_id == "segd_zoom_fit":
             self._apply_to_active_segd("zoom_to_fit")
+        elif action_id == "segd_reset_normal":
+            self._apply_to_active_segd("reset_to_initial_view")
         elif action_id == "segd_run_qc":
             self._apply_to_active_segd("run_qc", "full")
         elif action_id == "segd_header_qc":
@@ -1763,6 +1776,11 @@ class MainWindow(QMainWindow):
                     viewer.copy_view_to_clipboard()
             elif action_id == "segy_viewer_fit":
                 viewer.fit()
+            elif action_id == "segy_viewer_reset_normal":
+                if hasattr(viewer, "reset_to_initial_view"):
+                    viewer.reset_to_initial_view()
+                else:
+                    viewer.fit()
             elif action_id == "segy_viewer_wiggle":
                 if hasattr(viewer, "set_display_preset"):
                     viewer.set_display_preset("wiggle")
@@ -1847,6 +1865,9 @@ class MainWindow(QMainWindow):
                 viewer.set_viewer_tool("measure")
             elif action_id == "segy_viewer_clear_marks":
                 viewer.clear_picks_and_measurements()
+            elif action_id == "segy_viewer_manual_qc":
+                if hasattr(viewer, "show_manual_qc_page"):
+                    viewer.show_manual_qc_page()
             elif action_id == "segy_viewer_headers":
                 if hasattr(viewer, "show_headers_page"):
                     viewer.show_headers_page()
@@ -1939,34 +1960,12 @@ class MainWindow(QMainWindow):
             self._open_converter_page().validate_output()
         elif action_id == "converter_open_output":
             self._open_converter_page().open_last_output()
-        elif action_id == "vibroseis_open":
-            self._open_vibroseis_dashboard()
-        elif action_id == "vibroseis_load":
-            self._open_vibroseis_dashboard().open_telemetry()
-        elif action_id == "vibroseis_load_vaps":
-            dashboard = self._open_vibroseis_dashboard(); dashboard.show_vaps_qc(); dashboard.open_vaps()
-        elif action_id == "vibroseis_vaps_qc":
-            dashboard = self._open_vibroseis_dashboard(); dashboard.show_vaps_qc(); dashboard.run_vaps_qc()
-        elif action_id == "vibroseis_sweep":
-            self._open_vibroseis_dashboard().show_sweep()
-        elif action_id == "vibroseis_generate":
-            dashboard = self._open_vibroseis_dashboard(); dashboard.show_sweep(); dashboard.design_sweep()
-        elif action_id == "vibroseis_export_pilot":
-            self._open_vibroseis_dashboard().export_pilot()
-        elif action_id == "vibroseis_signal_qc":
-            dashboard = self._open_vibroseis_dashboard(); dashboard.show_signal_qc(); dashboard.run_signal_qc()
-        elif action_id == "vibroseis_correlation":
-            dashboard = self._open_vibroseis_dashboard(); dashboard.show_signal_qc(); dashboard.correlate_trace()
-        elif action_id == "vibroseis_ground_force":
-            dashboard = self._open_vibroseis_dashboard(); dashboard.show_ground_force(); dashboard.calculate_ground_force()
-        elif action_id == "vibroseis_productivity":
-            dashboard = self._open_vibroseis_dashboard(); dashboard.show_productivity(); dashboard.calculate_productivity()
-        elif action_id == "vibroseis_view_2d":
-            self._open_vibroseis_dashboard().show_geospatial_view("2d")
-        elif action_id == "vibroseis_view_3d":
-            self._open_vibroseis_dashboard().show_geospatial_view("3d")
-        elif action_id == "vibroseis_satellite":
-            self._open_vibroseis_dashboard().show_geospatial_view("2d")
+        elif action_id.startswith("vibroseis_"):
+            dashboard = self._open_vibroseis_dashboard()
+            if dashboard is not None:
+                handler = getattr(dashboard, "handle_ribbon_action", None)
+                if callable(handler):
+                    handler(action_id)
         elif action_id == "geodetic_open":
             self._apply_to_geodetic("open_file")
         elif action_id == "geodetic_examiner":
@@ -2843,6 +2842,11 @@ class MainWindow(QMainWindow):
         dashboard.show(); dashboard.raise_(); dashboard.setFocus(Qt.OtherFocusReason)
         return dashboard
 
+    def _on_vibroseis_page_changed(self, page: str) -> None:
+        self._vibroseis_ribbon_context = str(page or "vaps")
+        if getattr(self, "_active_module", None) == "vibroseis":
+            self._update_ribbon()
+
     def _open_vibroseis_dashboard(self):
         """Open the integrated Vibroseis workspace as a document tab.
 
@@ -2866,6 +2870,12 @@ class MainWindow(QMainWindow):
                 return None
             self._vibroseis_dashboard = dashboard
             dashboard.destroyed.connect(lambda *_: setattr(self, "_vibroseis_dashboard", None))
+            page_signal = getattr(dashboard, "page_changed", None)
+            if page_signal is not None:
+                try:
+                    page_signal.connect(self._on_vibroseis_page_changed)
+                except Exception:
+                    pass
             index = self._add_document_tab(
                 dashboard,
                 "Vibroseis Source QC",
@@ -2883,6 +2893,10 @@ class MainWindow(QMainWindow):
                 )
         self.tab_widget.setCurrentIndex(index)
         self._set_active_module("vibroseis")
+        context_getter = getattr(dashboard, "active_ribbon_context", None)
+        if callable(context_getter):
+            self._vibroseis_ribbon_context = context_getter()
+            self._update_ribbon()
         dashboard.show()
         dashboard.raise_()
         dashboard.setFocus(Qt.OtherFocusReason)
@@ -3326,7 +3340,18 @@ class MainWindow(QMainWindow):
             )
 
         self._sync_document_workspace()
+        self._auto_close_project_explorer()
         return index
+
+    def _auto_close_project_explorer(self) -> None:
+        """Hide the Project Explorer when a dashboard/workspace becomes active.
+
+        The dock remains available from Home > Project Explorer, but it no
+        longer occupies screen width after opening technical dashboards.
+        """
+        dock = getattr(self, "project_dock", None)
+        if dock is not None and dock.isVisible():
+            dock.hide()
 
     def _sync_document_workspace(self) -> None:
         if not hasattr(self, "central_stack"):
