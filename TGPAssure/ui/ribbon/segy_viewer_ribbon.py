@@ -64,7 +64,6 @@ class SegyViewerRibbonProvider(RibbonProvider):
                 [
                     large("Open SEG-Y", "segy_open_file", icon="seg-y", accent=True),
                     small("Fit", "segy_viewer_fit", "zoom-fit-best"),
-                    small("Normal State", "segy_viewer_reset_normal", "view-refresh"),
                     small("Copy", "segy_viewer_copy_view", "edit-copy"),
                     small("PNG", "segy_viewer_export_image", "image-x-generic"),
                     small("BMP", "segy_viewer_export_bmp", "document-save"),
@@ -74,12 +73,8 @@ class SegyViewerRibbonProvider(RibbonProvider):
                 "Display",
                 [
                     small("Wiggle", "segy_viewer_toggle_wiggle", "office-chart-line", checkable=True, checked=True),
-                    small("Gray", "segy_viewer_toggle_gray", "view-grid", checkable=True, checked=True),
                     small("Colour", "segy_viewer_toggle_color", "color-picker", checkable=True),
-                    small("Timelines", "segy_viewer_toggle_timelines", "grid", checkable=True, checked=True),
-                    small("Wiggle Only", "segy_viewer_wiggle", "office-chart-line"),
-                    small("Var Density", "segy_viewer_vd", "view-grid"),
-                    small("Colour View", "segy_viewer_color", "color-picker"),
+                    small("Normal", "segy_viewer_reset_normal", "view-refresh"),
                 ],
             ),
             RibbonGroup(
@@ -127,8 +122,6 @@ class SegyViewerRibbonProvider(RibbonProvider):
                     small("Filter", "segy_viewer_proc_filter", "view-filter", checkable=True),
                     small("AGC", "segy_viewer_proc_agc", "office-chart-line", checkable=True),
                     small("Normalize", "segy_viewer_proc_norm", "view-refresh", checkable=True),
-                    small("Weight", "segy_viewer_proc_weight", "transform-scale", checkable=True),
-                    small("Params", "segy_viewer_processing_params", "preferences-system"),
                 ],
             ),
             RibbonGroup(

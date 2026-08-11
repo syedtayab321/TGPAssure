@@ -44,6 +44,7 @@ from PySide6.QtWidgets import (
 )
 
 from modules.seismic.segd_viewer.header_viewer import HeaderViewer
+from modules.seismic.ui.color_palette_dialog import ColorPaletteDialog, COLOR_PALETTES, palette_icon
 from modules.seismic.segd_viewer.segd_reader import SegdReader
 from modules.seismic.segd_viewer.trace_waveform_dialog import TraceWaveformDialog
 from modules.seismic.segd_viewer.segd_interaction_dialogs import (
@@ -64,6 +65,256 @@ STATUS_COLORS = {
     "Multiple": QColor(240, 205, 0),
     "Dead": QColor(150, 0, 0),
     "Edited": QColor(235, 125, 20),
+}
+
+# Extended color palettes for SEG-D color density display
+COLOR_PALETTES = {
+    "Seismic": [
+        "#122452", "#1260A0", "#13A6B9", "#FFD54F", "#DA3C2D"
+    ],
+    "Seismic Blue-White-Red": [
+        "#191970", "#1E90FF", "#F0F8FF", "#FF6347", "#8B0000"
+    ],
+    "Viridis": [
+        "#440154", "#31688E", "#35B779", "#FDE725"
+    ],
+    "Grayscale": [
+        "#000000", "#404040", "#808080", "#BFBFBF", "#FFFFFF"
+    ],
+    "Blue Ice": [
+        "#071A2F", "#0F4C81", "#1FA2FF", "#A7F3D0", "#FFFFFF"
+    ],
+    "Copper Heat": [
+        "#1C1210", "#7C2D12", "#EA580C", "#FDBA74", "#FFF7ED"
+    ],
+    "Rainbow": [
+        "#FF0000", "#FF7F00", "#FFFF00", "#00FF00", "#0000FF", "#8B00FF"
+    ],
+    "Hot": [
+        "#000000", "#7F0000", "#FF0000", "#FF7F00", "#FFFF00", "#FFFFFF"
+    ],
+    "Cool": [
+        "#0000FF", "#00FFFF", "#00FF00", "#FFFF00", "#FF0000"
+    ],
+    "Jet": [
+        "#00008F", "#0000FF", "#0080FF", "#00FFFF", "#80FF80",
+        "#FFFF00", "#FF8000", "#FF0000", "#800000"
+    ],
+    "Ocean": [
+        "#000040", "#000080", "#0080C0", "#00C0FF", "#80E0FF", "#FFFFFF"
+    ],
+    "Terrain": [
+        "#004400", "#008000", "#90C090", "#C0C080", "#E0E080", "#FFFFFF"
+    ],
+    "Spectral": [
+        "#0000FF", "#0080FF", "#00FFFF", "#00FF80", "#80FF00",
+        "#FFFF00", "#FF8000", "#FF0080", "#FF0000"
+    ],
+    "NEO (Night Earth)": [
+        "#000000", "#001020", "#004060", "#0080A0", "#00C0E0",
+        "#FFFFFF", "#FFE080", "#FFA040", "#FF4000"
+    ],
+    "Volumetric Picker": [
+        "#000000", "#000080", "#0040C0", "#0080FF", "#80C0FF",
+        "#FFFFFF", "#FFC080", "#FF8000", "#C04000", "#800000"
+    ],
+    "Seismic Dip Azimuth": [
+        "#FF0000", "#FF8000", "#FFFF00", "#00FF00", "#00FFFF",
+        "#0080FF", "#FF00FF", "#FF0080"
+    ],
+    "SeismicRWB": [
+        "#0000FF", "#0080FF", "#00FFFF", "#FFFFFF", "#FFFF00",
+        "#FF8000", "#FF0000"
+    ],
+    "Red Blue Green": [
+        "#FF0000", "#FF80FF", "#FFFFFF", "#80FFFF", "#00FF00"
+    ],
+    "Green Blue Red": [
+        "#00FF00", "#80FFFF", "#FFFFFF", "#FF80FF", "#FF0000"
+    ],
+    "Polarity": [
+        "#0000FF", "#0080FF", "#FFFFFF", "#FF8000", "#FF0000"
+    ],
+    "Semblance": [
+        "#000000", "#004080", "#0080FF", "#00FFFF", "#00FF80",
+        "#80FF00", "#FFFF00", "#FF8000", "#FF0000"
+    ],
+    "Reflection Strength": [
+        "#FFFFFF", "#80FF80", "#00FF00", "#008000", "#004000",
+        "#000000"
+    ],
+    "Variance": [
+        "#000000", "#003F5C", "#7A5195", "#EF5675", "#FF7C43",
+        "#F9A93D", "#FFD166"
+    ],
+    "Local Flatness": [
+        "#0000FF", "#0080FF", "#00FFFF", "#00FF80", "#80FF00",
+        "#FFFF00", "#FF8000", "#FF0000"
+    ],
+    "Structural Lows": [
+        "#000000", "#001040", "#003080", "#0060C0", "#00A0FF",
+        "#80D0FF", "#FFFFFF"
+    ],
+    "Thickness": [
+        "#FFFFFF", "#FFE0A0", "#FFC040", "#FF8000", "#A04000",
+        "#400000"
+    ],
+    "Uncertainty": [
+        "#FFFFFF", "#C0E0FF", "#80C0FF", "#4080FF", "#0040FF",
+        "#0000A0"
+    ],
+    "Velocity": [
+        "#000000", "#000040", "#000080", "#0040C0", "#0080FF",
+        "#00FFFF", "#80FF80", "#FFFF00", "#FF8000", "#FF0000"
+    ],
+    "Resistivity": [
+        "#000000", "#800000", "#FF0000", "#FF8000", "#FFFF00",
+        "#80FF80", "#00FFFF", "#0080FF", "#0000FF", "#400080"
+    ],
+    "Permeability": [
+        "#FFFFFF", "#FFE0C0", "#FFA080", "#FF6040", "#D02000",
+        "#800000"
+    ],
+    "Water Saturation": [
+        "#000000", "#000080", "#0040C0", "#0080FF", "#40C0FF",
+        "#80E0FF", "#FFFFFF"
+    ],
+    "Vitrinite Reflectance": [
+        "#000000", "#003000", "#006000", "#00A000", "#40C040",
+        "#80E080", "#FFFFFF"
+    ],
+    "Gold": [
+        "#000000", "#402000", "#804000", "#BF8000", "#FFBF00",
+        "#FFFFFF"
+    ],
+    "Gold White Blue": [
+        "#000000", "#402000", "#804000", "#BF8000", "#FFBF00",
+        "#FFFFFF", "#80C0FF", "#0080FF", "#004080"
+    ],
+    "White Blue": [
+        "#FFFFFF", "#80C0FF", "#0080FF", "#004080", "#000080"
+    ],
+    "White Blue Green": [
+        "#FFFFFF", "#80C0FF", "#0080FF", "#00A0A0", "#008000"
+    ],
+    "White Grey Blue": [
+        "#FFFFFF", "#C0C0C0", "#808080", "#4080C0", "#004080"
+    ],
+    "White Red": [
+        "#FFFFFF", "#FFC0C0", "#FF8080", "#FF4040", "#FF0000"
+    ],
+    "White Yellow": [
+        "#FFFFFF", "#FFFFC0", "#FFFF80", "#FFFF00", "#BF8000"
+    ],
+    "Red Yellow Green": [
+        "#FF0000", "#FF8000", "#FFFF00", "#80FF00", "#00FF00"
+    ],
+    "Red White Blue": [
+        "#FF0000", "#FF8080", "#FFFFFF", "#8080FF", "#0000FF"
+    ],
+    "Red White Blue (Reverse)": [
+        "#0000FF", "#8080FF", "#FFFFFF", "#FF8080", "#FF0000"
+    ],
+    "Red White Blue (Blocky)": [
+        "#FF0000", "#FF4444", "#FF8888", "#FFCCCC", "#FFFFFF",
+        "#CCCCFF", "#8888FF", "#4444FF", "#0000FF"
+    ],
+    "Blue White Red": [
+        "#0000FF", "#8080FF", "#FFFFFF", "#FF8080", "#FF0000"
+    ],
+    "Blue White Red (Blocky)": [
+        "#0000FF", "#4444FF", "#8888FF", "#CCCCFF", "#FFFFFF",
+        "#FFCCCC", "#FF8888", "#FF4444", "#FF0000"
+    ],
+    "White Black Red": [
+        "#FFFFFF", "#C0C0C0", "#808080", "#404040", "#800000",
+        "#FF0000"
+    ],
+    "White Black Red (Anti)": [
+        "#FFFFFF", "#C0C0C0", "#808080", "#404040", "#800000",
+        "#FF0000", "#FF8000"
+    ],
+    "Red White Black": [
+        "#FF0000", "#FF8080", "#FFFFFF", "#808080", "#000000"
+    ],
+    "Green Yellow Red": [
+        "#00FF00", "#80FF00", "#FFFF00", "#FF8000", "#FF0000"
+    ],
+    "Green Blue Brown": [
+        "#004000", "#008000", "#00C000", "#40A0A0", "#808080",
+        "#A06040", "#804020"
+    ],
+    "Purple Blue Green": [
+        "#800080", "#4000C0", "#0080FF", "#00C0C0", "#00FF00"
+    ],
+    "Purple Blue Green (Reverse)": [
+        "#00FF00", "#00C0C0", "#0080FF", "#4000C0", "#800080"
+    ],
+    "Purple Green Red": [
+        "#800080", "#4000C0", "#00C0A0", "#80FF80", "#FFFF00",
+        "#FF8000", "#FF0000"
+    ],
+    "YellowFMS": [
+        "#000000", "#004000", "#008000", "#00C000", "#C0C000",
+        "#FFFF00", "#FFC000", "#FF8000", "#FF4000", "#FF0000"
+    ],
+    "YellowFMS-GR": [
+        "#000000", "#004000", "#008000", "#00C000", "#C0C000",
+        "#FFFF00", "#FFC000", "#FF8000", "#FF4000", "#FF0000",
+        "#FF0080", "#FF00FF"
+    ],
+    "YellowFMS-PEF": [
+        "#FFFFFF", "#FFFF80", "#FFFF00", "#FFC000", "#FF8000",
+        "#FF4000", "#FF0000", "#800000"
+    ],
+    "YellowFMS-R": [
+        "#FFFFFF", "#FFE0E0", "#FFC0C0", "#FF8080", "#FF4040",
+        "#FF0000", "#800000"
+    ],
+    "YellowFMS-T": [
+        "#FFFFFF", "#FFE0C0", "#FFC080", "#FF8040", "#FF4000",
+        "#800000"
+    ],
+    "GrayLU": [
+        "#000000", "#202020", "#404040", "#606060", "#808080",
+        "#A0A0A0", "#C0C0C0", "#E0E0E0", "#FFFFFF"
+    ],
+    "SunbowLU": [
+        "#000000", "#0000FF", "#00FFFF", "#00FF00", "#FFFF00",
+        "#FF0000", "#FFFFFF"
+    ],
+    "RainbowLU": [
+        "#0000FF", "#0080FF", "#00FFFF", "#00FF80", "#80FF00",
+        "#FFFF00", "#FF8000", "#FF0000"
+    ],
+    "Sunny Side Up": [
+        "#000040", "#000080", "#0040C0", "#0080FF", "#40C0FF",
+        "#80FFFF", "#FFFF80", "#FFE080", "#FFC040", "#FF8000"
+    ],
+    "Spectrum": [
+        "#000000", "#0000FF", "#00FFFF", "#00FF00", "#FFFF00",
+        "#FF8000", "#FF0000"
+    ],
+    "Log Rainbow": [
+        "#0000FF", "#0080FF", "#00FFFF", "#00FF80", "#80FF00",
+        "#FFFF00", "#FF8000", "#FF0000"
+    ],
+    "Log VDL": [
+        "#000000", "#004000", "#008000", "#00C000", "#C0C000",
+        "#FFFF00", "#FF8000", "#FF0000"
+    ],
+    "Log Sand & Shale": [
+        "#FFE0A0", "#FFD080", "#FFC060", "#FFA040", "#FF8020",
+        "#C06020", "#804020", "#402010", "#000000"
+    ],
+    "Log Seismic": [
+        "#0000FF", "#0080FF", "#00FFFF", "#FFFFFF", "#FFFF00",
+        "#FF8000", "#FF0000"
+    ],
+    "Map Blocked": [
+        "#0000FF", "#0080FF", "#00FFFF", "#00FF80", "#80FF00",
+        "#FFFF00", "#FF8000", "#FF0000"
+    ]
 }
 
 
@@ -204,10 +455,6 @@ class RenderWorker(QRunnable):
         if self.params.gain_mode == "fixed":
             work *= np.float32(10.0 ** (self.params.fixed_gain_db / 20.0))
         elif self.params.gain_mode == "trace_balance":
-            # Match the legacy 408 viewer default: every trace is normalised
-            # independently to its own peak before the display gain/clip is
-            # applied.  This prevents the first high-amplitude traces from
-            # flooding the section and keeps weak traces visible.
             peak = np.max(np.abs(work), axis=1, keepdims=True).astype(np.float32)
             peak[peak <= 1e-12] = 1.0
             work = work / peak
@@ -239,13 +486,10 @@ class RenderWorker(QRunnable):
                 if sos is not None:
                     work = sosfiltfilt(sos, work, axis=1).astype(np.float32, copy=False)
             except Exception:
-                # Filtering is display-only; a bad/unsupported filter must never prevent raw SEG-D viewing.
                 pass
 
         absolute = np.abs(work)
         if self.params.clip_percentile <= 4.0:
-            # Legacy "Trace Clip (0.5 - 4)" style control.  The entered value
-            # is an amplitude-deflection clip, not a percentile.
             clip = float(max(0.05, self.params.clip_percentile))
         else:
             percentile = min(100.0, max(0.1, self.params.clip_percentile))
@@ -447,44 +691,38 @@ class RenderWorker(QRunnable):
 
     @staticmethod
     def _apply_color_palette(values: np.ndarray, palette: str) -> np.ndarray:
+        """Apply a color palette to the normalized density values."""
         values = np.clip(values, -1.0, 1.0)
         normalized = (values + 1.0) * 0.5
-        palette_key = str(palette or "seismic").lower()
-
-        if palette_key == "grayscale":
-            gray = np.clip((1.0 - normalized) * 255.0, 0, 255).astype(np.uint8)
-            return np.ascontiguousarray(np.repeat(gray[:, :, None], 3, axis=2))
-
-        if palette_key == "viridis":
-            stops = np.asarray([0.0, 0.25, 0.50, 0.75, 1.0], dtype=np.float32)
-            colors = np.asarray(
-                [[68, 1, 84], [59, 82, 139], [33, 145, 140], [94, 201, 98], [253, 231, 37]],
-                dtype=np.float32,
-            )
-        elif palette_key == "blue_white_red":
-            stops = np.asarray([0.0, 0.5, 1.0], dtype=np.float32)
-            colors = np.asarray([[25, 70, 185], [250, 250, 250], [190, 30, 35]], dtype=np.float32)
-        else:  # Traditional seismic: deep blue -> cyan/white -> yellow/red.
-            stops = np.asarray([0.0, 0.24, 0.50, 0.76, 1.0], dtype=np.float32)
-            colors = np.asarray(
-                [[20, 45, 155], [35, 170, 225], [248, 248, 245], [250, 185, 45], [190, 25, 30]],
-                dtype=np.float32,
-            )
-
+        
+        # Get palette colors
+        palette_key = str(palette or "Seismic")
+        
+        # Find the palette by name (case-insensitive)
+        found_palette = None
+        for name in COLOR_PALETTES:
+            if name.lower() == palette_key.lower():
+                found_palette = name
+                break
+        
+        if found_palette is None:
+            # Fallback to Seismic
+            found_palette = "Seismic"
+        
+        colors = [QColor(c) for c in COLOR_PALETTES[found_palette]]
+        
+        # Build color stops
+        stops = np.linspace(0.0, 1.0, len(colors))
+        rgb_array = np.asarray([[c.red(), c.green(), c.blue()] for c in colors], dtype=float)
+        
         flat = normalized.reshape(-1)
         rgb = np.empty((flat.size, 3), dtype=np.float32)
         for channel in range(3):
-            rgb[:, channel] = np.interp(flat, stops, colors[:, channel])
+            rgb[:, channel] = np.interp(flat, stops, rgb_array[:, channel])
         return np.ascontiguousarray(np.clip(rgb.reshape(values.shape + (3,)), 0, 255).astype(np.uint8))
 
     def _render_wiggle_color(self, data: np.ndarray, statuses: list[str]) -> QImage:
-        """Render coloured wiggles without drawing a second density layer.
-
-        The earlier implementation painted a full colour-density raster first and
-        then drew wiggles on top. On dense 408/428 field records this looked like
-        the shot gather was duplicated/overprinted. This mode now means
-        "coloured wiggle QC", not "density plus wiggle overlay".
-        """
+        """Render coloured wiggles without drawing a second density layer."""
         trace_count, sample_count = data.shape
         width = max(2, self.params.width)
         height = max(2, self.params.height)
@@ -603,7 +841,6 @@ class TraceStatusLegend(QGroupBox):
             row = index // 3
             col = index % 3
             layout.addWidget(item, row, col)
-
 
 
 class ErrorStatusPanel(QGroupBox):
@@ -1160,9 +1397,6 @@ class SegdImageView(QWidget):
 
     def target_render_size(self) -> tuple[int, int]:
         rect = self.plot_rect()
-        # Render at the canvas logical size and request a fresh render on zoom.
-        # This avoids stretching/down-sampling a previous bitmap, which made
-        # traces look soft or distorted in the packaged viewer.
         width = max(420, min(6000, int(rect.width())))
         height = max(280, min(6000, int(rect.height())))
         return width, height
@@ -1315,12 +1549,6 @@ class SegdImageView(QWidget):
         return QPointF(plot.left() + fx * plot.width(), plot.top() + fy * plot.height())
 
     def wheelEvent(self, event: QWheelEvent) -> None:
-        """Zoom by requesting a smaller/larger trace/sample window.
-
-        This deliberately avoids magnifying an already-rasterized bitmap, which
-        made wiggles look blurry and horizontally stretched. Every zoom step is
-        re-read and re-rendered from the original SEG-D samples.
-        """
         plot = self.plot_rect()
         point = event.position()
         if not plot.contains(point):
@@ -1334,8 +1562,6 @@ class SegdImageView(QWidget):
         vertical_only = bool(event.modifiers() & Qt.ShiftModifier)
         new_traces = trace_count if vertical_only else max(1, int(round(trace_count * factor)))
         new_samples = sample_count if horizontal_only else max(8, int(round(sample_count * factor)))
-        # The loaded render window is the hard bound for zoom-out here; the
-        # parent expands further using its full-file spin ranges when possible.
         max_traces = max(trace_count, self._total_traces)
         max_samples = max(sample_count, self._total_samples)
         new_traces = min(new_traces, max_traces)
@@ -1583,14 +1809,9 @@ class SegdViewerWidget(QWidget):
         header_layout.addStretch(1)
         header_layout.addWidget(self.position_label)
         header_layout.addWidget(self.header_render_button)
-        # Keep these labels for internal status updates, but do not show the
-        # modern summary strip.  The legacy SEG-D view uses the right File Header
-        # card and left Trace Attributes panel instead.
         self._legacy_summary_header = header
         header.hide()
 
-        # Build configuration widgets once.  They are controlled from the legacy
-        # Configure dialog instead of occupying the screen permanently.
         self.trace_attributes = TraceAttributesPanel(self)
         self.view_controls = self._create_view_controls_tab()
         self.gain_controls = self._create_gain_controls_tab()
@@ -1725,10 +1946,25 @@ class SegdViewerWidget(QWidget):
         self.display_combo.addItem("Variable Density (Grayscale)", "variable_density")
         self.display_combo.addItem("Color Density", "color_density")
         self.display_combo.addItem("Wiggle + Color", "wiggle_color")
-        # Default to a single wiggle-only render. This prevents the first opened record
-        # from looking like duplicated data because of variable-area fill/overlays.
         self.display_combo.setCurrentIndex(0)
         self.display_combo.currentIndexChanged.connect(self._on_control_changed)
+        self.display_combo.currentIndexChanged.connect(self._update_color_library_visibility)
+
+        # Color palette selector for density modes
+        self.palette_combo = QComboBox()
+        palette_names = sorted(COLOR_PALETTES.keys())
+        for name in palette_names:
+            self.palette_combo.addItem(name, name)
+        self.palette_combo.setCurrentText("Seismic")
+        self.palette_combo.currentIndexChanged.connect(self._on_control_changed)
+        self.palette_combo.setToolTip("Select color palette for Color Density and Wiggle+Color display modes")
+        self.palette_combo.setVisible(False)
+
+        self.color_library_button = QPushButton("Color Library")
+        self.color_library_button.setObjectName("analysisButton")
+        self.color_library_button.setIcon(palette_icon())
+        self.color_library_button.setToolTip("Select the colour table used by Color Density")
+        self.color_library_button.clicked.connect(self._open_color_library)
 
         self.trace_start_spin = QSpinBox()
         self.trace_start_spin.setMinimum(1)
@@ -1773,6 +2009,7 @@ class SegdViewerWidget(QWidget):
         self.qc_colors_check.toggled.connect(self._on_control_changed)
 
         view_form.addRow("Display", self.display_combo)
+        view_form.addRow("Color Palette", self.color_library_button)
         view_form.addRow("First Trace", self.trace_start_spin)
         view_form.addRow("Last Trace", self.trace_end_spin)
         view_form.addRow("First Sample", self.sample_start_spin)
@@ -1785,6 +2022,21 @@ class SegdViewerWidget(QWidget):
         layout.addWidget(view_group)
         layout.addStretch(1)
         return widget
+
+    def _update_color_library_visibility(self, *_args) -> None:
+        """Show the visual colour-table button only for Color Density."""
+        if not hasattr(self, "color_library_button"):
+            return
+        is_color_density = str(self.display_combo.currentData() or "") == "color_density"
+        self.color_library_button.setVisible(is_color_density)
+
+    def _open_color_library(self) -> None:
+        """Open the shared colour-table dialog and apply the selection immediately."""
+        current = str(self.palette_combo.currentData() or self.palette_combo.currentText() or "Seismic")
+        dialog = ColorPaletteDialog(current, self)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        self.set_color_palette(dialog.selected_palette)
 
     def _create_gain_controls_tab(self) -> QWidget:
         widget = QWidget()
@@ -2130,9 +2382,6 @@ class SegdViewerWidget(QWidget):
         if self._closing or generation != self._open_generation:
             return
         self.busy_overlay.update_progress(value, message)
-        # File indexing is the first phase of opening; reserve the final part of
-        # the full-page progress bar for the initial seismic render so progress
-        # never jumps backwards from 100% to a low render percentage.
         self.loading_progress.emit(min(78, max(0, int(value * 0.78))), message)
 
     def _on_open_result(self, generation: int, reader: SegdReader) -> None:
@@ -2254,9 +2503,22 @@ class SegdViewerWidget(QWidget):
                 self.display_combo.setCurrentIndex(index)
 
     def set_color_palette(self, palette: str) -> None:
-        index = self.color_palette_combo.findData(palette)
+        for name in COLOR_PALETTES:
+            if name.lower() == str(palette).lower():
+                index = self.palette_combo.findData(name)
+                if index >= 0:
+                    self.palette_combo.setCurrentIndex(index)
+                    if hasattr(self, "color_library_button"):
+                        self.color_library_button.setText(name)
+                        self.color_library_button.setIcon(palette_icon(COLOR_PALETTES[name]))
+                    return
+        index = self.palette_combo.findData(palette)
         if index >= 0:
-            self.color_palette_combo.setCurrentIndex(index)
+            self.palette_combo.setCurrentIndex(index)
+            if hasattr(self, "color_library_button"):
+                name = str(self.palette_combo.currentText())
+                self.color_library_button.setText(name)
+                self.color_library_button.setIcon(palette_icon(COLOR_PALETTES.get(name)))
 
     def set_color_gain(self, gain: float) -> None:
         self.color_gain_spin.setValue(float(gain))
@@ -2290,6 +2552,7 @@ class SegdViewerWidget(QWidget):
         initial_trace_count = min(trace_count, 300)
         blockers = [
             QSignalBlocker(self.display_combo),
+            QSignalBlocker(self.palette_combo),
             QSignalBlocker(self.gain_combo),
             QSignalBlocker(self.color_palette_combo),
             QSignalBlocker(self.trace_start_spin),
@@ -2310,6 +2573,13 @@ class SegdViewerWidget(QWidget):
             index = self.display_combo.findData("wiggle")
             if index >= 0:
                 self.display_combo.setCurrentIndex(index)
+            # Reset palette to Seismic
+            index = self.palette_combo.findData("Seismic")
+            if index >= 0:
+                self.palette_combo.setCurrentIndex(index)
+            if hasattr(self, "color_library_button"):
+                self.color_library_button.setText("Seismic")
+                self.color_library_button.setIcon(palette_icon(COLOR_PALETTES.get("Seismic")))
             index = self.gain_combo.findData("trace_balance")
             if index >= 0:
                 self.gain_combo.setCurrentIndex(index)
@@ -2330,6 +2600,7 @@ class SegdViewerWidget(QWidget):
             self.qc_colors_check.setChecked(True)
             self.remove_dc_check.setChecked(True)
             self._filter_enabled = False
+            self._update_color_library_visibility()
             self._filter_low_hz = 0.0
             self._filter_high_hz = 0.0
             self.canvas.set_mode("pan")
@@ -2515,7 +2786,6 @@ class SegdViewerWidget(QWidget):
         flag_counts: dict[str, int] = {"Resistance": 0, "Capacitance": 0, "Leakage": 0, "Tilt": 0, "Multiple": 0, "Edited": 0, "Auxiliary": 0, "Dead": 0}
         status_source = list(self._trace_statuses)
         if len(status_source) < trace_count:
-            # Rebuild a status snapshot from trace headers where possible so QC does not depend only on the displayed window.
             for info in trace_infos:
                 if getattr(info, "channel_type", 1) != 1:
                     status_source.append("Auxiliary")
@@ -2786,6 +3056,10 @@ class SegdViewerWidget(QWidget):
         sample_start = min(self.sample_start_spin.value(), self.sample_end_spin.value()) - 1
         sample_end = max(self.sample_start_spin.value(), self.sample_end_spin.value())
         width, height = self.canvas.target_render_size()
+        
+        # Get the palette name from the palette combo
+        palette_name = str(self.palette_combo.currentText())
+        
         params = RenderParameters(
             trace_start=trace_start,
             trace_end=trace_end,
@@ -2797,7 +3071,7 @@ class SegdViewerWidget(QWidget):
             clip_percentile=float(self.clip_spin.value()),
             display_mode=str(self.display_combo.currentData()),
             wiggle_scale=float(self.wiggle_scale_spin.value()),
-            color_palette=str(self.color_palette_combo.currentData()),
+            color_palette=palette_name,
             color_gain=float(self.color_gain_spin.value()),
             polarity=int(self.polarity_combo.currentData()),
             fill_positive=bool(self.fill_polarity_combo.currentData()),

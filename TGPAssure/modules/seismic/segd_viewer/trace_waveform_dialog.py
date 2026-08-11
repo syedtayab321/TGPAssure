@@ -10,7 +10,7 @@ try:
     pg.setConfigOptions(antialias=True)
 except Exception:
     pass
-from PySide6.QtCore import Qt, QRectF, Signal
+from PySide6.QtCore import QPointF, Qt, QRectF, Signal
 from PySide6.QtGui import QColor, QFont, QImage, QMouseEvent, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -38,6 +38,12 @@ from PySide6.QtWidgets import (
 )
 
 from modules.seismic.segd_viewer.segd_reader import SegdReader
+from modules.seismic.ui.color_palette_dialog import (
+    ColorPaletteDialog,
+    COLOR_PALETTES,
+    palette_icon,
+    palette_to_rgb_array,
+)
 
 
 DIALOG_STYLE = """
@@ -97,33 +103,44 @@ DIALOG_STYLE = """
 """
 
 
-def _spectral_lut() -> np.ndarray:
-    """Small built-in blue/cyan/yellow/red lookup table, avoiding optional colormap APIs."""
-    stops = np.array(
-        [
-            [18, 36, 82],
-            [18, 96, 160],
-            [19, 166, 185],
-            [255, 213, 79],
-            [218, 60, 45],
-        ],
-        dtype=float,
-    )
-    positions = np.linspace(0.0, 1.0, len(stops))
-    x = np.linspace(0.0, 1.0, 256)
-    lut = np.vstack([np.interp(x, positions, stops[:, c]) for c in range(3)]).T
-    return np.clip(lut, 0, 255).astype(np.ubyte)
-
-
+# Extended color palettes for FFT and FT analysis
 _PALETTES: dict[str, list[str]] = {
     "TGP Spectral": ["#122452", "#1260A0", "#13A6B9", "#FFD54F", "#DA3C2D"],
+    "Seismic Blue-White-Red": ["#191970", "#1E90FF", "#F0F8FF", "#FF6347", "#8B0000"],
     "Blue Ice": ["#071A2F", "#0F4C81", "#1FA2FF", "#A7F3D0", "#FFFFFF"],
     "Copper Heat": ["#1C1210", "#7C2D12", "#EA580C", "#FDBA74", "#FFF7ED"],
-    "Seismic Red Blue": ["#173B8E", "#FFFFFF", "#B91C1C"],
-    "Viridis Safe": ["#440154", "#31688E", "#35B779", "#FDE725"],
+    "Viridis": ["#440154", "#31688E", "#35B779", "#FDE725"],
+    "SeismicRWB": ["#0000FF", "#0080FF", "#00FFFF", "#FFFFFF", "#FFFF00", "#FF8000", "#FF0000"],
+    "Red White Blue": ["#FF0000", "#FF8080", "#FFFFFF", "#8080FF", "#0000FF"],
+    "Red White Blue (Reverse)": ["#0000FF", "#8080FF", "#FFFFFF", "#FF8080", "#FF0000"],
+    "Blue White Red": ["#0000FF", "#8080FF", "#FFFFFF", "#FF8080", "#FF0000"],
+    "Green Yellow Red": ["#00FF00", "#80FF00", "#FFFF00", "#FF8000", "#FF0000"],
+    "Purple Blue Green": ["#800080", "#4000C0", "#0080FF", "#00C0C0", "#00FF00"],
+    "Gold": ["#000000", "#402000", "#804000", "#BF8000", "#FFBF00", "#FFFFFF"],
+    "White Blue": ["#FFFFFF", "#80C0FF", "#0080FF", "#004080", "#000080"],
+    "White Red": ["#FFFFFF", "#FFC0C0", "#FF8080", "#FF4040", "#FF0000"],
+    "GrayLU": ["#000000", "#202020", "#404040", "#606060", "#808080", "#A0A0A0", "#C0C0C0", "#E0E0E0", "#FFFFFF"],
+    "SunbowLU": ["#000000", "#0000FF", "#00FFFF", "#00FF00", "#FFFF00", "#FF0000", "#FFFFFF"],
+    "RainbowLU": ["#0000FF", "#0080FF", "#00FFFF", "#00FF80", "#80FF00", "#FFFF00", "#FF8000", "#FF0000"],
+    "Spectrum": ["#000000", "#0000FF", "#00FFFF", "#00FF00", "#FFFF00", "#FF8000", "#FF0000"],
+    "Hot": ["#000000", "#7F0000", "#FF0000", "#FF7F00", "#FFFF00", "#FFFFFF"],
+    "Cool": ["#0000FF", "#00FFFF", "#00FF00", "#FFFF00", "#FF0000"],
+    "Jet": ["#00008F", "#0000FF", "#0080FF", "#00FFFF", "#80FF80", "#FFFF00", "#FF8000", "#FF0000", "#800000"],
+    "Ocean": ["#000040", "#000080", "#0080C0", "#00C0FF", "#80E0FF", "#FFFFFF"],
+    "Terrain": ["#004400", "#008000", "#90C090", "#C0C080", "#E0E080", "#FFFFFF"],
+    "Spectral": ["#0000FF", "#0080FF", "#00FFFF", "#00FF80", "#80FF00", "#FFFF00", "#FF8000", "#FF0080", "#FF0000"],
+    "NEO": ["#000000", "#001020", "#004060", "#0080A0", "#00C0E0", "#FFFFFF", "#FFE080", "#FFA040", "#FF4000"],
+    "Variance": ["#000000", "#003F5C", "#7A5195", "#EF5675", "#FF7C43", "#F9A93D", "#FFD166"],
+    "Semblance": ["#000000", "#004080", "#0080FF", "#00FFFF", "#00FF80", "#80FF00", "#FFFF00", "#FF8000", "#FF0000"],
+    "Reflection Strength": ["#FFFFFF", "#80FF80", "#00FF00", "#008000", "#004000", "#000000"],
+    "Polarity": ["#0000FF", "#0080FF", "#FFFFFF", "#FF8000", "#FF0000"],
+    "Rainbow": ["#FF0000", "#FF7F00", "#FFFF00", "#00FF00", "#0000FF", "#8B00FF"],
+    "Grayscale": ["#000000", "#404040", "#808080", "#BFBFBF", "#FFFFFF"],
+    "Seismic": ["#122452", "#1260A0", "#13A6B9", "#FFD54F", "#DA3C2D"],
 }
 
 
+# Extended range presets for FFT dB scale
 _RANGE_PRESETS: dict[str, dict[str, list[tuple[float, float, str]]]] = {
     "fft_db": {
         "Legacy dB": [
@@ -149,6 +166,215 @@ _RANGE_PRESETS: dict[str, dict[str, list[tuple[float, float, str]]]] = {
             (-60.0, -30.0, "#FFFF00"),
             (-30.0, 6.0, "#FF0000"),
         ],
+        "Seismic Blue-White-Red": [
+            (-200.0, -150.0, "#191970"),
+            (-150.0, -100.0, "#1E90FF"),
+            (-100.0, -60.0, "#87CEEB"),
+            (-60.0, -30.0, "#F0F8FF"),
+            (-30.0, -10.0, "#FF6347"),
+            (-10.0, 6.0, "#8B0000"),
+        ],
+        "SeismicRWB": [
+            (-200.0, -140.0, "#0000FF"),
+            (-140.0, -100.0, "#0080FF"),
+            (-100.0, -60.0, "#00FFFF"),
+            (-60.0, -30.0, "#FFFFFF"),
+            (-30.0, -10.0, "#FFFF00"),
+            (-10.0, 6.0, "#FF8000"),
+            (-10.0, 6.0, "#FF0000"),
+        ],
+        "Red-White-Blue": [
+            (-200.0, -120.0, "#FF0000"),
+            (-120.0, -80.0, "#FF6666"),
+            (-80.0, -50.0, "#FFCCCC"),
+            (-50.0, -20.0, "#FFFFFF"),
+            (-20.0, -5.0, "#CCCCFF"),
+            (-5.0, 6.0, "#6666FF"),
+            (-5.0, 6.0, "#0000FF"),
+        ],
+        "Blue-White-Red": [
+            (-200.0, -120.0, "#0000FF"),
+            (-120.0, -80.0, "#6666FF"),
+            (-80.0, -50.0, "#CCCCFF"),
+            (-50.0, -20.0, "#FFFFFF"),
+            (-20.0, -5.0, "#FFCCCC"),
+            (-5.0, 6.0, "#FF6666"),
+            (-5.0, 6.0, "#FF0000"),
+        ],
+        "Green-Yellow-Red": [
+            (-200.0, -120.0, "#00FF00"),
+            (-120.0, -80.0, "#80FF00"),
+            (-80.0, -50.0, "#FFFF00"),
+            (-50.0, -20.0, "#FF8000"),
+            (-20.0, 6.0, "#FF0000"),
+        ],
+        "Purple-Blue-Green": [
+            (-200.0, -120.0, "#800080"),
+            (-120.0, -80.0, "#4000C0"),
+            (-80.0, -50.0, "#0080FF"),
+            (-50.0, -20.0, "#00C0C0"),
+            (-20.0, 6.0, "#00FF00"),
+        ],
+        "Gold": [
+            (-200.0, -140.0, "#000000"),
+            (-140.0, -100.0, "#402000"),
+            (-100.0, -60.0, "#804000"),
+            (-60.0, -30.0, "#BF8000"),
+            (-30.0, 6.0, "#FFBF00"),
+            (-30.0, 6.0, "#FFFFFF"),
+        ],
+        "White-Blue": [
+            (-200.0, -120.0, "#FFFFFF"),
+            (-120.0, -80.0, "#80C0FF"),
+            (-80.0, -50.0, "#0080FF"),
+            (-50.0, -20.0, "#004080"),
+            (-20.0, 6.0, "#000080"),
+        ],
+        "White-Red": [
+            (-200.0, -120.0, "#FFFFFF"),
+            (-120.0, -80.0, "#FFC0C0"),
+            (-80.0, -50.0, "#FF8080"),
+            (-50.0, -20.0, "#FF4040"),
+            (-20.0, 6.0, "#FF0000"),
+        ],
+        "GrayLU": [
+            (-200.0, -150.0, "#000000"),
+            (-150.0, -120.0, "#202020"),
+            (-120.0, -90.0, "#404040"),
+            (-90.0, -60.0, "#606060"),
+            (-60.0, -30.0, "#808080"),
+            (-30.0, -10.0, "#A0A0A0"),
+            (-10.0, 6.0, "#C0C0C0"),
+            (-10.0, 6.0, "#E0E0E0"),
+            (-10.0, 6.0, "#FFFFFF"),
+        ],
+        "SunbowLU": [
+            (-200.0, -140.0, "#000000"),
+            (-140.0, -100.0, "#0000FF"),
+            (-100.0, -60.0, "#00FFFF"),
+            (-60.0, -30.0, "#00FF00"),
+            (-30.0, -10.0, "#FFFF00"),
+            (-10.0, 6.0, "#FF0000"),
+            (-10.0, 6.0, "#FFFFFF"),
+        ],
+        "RainbowLU": [
+            (-200.0, -140.0, "#0000FF"),
+            (-140.0, -100.0, "#0080FF"),
+            (-100.0, -60.0, "#00FFFF"),
+            (-60.0, -30.0, "#00FF80"),
+            (-30.0, -10.0, "#80FF00"),
+            (-10.0, 6.0, "#FFFF00"),
+            (-10.0, 6.0, "#FF8000"),
+            (-10.0, 6.0, "#FF0000"),
+        ],
+        "Spectrum": [
+            (-200.0, -140.0, "#000000"),
+            (-140.0, -100.0, "#0000FF"),
+            (-100.0, -60.0, "#00FFFF"),
+            (-60.0, -30.0, "#00FF00"),
+            (-30.0, -10.0, "#FFFF00"),
+            (-10.0, 6.0, "#FF8000"),
+            (-10.0, 6.0, "#FF0000"),
+        ],
+        "Hot": [
+            (-200.0, -140.0, "#000000"),
+            (-140.0, -100.0, "#7F0000"),
+            (-100.0, -60.0, "#FF0000"),
+            (-60.0, -30.0, "#FF7F00"),
+            (-30.0, -10.0, "#FFFF00"),
+            (-10.0, 6.0, "#FFFFFF"),
+        ],
+        "Cool": [
+            (-200.0, -140.0, "#0000FF"),
+            (-140.0, -100.0, "#00FFFF"),
+            (-100.0, -60.0, "#00FF00"),
+            (-60.0, -30.0, "#FFFF00"),
+            (-30.0, 6.0, "#FF0000"),
+        ],
+        "Jet": [
+            (-200.0, -150.0, "#00008F"),
+            (-150.0, -120.0, "#0000FF"),
+            (-120.0, -90.0, "#0080FF"),
+            (-90.0, -60.0, "#00FFFF"),
+            (-60.0, -30.0, "#80FF80"),
+            (-30.0, -10.0, "#FFFF00"),
+            (-10.0, 6.0, "#FF8000"),
+            (-10.0, 6.0, "#FF0000"),
+            (-10.0, 6.0, "#800000"),
+        ],
+        "Ocean": [
+            (-200.0, -140.0, "#000040"),
+            (-140.0, -100.0, "#000080"),
+            (-100.0, -60.0, "#0080C0"),
+            (-60.0, -30.0, "#00C0FF"),
+            (-30.0, -10.0, "#80E0FF"),
+            (-10.0, 6.0, "#FFFFFF"),
+        ],
+        "Terrain": [
+            (-200.0, -140.0, "#004400"),
+            (-140.0, -100.0, "#008000"),
+            (-100.0, -60.0, "#90C090"),
+            (-60.0, -30.0, "#C0C080"),
+            (-30.0, -10.0, "#E0E080"),
+            (-10.0, 6.0, "#FFFFFF"),
+        ],
+        "Spectral": [
+            (-200.0, -140.0, "#0000FF"),
+            (-140.0, -100.0, "#0080FF"),
+            (-100.0, -60.0, "#00FFFF"),
+            (-60.0, -30.0, "#00FF80"),
+            (-30.0, -10.0, "#80FF00"),
+            (-10.0, 6.0, "#FFFF00"),
+            (-10.0, 6.0, "#FF8000"),
+            (-10.0, 6.0, "#FF0080"),
+            (-10.0, 6.0, "#FF0000"),
+        ],
+        "NEO": [
+            (-200.0, -140.0, "#000000"),
+            (-140.0, -100.0, "#001020"),
+            (-100.0, -60.0, "#004060"),
+            (-60.0, -30.0, "#0080A0"),
+            (-30.0, -10.0, "#00C0E0"),
+            (-10.0, 6.0, "#FFFFFF"),
+            (-10.0, 6.0, "#FFE080"),
+            (-10.0, 6.0, "#FFA040"),
+            (-10.0, 6.0, "#FF4000"),
+        ],
+        "Variance": [
+            (-200.0, -140.0, "#000000"),
+            (-140.0, -100.0, "#003F5C"),
+            (-100.0, -70.0, "#7A5195"),
+            (-70.0, -40.0, "#EF5675"),
+            (-40.0, -20.0, "#FF7C43"),
+            (-20.0, -5.0, "#F9A93D"),
+            (-5.0, 6.0, "#FFD166"),
+        ],
+        "Semblance": [
+            (-200.0, -140.0, "#000000"),
+            (-140.0, -100.0, "#004080"),
+            (-100.0, -70.0, "#0080FF"),
+            (-70.0, -40.0, "#00FFFF"),
+            (-40.0, -20.0, "#00FF80"),
+            (-20.0, -5.0, "#80FF00"),
+            (-5.0, 6.0, "#FFFF00"),
+            (-5.0, 6.0, "#FF8000"),
+            (-5.0, 6.0, "#FF0000"),
+        ],
+        "Reflection Strength": [
+            (-200.0, -140.0, "#000000"),
+            (-140.0, -100.0, "#004000"),
+            (-100.0, -70.0, "#008000"),
+            (-70.0, -40.0, "#00FF00"),
+            (-40.0, -20.0, "#80FF80"),
+            (-20.0, 6.0, "#FFFFFF"),
+        ],
+        "Polarity": [
+            (-200.0, -100.0, "#0000FF"),
+            (-100.0, -50.0, "#0080FF"),
+            (-50.0, -10.0, "#FFFFFF"),
+            (-10.0, 6.0, "#FF8000"),
+            (-10.0, 6.0, "#FF0000"),
+        ],
     },
     "frequency_hz": {
         "Legacy Hz": [
@@ -172,6 +398,180 @@ _RANGE_PRESETS: dict[str, dict[str, list[tuple[float, float, str]]]] = {
             (20.0, 32.0, "#FFD600"),
             (32.0, 10000.0, "#D50000"),
         ],
+        "Seismic Blue-White-Red": [
+            (0.0, 5.0, "#191970"),
+            (5.0, 10.0, "#1E90FF"),
+            (10.0, 15.0, "#87CEEB"),
+            (15.0, 25.0, "#F0F8FF"),
+            (25.0, 40.0, "#FF6347"),
+            (40.0, 10000.0, "#8B0000"),
+        ],
+        "SeismicRWB": [
+            (0.0, 5.0, "#0000FF"),
+            (5.0, 10.0, "#0080FF"),
+            (10.0, 15.0, "#00FFFF"),
+            (15.0, 25.0, "#FFFFFF"),
+            (25.0, 40.0, "#FFFF00"),
+            (40.0, 10000.0, "#FF8000"),
+            (40.0, 10000.0, "#FF0000"),
+        ],
+        "Red-White-Blue": [
+            (0.0, 5.0, "#FF0000"),
+            (5.0, 10.0, "#FF6666"),
+            (10.0, 15.0, "#FFCCCC"),
+            (15.0, 25.0, "#FFFFFF"),
+            (25.0, 40.0, "#CCCCFF"),
+            (40.0, 10000.0, "#6666FF"),
+            (40.0, 10000.0, "#0000FF"),
+        ],
+        "Blue-White-Red": [
+            (0.0, 5.0, "#0000FF"),
+            (5.0, 10.0, "#6666FF"),
+            (10.0, 15.0, "#CCCCFF"),
+            (15.0, 25.0, "#FFFFFF"),
+            (25.0, 40.0, "#FFCCCC"),
+            (40.0, 10000.0, "#FF6666"),
+            (40.0, 10000.0, "#FF0000"),
+        ],
+        "Green-Yellow-Red": [
+            (0.0, 5.0, "#00FF00"),
+            (5.0, 10.0, "#80FF00"),
+            (10.0, 15.0, "#FFFF00"),
+            (15.0, 25.0, "#FF8000"),
+            (25.0, 10000.0, "#FF0000"),
+        ],
+        "Purple-Blue-Green": [
+            (0.0, 5.0, "#800080"),
+            (5.0, 10.0, "#4000C0"),
+            (10.0, 15.0, "#0080FF"),
+            (15.0, 25.0, "#00C0C0"),
+            (25.0, 10000.0, "#00FF00"),
+        ],
+        "Gold": [
+            (0.0, 5.0, "#000000"),
+            (5.0, 10.0, "#402000"),
+            (10.0, 15.0, "#804000"),
+            (15.0, 25.0, "#BF8000"),
+            (25.0, 10000.0, "#FFBF00"),
+            (25.0, 10000.0, "#FFFFFF"),
+        ],
+        "White-Blue": [
+            (0.0, 5.0, "#FFFFFF"),
+            (5.0, 10.0, "#80C0FF"),
+            (10.0, 20.0, "#0080FF"),
+            (20.0, 40.0, "#004080"),
+            (40.0, 10000.0, "#000080"),
+        ],
+        "White-Red": [
+            (0.0, 5.0, "#FFFFFF"),
+            (5.0, 10.0, "#FFC0C0"),
+            (10.0, 20.0, "#FF8080"),
+            (20.0, 40.0, "#FF4040"),
+            (40.0, 10000.0, "#FF0000"),
+        ],
+        "GrayLU": [
+            (0.0, 5.0, "#000000"),
+            (5.0, 10.0, "#202020"),
+            (10.0, 15.0, "#404040"),
+            (15.0, 20.0, "#606060"),
+            (20.0, 30.0, "#808080"),
+            (30.0, 50.0, "#A0A0A0"),
+            (50.0, 100.0, "#C0C0C0"),
+            (100.0, 10000.0, "#E0E0E0"),
+            (100.0, 10000.0, "#FFFFFF"),
+        ],
+        "SunbowLU": [
+            (0.0, 5.0, "#000000"),
+            (5.0, 10.0, "#0000FF"),
+            (10.0, 15.0, "#00FFFF"),
+            (15.0, 25.0, "#00FF00"),
+            (25.0, 50.0, "#FFFF00"),
+            (50.0, 100.0, "#FF0000"),
+            (100.0, 10000.0, "#FFFFFF"),
+        ],
+        "RainbowLU": [
+            (0.0, 5.0, "#0000FF"),
+            (5.0, 10.0, "#0080FF"),
+            (10.0, 15.0, "#00FFFF"),
+            (15.0, 25.0, "#00FF80"),
+            (25.0, 50.0, "#80FF00"),
+            (50.0, 100.0, "#FFFF00"),
+            (100.0, 10000.0, "#FF8000"),
+            (100.0, 10000.0, "#FF0000"),
+        ],
+        "Spectrum": [
+            (0.0, 5.0, "#000000"),
+            (5.0, 10.0, "#0000FF"),
+            (10.0, 15.0, "#00FFFF"),
+            (15.0, 25.0, "#00FF00"),
+            (25.0, 50.0, "#FFFF00"),
+            (50.0, 100.0, "#FF8000"),
+            (100.0, 10000.0, "#FF0000"),
+        ],
+        "Hot": [
+            (0.0, 5.0, "#000000"),
+            (5.0, 10.0, "#7F0000"),
+            (10.0, 15.0, "#FF0000"),
+            (15.0, 25.0, "#FF7F00"),
+            (25.0, 50.0, "#FFFF00"),
+            (50.0, 10000.0, "#FFFFFF"),
+        ],
+        "Cool": [
+            (0.0, 5.0, "#0000FF"),
+            (5.0, 10.0, "#00FFFF"),
+            (10.0, 20.0, "#00FF00"),
+            (20.0, 40.0, "#FFFF00"),
+            (40.0, 10000.0, "#FF0000"),
+        ],
+        "Jet": [
+            (0.0, 5.0, "#00008F"),
+            (5.0, 10.0, "#0000FF"),
+            (10.0, 15.0, "#0080FF"),
+            (15.0, 20.0, "#00FFFF"),
+            (20.0, 30.0, "#80FF80"),
+            (30.0, 50.0, "#FFFF00"),
+            (50.0, 100.0, "#FF8000"),
+            (100.0, 10000.0, "#FF0000"),
+            (100.0, 10000.0, "#800000"),
+        ],
+        "Ocean": [
+            (0.0, 5.0, "#000040"),
+            (5.0, 10.0, "#000080"),
+            (10.0, 15.0, "#0080C0"),
+            (15.0, 25.0, "#00C0FF"),
+            (25.0, 50.0, "#80E0FF"),
+            (50.0, 10000.0, "#FFFFFF"),
+        ],
+        "Terrain": [
+            (0.0, 5.0, "#004400"),
+            (5.0, 10.0, "#008000"),
+            (10.0, 15.0, "#90C090"),
+            (15.0, 25.0, "#C0C080"),
+            (25.0, 50.0, "#E0E080"),
+            (50.0, 10000.0, "#FFFFFF"),
+        ],
+        "Spectral": [
+            (0.0, 5.0, "#0000FF"),
+            (5.0, 10.0, "#0080FF"),
+            (10.0, 15.0, "#00FFFF"),
+            (15.0, 25.0, "#00FF80"),
+            (25.0, 50.0, "#80FF00"),
+            (50.0, 100.0, "#FFFF00"),
+            (100.0, 10000.0, "#FF8000"),
+            (100.0, 10000.0, "#FF0080"),
+            (100.0, 10000.0, "#FF0000"),
+        ],
+        "NEO": [
+            (0.0, 5.0, "#000000"),
+            (5.0, 10.0, "#001020"),
+            (10.0, 15.0, "#004060"),
+            (15.0, 25.0, "#0080A0"),
+            (25.0, 50.0, "#00C0E0"),
+            (50.0, 10000.0, "#FFFFFF"),
+            (50.0, 10000.0, "#FFE080"),
+            (50.0, 10000.0, "#FFA040"),
+            (50.0, 10000.0, "#FF4000"),
+        ],
     },
 }
 
@@ -190,6 +590,21 @@ def _normalise_ranges(ranges: list[tuple[float, float, str]]) -> list[tuple[floa
         qcolor = QColor(str(color))
         cleaned.append((low_f, high_f, qcolor.name() if qcolor.isValid() else "#000000"))
     return sorted(cleaned, key=lambda item: item[0])
+
+
+def _palette_to_ranges(palette_name: str, low: float, high: float) -> list[tuple[float, float, str]]:
+    """Convert a visual colour table into evenly spaced value ranges."""
+    colors = COLOR_PALETTES.get(palette_name, COLOR_PALETTES["Seismic"])
+    low = float(low)
+    high = float(high)
+    if not np.isfinite(low):
+        low = 0.0
+    if not np.isfinite(high):
+        high = low + 1.0
+    if high <= low:
+        high = low + 1.0
+    edges = np.linspace(low, high, len(colors) + 1)
+    return [(float(edges[i]), float(edges[i + 1]), color) for i, color in enumerate(colors)]
 
 
 def _range_color(value: float, ranges: list[tuple[float, float, str]], fallback: str = "#111111") -> str:
@@ -591,7 +1006,7 @@ class _RangeEditorDialog(QDialog):
 
 
 class _RangeSelector(QWidget):
-    """Preset + editable range coloring control."""
+    """Preset range control plus the shared visual colour-table dialog."""
 
     changed = Signal()
 
@@ -599,25 +1014,40 @@ class _RangeSelector(QWidget):
         super().__init__(parent)
         self.mode = mode
         self.units = units
+        self._palette_name = "Seismic"
         presets = _RANGE_PRESETS.get(mode, {})
         first_name = next(iter(presets), "Default")
         self._ranges = _copy_ranges(presets.get(first_name, []))
+
         self.combo = QComboBox(self)
         for name in presets:
             self.combo.addItem(name, name)
         self.combo.currentIndexChanged.connect(self._preset_changed)
+
+        self.library_button = QPushButton("Color Library", self)
+        self.library_button.setObjectName("analysisButton")
+        self.library_button.setIcon(palette_icon())
+        self.library_button.setToolTip("Open the shared seismic colour-table library")
+        self.library_button.clicked.connect(self._open_color_library)
+
         self.edit_button = QPushButton("Edit Colours", self)
         self.edit_button.setObjectName("analysisButton")
         self.edit_button.clicked.connect(self._edit_ranges)
+
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(5)
-        layout.addWidget(QLabel("Range palette:"))
+        layout.addWidget(QLabel("Range preset:"))
         layout.addWidget(self.combo)
+        layout.addWidget(self.library_button)
         layout.addWidget(self.edit_button)
 
     def ranges(self) -> list[tuple[float, float, str]]:
         return _copy_ranges(self._ranges)
+
+    @property
+    def palette_name(self) -> str:
+        return self._palette_name
 
     def _preset_changed(self) -> None:
         preset_name = str(self.combo.currentData() or self.combo.currentText())
@@ -625,6 +1055,32 @@ class _RangeSelector(QWidget):
         if preset_name in presets:
             self._ranges = _copy_ranges(presets[preset_name])
             self.changed.emit()
+
+    def _open_color_library(self) -> None:
+        dialog = ColorPaletteDialog(self._palette_name, self)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        self._palette_name = dialog.selected_palette
+        if self._ranges:
+            low = min(item[0] for item in self._ranges)
+            high = max(item[1] for item in self._ranges)
+        else:
+            low, high = 0.0, 1.0
+        self._ranges = _palette_to_ranges(self._palette_name, low, high)
+        self.changed.emit()
+
+    def set_palette(self, palette_name: str, low: float | None = None, high: float | None = None) -> None:
+        if palette_name not in COLOR_PALETTES:
+            palette_name = "Seismic"
+        self._palette_name = palette_name
+        if low is None or high is None:
+            if self._ranges:
+                low = min(item[0] for item in self._ranges)
+                high = max(item[1] for item in self._ranges)
+            else:
+                low, high = 0.0, 1.0
+        self._ranges = _palette_to_ranges(palette_name, float(low), float(high))
+        self.changed.emit()
 
     def _edit_ranges(self) -> None:
         preset_name = str(self.combo.currentData() or self.combo.currentText())
@@ -740,7 +1196,6 @@ def _metric_card(title: str, value: str, accent: str = "#0A86C7") -> QFrame:
     return card
 
 
-
 class _FTImagePlot(QWidget):
     """Crash-safe Qt-only spectrogram display for SEG-D FT analysis.
 
@@ -825,7 +1280,7 @@ class _FTImagePlot(QWidget):
         # Flip frequency axis so low frequency is at the bottom and high is at the top.
         display_z = np.flipud(np.asarray(z, dtype=np.float32))
         low, high = self._level_limits()
-        lut = _range_gradient_lut(self._ranges, steps=768) if self._ranges else _spectral_lut()
+        lut = _range_gradient_lut(self._ranges, steps=768) if self._ranges else _colors_to_lut(_PALETTES["TGP Spectral"])
         scale = max(high - low, 1e-12)
         idx = np.clip(((display_z - low) / scale) * float(len(lut) - 1), 0, len(lut) - 1).astype(np.int32)
         rgb = np.ascontiguousarray(lut[idx], dtype=np.uint8)
@@ -941,6 +1396,7 @@ class _FTImagePlot(QWidget):
             return
         super().mousePressEvent(event)
 
+
 class WaveformPlotWidget(QWidget):
     """Single-trace amplitude-vs-time plot with gain, cursor and sample navigation."""
 
@@ -958,6 +1414,8 @@ class WaveformPlotWidget(QWidget):
         self._gain = 1.0
         self._selected_sample = 0
         self._polarity = 1
+        self._palette_name = "Seismic"
+        self._palette_lut = palette_to_rgb_array("Seismic", 256)
         self._view_start = 0
         self._view_end = 0
 
@@ -985,6 +1443,17 @@ class WaveformPlotWidget(QWidget):
     def set_polarity(self, polarity: int) -> None:
         self._polarity = -1 if int(polarity) < 0 else 1
         self.update()
+
+    def set_palette(self, palette_name: str) -> None:
+        if palette_name not in COLOR_PALETTES:
+            palette_name = "Seismic"
+        self._palette_name = palette_name
+        self._palette_lut = palette_to_rgb_array(palette_name, 256)
+        self.update()
+
+    @property
+    def palette_name(self) -> str:
+        return self._palette_name
 
     def reset_view(self) -> None:
         self._view_start = 0
@@ -1075,16 +1544,23 @@ class WaveformPlotWidget(QWidget):
 
         target_points = min(n, max(600, pixel_count * 2))
         indices = np.unique(np.linspace(0, n - 1, target_points).astype(int))
-        path = QPainterPath()
-        for j, local_index in enumerate(indices):
-            x = rect.left() + (float(local_index) / max(n - 1, 1)) * rect.width()
-            y = float(self._display_y(np.array([visible[local_index]]), rect, mid_y, display_scale)[0])
-            if j == 0:
-                path.moveTo(x, y)
-            else:
-                path.lineTo(x, y)
-        painter.setPen(QPen(QColor("#111111"), 1.15))
-        painter.drawPath(path)
+        # Draw each waveform segment using the selected colour table. The
+        # normalized amplitude controls the colour, so the waveform changes
+        # colour continuously with its actual trace values.
+        for j in range(max(0, len(indices) - 1)):
+            i0 = int(indices[j])
+            i1 = int(indices[j + 1])
+            x0 = rect.left() + (float(i0) / max(n - 1, 1)) * rect.width()
+            x1 = rect.left() + (float(i1) / max(n - 1, 1)) * rect.width()
+            y0 = float(self._display_y(np.array([visible[i0]]), rect, mid_y, display_scale)[0])
+            y1 = float(self._display_y(np.array([visible[i1]]), rect, mid_y, display_scale)[0])
+            value = float((visible[i0] + visible[i1]) * 0.5)
+            normalized = max(0.0, min(1.0, (value / max(display_scale, 1e-20) + 1.0) * 0.5))
+            lut_index = int(round(normalized * (len(self._palette_lut) - 1)))
+            rgb = self._palette_lut[max(0, min(len(self._palette_lut) - 1, lut_index))]
+            pen_color = QColor(int(rgb[0]), int(rgb[1]), int(rgb[2]))
+            painter.setPen(QPen(pen_color, 1.35))
+            painter.drawLine(QPointF(x0, y0), QPointF(x1, y1))
 
         total_ms = (self._samples.size - 1) * self._sample_interval_ms
         left_ms = start * self._sample_interval_ms
@@ -1162,6 +1638,13 @@ class TraceWaveformDialog(QDialog):
         self.rms_label.setObjectName("titleLabel")
         header_layout.addWidget(self.info_label, 1)
         header_layout.addWidget(self.rms_label)
+        self.color_library_button = QPushButton("Color Library")
+        self.color_library_button.setObjectName("analysisButton")
+        self.color_library_button.setIcon(palette_icon())
+        self.color_library_button.setToolTip("Select the waveform colour table. Wave colours follow amplitude values.")
+        self.color_library_button.setMinimumWidth(118)
+        self.color_library_button.clicked.connect(self._open_waveform_color_library)
+        header_layout.addWidget(self.color_library_button)
         layout.addWidget(header)
 
         plot_card = QFrame(self)
@@ -1282,7 +1765,6 @@ class TraceWaveformDialog(QDialog):
         controls_grid.setColumnStretch(5, 1)
         layout.addWidget(controls)
 
-
         footer = QFrame(self)
         footer.setObjectName("headerCard")
         footer_layout = QHBoxLayout(footer)
@@ -1309,6 +1791,16 @@ class TraceWaveformDialog(QDialog):
             button.setToolTip(tooltip)
         button.clicked.connect(slot)
         return button
+
+    def _open_waveform_color_library(self) -> None:
+        dialog = ColorPaletteDialog(self.plot.palette_name, self)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            self.plot.set_palette(dialog.selected_palette)
+            self.color_library_button.setText(dialog.selected_palette)
+            self.color_library_button.setIcon(palette_icon(COLOR_PALETTES.get(dialog.selected_palette)))
+            self.color_library_button.setToolTip(
+                f"Current colour table: {dialog.selected_palette}. Colours follow waveform amplitude values."
+            )
 
     def _show_trace_header(self) -> None:
         try:
@@ -1692,11 +2184,6 @@ class TraceWaveformDialog(QDialog):
             start_sample = max(0, min(total_samples - 1, int(round(start_time / sample_interval))))
             end_sample = max(start_sample + 2, min(total_samples, int(round(end_time / sample_interval)) + 1))
             try:
-                # Current SegdReader signature is read_channel_data(trace_range, channel, sample_range).
-                # The previous call accidentally passed start/end samples as channel/sample_range,
-                # so the exception path used self._samples and every arrow-selected trace showed
-                # the same FFT. Read the selected SEG-D trace window directly and keep the
-                # fallback only for older/custom readers.
                 if hasattr(self._reader, "read_channel_data"):
                     selection = self._reader.read_channel_data((first - 1, last), 0, (start_sample, end_sample))
                 else:
@@ -1982,7 +2469,6 @@ class TraceWaveformDialog(QDialog):
         close = QPushButton("Close")
         close.setObjectName("dangerButton")
         close.clicked.connect(dlg.accept)
-        row.addWidget(close)
         lay.addLayout(row)
         dlg.exec()
 
