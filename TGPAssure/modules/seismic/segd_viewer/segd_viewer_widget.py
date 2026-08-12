@@ -965,6 +965,7 @@ class TraceAttributesPanel(QGroupBox):
         form.setContentsMargins(4, 4, 4, 4)
         form.setVerticalSpacing(1)
         self._labels: dict[str, QLabel] = {}
+        self._captions: dict[str, QLabel] = {}
         self.setStyleSheet(
             "QGroupBox{font-weight:700;color:#202020;border:1px solid #C8C8C8;margin-top:8px;background:#EFEFEF;}"
             "QGroupBox::title{subcontrol-origin:margin;left:7px;padding:0 2px;}"
@@ -991,15 +992,41 @@ class TraceAttributesPanel(QGroupBox):
             ("amplitude", "Amp"),
         ]
         for key, caption in rows:
+            caption_label = QLabel(caption)
+            caption_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
             value = QLabel("—")
-            value.setTextInteractionFlags(Qt.TextSelectableByMouse)
+            value.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            value.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+            self._captions[key] = caption_label
             self._labels[key] = value
-            form.addRow(caption, value)
+            form.addRow(caption_label, value)
+
+        self._attribute_colors = {
+            "channel_set": "#FFFFFF",
+            "line": "#8C8C00", "point": "#8C8C00", "x": "#8C8C00",
+            "y": "#8C8C00", "z": "#8C8C00",
+            "channel_type": "#FFF000", "sensor": "#FFF000",
+            "resistance": "#1E45E8", "capacitance": "#1E45E8",
+            "tilt": "#1E45E8", "leakage": "#1E45E8",
+            "receiver_index": "#20A33A", "trace": "#20A33A",
+            "status": "#E12626",
+            "sample": "#FFFFFF", "time": "#FFFFFF", "amplitude": "#FFFFFF",
+        }
+        self._apply_attribute_colors()
+
+    def _apply_attribute_colors(self) -> None:
+        for key, color in self._attribute_colors.items():
+            caption = self._captions.get(key)
+            value = self._labels.get(key)
+            if caption is not None:
+                caption.setStyleSheet(f"color:{color};background:transparent;font-size:8pt;font-weight:700;")
+            if value is not None and key != "status":
+                value.setStyleSheet(f"color:{color};background:transparent;font-size:8pt;font-weight:700;")
 
     def clear_values(self) -> None:
         for label in self._labels.values():
             label.setText("—")
-            label.setStyleSheet("")
+        self._apply_attribute_colors()
 
     def set_trace(
         self,
@@ -1067,6 +1094,7 @@ class TraceAttributesPanel(QGroupBox):
         self._labels["status"].setStyleSheet(
             f"background:rgb({color.red()},{color.green()},{color.blue()});color:{text_color};padding:2px 5px;font-weight:700;"
         )
+        self._captions["status"].setStyleSheet("color:#E12626;background:transparent;font-size:8pt;font-weight:700;")
 
 
 class SegdAreaZoomDialog(QDialog):
@@ -1736,6 +1764,7 @@ class SegdImageView(QWidget):
 
 
 class SegdViewerWidget(QWidget):
+    color_density_changed = Signal(bool)
     loading_started = Signal(str, str)
     loading_progress = Signal(int, str)
     loading_finished = Signal()
@@ -2029,6 +2058,16 @@ class SegdViewerWidget(QWidget):
             return
         is_color_density = str(self.display_combo.currentData() or "") == "color_density"
         self.color_library_button.setVisible(is_color_density)
+        self.color_density_changed.emit(is_color_density)
+
+    def open_color_library(self) -> None:
+        """Public command used by the main ribbon to open the colour-table dialog."""
+        self._open_color_library()
+
+    # Backward-compatible alias for older ribbon builds that used the misspelled
+    # ``libraray`` action target. New code should always use open_color_library.
+    def open_color_libraray(self) -> None:
+        self.open_color_library()
 
     def _open_color_library(self) -> None:
         """Open the shared colour-table dialog and apply the selection immediately."""
@@ -2498,6 +2537,7 @@ class SegdViewerWidget(QWidget):
         index = self.display_combo.findData(mode)
         if index >= 0:
             if self.display_combo.currentIndex() == index:
+                self._update_color_library_visibility()
                 self.render_current_view()
             else:
                 self.display_combo.setCurrentIndex(index)

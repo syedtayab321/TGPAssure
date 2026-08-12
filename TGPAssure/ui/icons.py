@@ -84,6 +84,8 @@ ICON_SPECS: dict[str, IconSpec] = {
     "help-about": IconSpec("fa6s.circle-question", "#3F82BA"),
     "help-contents": IconSpec("fa6s.book-open", "#3F82BA"),
     "go-home": IconSpec("fa6s.house", "#4D8BC2"),
+    "go-previous": IconSpec("fa6s.circle-chevron-left", "#1E5F95", scale=0.86),
+    "go-next": IconSpec("fa6s.circle-chevron-right", "#1E5F95", scale=0.86),
     "home": IconSpec("fa6s.house", "#4D8BC2"),
     "seismic": IconSpec("fa6s.wave-square", "#2C9A63"),
     "electrical": IconSpec("fa6s.bolt", "#D18A24"),

@@ -339,6 +339,28 @@ class UpholeRibbonProvider(_Provider):
     ]
 
 
+class ArrayResponseRibbonProvider(_Provider):
+    tab_id = "array_response"
+    groups = [
+        RibbonGroup("File", [
+            RibbonAction("Open", "array_response_open", icon="document-open", accent=True),
+            RibbonAction("Save", "array_response_save", icon="document-save", presentation="small"),
+            RibbonAction("New", "array_response_new", icon="document-new", presentation="small"),
+            RibbonAction("Clear", "array_response_clear", icon="edit-clear", presentation="small"),
+        ]),
+        RibbonGroup("View", [
+            RibbonAction("Response", "array_response_response", icon="office-chart-line", accent=True),
+            RibbonAction("Design", "array_response_design", icon="view-grid"),
+            RibbonAction("Print", "array_response_print", icon="document-print", presentation="small"),
+        ]),
+        RibbonGroup("Azimuth", [
+            RibbonAction("0°", "array_response_azimuth_0", icon="go-first", presentation="small"),
+            RibbonAction("45°", "array_response_azimuth_45", icon="go-next", presentation="small"),
+            RibbonAction("90°", "array_response_azimuth_90", icon="go-last", presentation="small"),
+        ]),
+    ]
+
+
 def workflow_providers() -> list[RibbonProvider]:
     return [
         MagneticDataRibbonProvider(), MagneticQcRibbonProvider(), MagneticProcessingRibbonProvider(),
@@ -349,5 +371,5 @@ def workflow_providers() -> list[RibbonProvider]:
         ElectricalViewerRibbonProvider(), ElectricalReportsRibbonProvider(),
         VibroseisDataRibbonProvider(), VibroseisQcRibbonProvider(), VibroseisViewerRibbonProvider(),
         VibroseisPlanningRibbonProvider(),
-        SegdScannerRibbonProvider(), ReceiverQcRibbonProvider(), SmtRibbonProvider(), UpholeRibbonProvider(),
+        SegdScannerRibbonProvider(), ReceiverQcRibbonProvider(), SmtRibbonProvider(), UpholeRibbonProvider(), ArrayResponseRibbonProvider(),
     ]

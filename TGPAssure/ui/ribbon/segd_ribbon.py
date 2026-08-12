@@ -6,6 +6,12 @@ from ui.ribbon.ribbon_provider import RibbonAction, RibbonGroup, RibbonProvider
 
 
 class SegdRibbonProvider(RibbonProvider):
+    def __init__(self) -> None:
+        self._show_color_library = False
+
+    def set_color_library_visible(self, visible: bool) -> None:
+        self._show_color_library = bool(visible)
+
     def ribbon_tab_id(self) -> str:
         return "segd"
 
@@ -25,6 +31,7 @@ class SegdRibbonProvider(RibbonProvider):
                 RibbonAction("Wiggle", "segd_display_wiggle", icon="office-chart-line"),
                 RibbonAction("Variable Density", "segd_display_vd", icon="view-grid"),
                 RibbonAction("Color Density", "segd_display_color", icon="view-grid"),
+                *([RibbonAction("Color Library", "segd_color_library", icon="color-picker")] if self._show_color_library else []),
                 RibbonAction("Wiggle + Color", "segd_display_wiggle_color", icon="office-chart-line"),
                 RibbonAction("Variable Area", "segd_display_va", icon="view-grid"),
                 RibbonAction("Fit", "segd_zoom_fit", icon="zoom-fit-best"),

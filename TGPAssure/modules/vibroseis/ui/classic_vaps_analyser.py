@@ -10,6 +10,10 @@ from PySide6.QtWidgets import (
     QButtonGroup,
     QCheckBox,
     QFileDialog,
+    QComboBox,
+    QDialog,
+    QDialogButtonBox,
+    QGridLayout,
     QGroupBox,
     QHBoxLayout,
     QLabel,
@@ -17,6 +21,8 @@ from PySide6.QtWidgets import (
     QPushButton,
     QRadioButton,
     QScrollArea,
+    QTableWidget,
+    QTableWidgetItem,
     QVBoxLayout,
     QWidget,
 )
@@ -61,6 +67,11 @@ QLabel#vibTag {
 }
 QLabel#copyright { color:red; font-size:7.4pt; background:transparent; }
 QLabel#classicStatus { color:#202020; background:transparent; font-size:7.5pt; }
+QLabel#activeAttrLabel { color:#12324A; background:#FFFFFF; border:1px solid #C4CDD8; padding:4px 8px; font-weight:600; }
+QGroupBox#vibSelectPanel { background:#F9FAFC; border:1px solid #BFC7D0; }
+QWidget#vibCell { background:#FFFFFF; border:1px solid #E1E5EA; }
+QLabel#dayChip { color:#001B44; font-weight:bold; background:#FFFFFF; border:1px solid #B7C5D8; padding:2px 6px; }
+QComboBox { background:#FFFFFF; border:1px solid #9E9E9E; min-height:20px; font-size:7.5pt; }
 QScrollArea { border:0; background:#F3F3F3; }
 """
 
@@ -110,16 +121,20 @@ class _VapsClassicPlot(QWidget):
         self.filtered = False
         self._points: list[tuple[float, float, VapsRecord, QColor]] = []
         self._cursor: Optional[QPointF] = None
+        self.palette_name = "Classic"
+        self.show_lines = False
 
     def set_records(self, records: list[VapsRecord]) -> None:
         self.records = list(records or [])
         self.update()
 
-    def set_display(self, attr: str, label: str, selected_vibs: set[str], filtered: bool) -> None:
+    def set_display(self, attr: str, label: str, selected_vibs: set[str], filtered: bool, palette_name: str = "Classic", show_lines: bool = False) -> None:
         self.attr = attr
         self.label = label
         self.selected_vibs = set(selected_vibs)
         self.filtered = filtered
+        self.palette_name = palette_name or "Classic"
+        self.show_lines = bool(show_lines)
         self.update()
 
     def _value(self, record: VapsRecord) -> float | None:
@@ -164,7 +179,27 @@ class _VapsClassicPlot(QWidget):
         return rows
 
     def _plot_rect(self) -> QRectF:
-        return QRectF(36, 12, max(1, self.width() - 46), max(1, self.height() - 24))
+        return QRectF(46, 18, max(1, self.width() - 64), max(1, self.height() - 48))
+
+
+    def _x_value(self, record: VapsRecord, fallback: int) -> float:
+        text = str(record.time or "").strip()
+        m = __import__("re").search(r"(\d{1,2}):(\d{2})(?::(\d{2}(?:\.\d+)?))?", text)
+        if m:
+            h = int(m.group(1)); mn = int(m.group(2)); sec = float(m.group(3) or 0.0)
+            return h + mn / 60.0 + sec / 3600.0
+        return float(record.source_line or fallback)
+
+    def _colour_for_vib(self, vib: str, value: float, ymin: float, ymax: float) -> QColor:
+        if self.palette_name == "Thermal":
+            t = 0.0 if ymax <= ymin else max(0.0, min(1.0, (value - ymin) / (ymax - ymin)))
+            return QColor(int(40 + 215 * t), int(45 + 90 * (1.0 - abs(t - 0.5) * 2.0)), int(220 * (1.0 - t)))
+        if self.palette_name == "Traffic":
+            t = 0.0 if ymax <= ymin else max(0.0, min(1.0, (value - ymin) / (ymax - ymin)))
+            if t > 0.75: return QColor("#D7191C")
+            if t > 0.50: return QColor("#FDAE61")
+            return QColor("#1A9641")
+        return QColor(_TAG_COLOURS[(int(vib) - 1) % len(_TAG_COLOURS)] if vib.isdigit() and int(vib) > 0 else "#000000")
 
     def paintEvent(self, _event) -> None:
         painter = QPainter(self)
@@ -189,7 +224,7 @@ class _VapsClassicPlot(QWidget):
             if value is None or not np.isfinite(value):
                 continue
             values.append(float(value))
-            xvals.append(float(rec.source_line or i + 1))
+            xvals.append(self._x_value(rec, i + 1))
         if not values:
             painter.setPen(QPen(QColor(60, 60, 60), 1))
             painter.drawText(plot, Qt.AlignmentFlag.AlignCenter, f"No numeric values available for {self.label}.")
@@ -210,6 +245,11 @@ class _VapsClassicPlot(QWidget):
         for i in range(1, 6):
             y = plot.top() + i / 6 * plot.height()
             painter.drawLine(QPointF(plot.left(), y), QPointF(plot.right(), y))
+        painter.setPen(QPen(QColor(80, 80, 80), 1))
+        painter.drawText(QRectF(2, plot.top(), 42, 16), Qt.AlignmentFlag.AlignRight, f"{ymax:.3g}")
+        painter.drawText(QRectF(2, plot.bottom()-16, 42, 16), Qt.AlignmentFlag.AlignRight, f"{ymin:.3g}")
+        painter.drawText(QRectF(plot.left(), plot.bottom()+4, 80, 16), Qt.AlignmentFlag.AlignLeft, f"{xmin:.3g}")
+        painter.drawText(QRectF(plot.right()-80, plot.bottom()+4, 80, 16), Qt.AlignmentFlag.AlignRight, f"{xmax:.3g}")
 
         by_vib: dict[str, list[tuple[float, float, VapsRecord]]] = {}
         for i, rec in enumerate(rows):
@@ -217,13 +257,14 @@ class _VapsClassicPlot(QWidget):
             if value is None or not np.isfinite(value):
                 continue
             vib = self._norm_vib(rec.vib)
-            x = float(rec.source_line or i + 1)
+            x = self._x_value(rec, i + 1)
             by_vib.setdefault(vib, []).append((x, float(value), rec))
 
         def sort_key(v: str):
             return (int(v) if v.isdigit() else 999, v)
 
         for vib in sorted(by_vib, key=sort_key):
+            # Per-point colour is used for non-classic palettes; the classic palette stays by vibrator.
             color = QColor(_TAG_COLOURS[(int(vib) - 1) % len(_TAG_COLOURS)] if vib.isdigit() and int(vib) > 0 else "#000000")
             painter.setPen(QPen(color, 1.15))
             pts = sorted(by_vib[vib], key=lambda p: p[0])
@@ -232,12 +273,14 @@ class _VapsClassicPlot(QWidget):
                 sx = plot.left() + (x - xmin) / max(1e-12, xmax - xmin) * plot.width()
                 sy = plot.bottom() - (y - ymin) / max(1e-12, ymax - ymin) * plot.height()
                 pt = QPointF(float(sx), float(sy))
-                if last is not None:
+                point_color = self._colour_for_vib(vib, y, ymin, ymax)
+                painter.setPen(QPen(point_color, 1.15))
+                if self.show_lines and last is not None:
                     painter.drawLine(last, pt)
-                painter.setBrush(color)
+                painter.setBrush(point_color)
                 painter.drawEllipse(pt, 2.8, 2.8)
                 painter.setBrush(Qt.BrushStyle.NoBrush)
-                self._points.append((float(sx), float(sy), rec, color))
+                self._points.append((float(sx), float(sy), rec, point_color))
                 last = pt
 
         painter.setPen(QPen(QColor(60, 60, 60), 1))
@@ -267,9 +310,11 @@ class _VapsClassicPlot(QWidget):
 class ClassicVapsAnalyser(QWidget):
     """Compact classic VAPS analyser body.
 
-    The old Open/Print/BMP/Display/432-mode controls are intentionally exposed
-    through the top ribbon.  This widget now keeps only the data display area,
-    left vibrator selector and status line so the workspace is not crowded.
+    Ribbon-driven VAPS analyser body.
+
+    The display attribute radio buttons, Raw/Filtered mode, palette and export
+    controls live in the Vibroseis ribbon.  The workspace only keeps a compact
+    responsive vibrator selector, the plot and the status strip.
     """
 
     records_loaded = Signal(list, object)
@@ -286,9 +331,14 @@ class ClassicVapsAnalyser(QWidget):
         self.attr_group.setExclusive(True)
         self.filtered_radio = QRadioButton("Filtered", self)
         self.raw_radio = QRadioButton("Raw", self)
+        self.lines_check = QCheckBox("Connect")
+        self.palette_combo = QComboBox(self)
+        self.palette_combo.addItems(["Classic", "Thermal", "Traffic"])
         self.raw_radio.setChecked(True)
         self.filtered_radio.toggled.connect(self._refresh_plot)
         self.raw_radio.toggled.connect(self._refresh_plot)
+        self.lines_check.toggled.connect(self._refresh_plot)
+        self.palette_combo.currentTextChanged.connect(self._refresh_plot)
         for attr, label in DISPLAY_ATTRS:
             rb = QRadioButton(label, self)
             rb.hide()
@@ -304,28 +354,67 @@ class ClassicVapsAnalyser(QWidget):
         root.setContentsMargins(3, 3, 3, 3)
         root.setSpacing(2)
 
+        # Ribbon-only controls.  Keep the radio buttons and mode widgets alive
+        # as state holders, but do not show the large in-page radio panel.
+        for rb in self.attr_buttons.values():
+            rb.hide()
+        self.raw_radio.hide()
+        self.filtered_radio.hide()
+        self.lines_check.hide()
+        self.palette_combo.hide()
+
+        top_status = QHBoxLayout()
+        top_status.setSpacing(8)
+        self.active_attr_label = QLabel("Display: Drive Level  |  Mode: Raw  |  Palette: Classic")
+        self.active_attr_label.setObjectName("activeAttrLabel")
+        self.day_chip = QLabel("Day 1")
+        self.day_chip.setObjectName("dayChip")
+        top_status.addWidget(self.active_attr_label, 1)
+        top_status.addWidget(self.day_chip, 0, Qt.AlignmentFlag.AlignRight)
+        root.addLayout(top_status, 0)
+
         body = QHBoxLayout()
         body.setSpacing(4)
 
-        select = QGroupBox("Select Vibs")
-        select.setMaximumWidth(122)
-        select.setMinimumWidth(106)
+        select = QGroupBox("Select Vibrators")
+        select.setObjectName("vibSelectPanel")
+        select.setMinimumWidth(154)
+        select.setMaximumWidth(220)
         sl_outer = QVBoxLayout(select)
-        sl_outer.setContentsMargins(4, 7, 4, 4)
-        sl_outer.setSpacing(2)
+        sl_outer.setContentsMargins(6, 8, 6, 6)
+        sl_outer.setSpacing(5)
+
+        quick = QGridLayout()
+        quick.setHorizontalSpacing(3)
+        quick.setVerticalSpacing(3)
+        all_btn = QPushButton("All")
+        all_btn.clicked.connect(self.select_all_vibs)
+        none_btn = QPushButton("None")
+        none_btn.clicked.connect(self.select_no_vibs)
+        rst_btn = QPushButton("Reset")
+        rst_btn.clicked.connect(self.reset_to_loaded)
+        quick.addWidget(all_btn, 0, 0)
+        quick.addWidget(none_btn, 0, 1)
+        quick.addWidget(rst_btn, 1, 0, 1, 2)
+        sl_outer.addLayout(quick)
 
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll.setMinimumHeight(230)
         vib_holder = QWidget()
-        vib_layout = QVBoxLayout(vib_holder)
-        vib_layout.setContentsMargins(0, 0, 0, 0)
-        vib_layout.setSpacing(1)
+        vib_grid = QGridLayout(vib_holder)
+        vib_grid.setContentsMargins(0, 0, 0, 0)
+        vib_grid.setHorizontalSpacing(4)
+        vib_grid.setVerticalSpacing(2)
         for i in range(1, 21):
-            row = QHBoxLayout()
-            row.setContentsMargins(0, 0, 0, 0)
+            cell = QWidget()
+            cell.setObjectName("vibCell")
+            row = QHBoxLayout(cell)
+            row.setContentsMargins(1, 0, 1, 0)
             row.setSpacing(2)
-            cb = QCheckBox(f"Vib {i}")
+            cb = QCheckBox(str(i))
+            cb.setToolTip(f"Vibrator {i}")
             cb.toggled.connect(self._refresh_plot)
             self.vib_checks[str(i)] = cb
             tag = QLabel(f"V{i}")
@@ -333,24 +422,10 @@ class ClassicVapsAnalyser(QWidget):
             fg = "white" if _TAG_COLOURS[i - 1] == "#000000" else "black"
             tag.setStyleSheet(f"background:{_TAG_COLOURS[i - 1]};color:{fg};border:1px solid #606060;font-weight:bold;")
             row.addWidget(cb, 1)
-            row.addWidget(tag)
-            vib_layout.addLayout(row)
-        vib_layout.addStretch(1)
+            row.addWidget(tag, 0)
+            vib_grid.addWidget(cell, (i - 1) // 2, (i - 1) % 2)
         scroll.setWidget(vib_holder)
         sl_outer.addWidget(scroll, 1)
-
-        btnrow = QHBoxLayout()
-        btnrow.setSpacing(2)
-        all_btn = QPushButton("All")
-        all_btn.clicked.connect(self.select_all_vibs)
-        none_btn = QPushButton("None")
-        none_btn.clicked.connect(self.select_no_vibs)
-        rst_btn = QPushButton("Rst")
-        rst_btn.clicked.connect(self.reset_to_loaded)
-        btnrow.addWidget(all_btn)
-        btnrow.addWidget(none_btn)
-        btnrow.addWidget(rst_btn)
-        sl_outer.addLayout(btnrow)
         body.addWidget(select, 0)
 
         self.plot = _VapsClassicPlot(self)
@@ -448,18 +523,73 @@ class ClassicVapsAnalyser(QWidget):
     def set_filtered_mode(self) -> None:
         self.set_mode(True)
 
-    def _refresh_plot(self) -> None:
+    def set_connect(self, connected: bool) -> None:
+        self.lines_check.blockSignals(True)
+        self.lines_check.setChecked(bool(connected))
+        self.lines_check.blockSignals(False)
+        self._refresh_plot()
+
+    def toggle_connect(self) -> None:
+        self.set_connect(not self.lines_check.isChecked())
+
+    def set_palette(self, palette_name: str) -> None:
+        name = str(palette_name or "Classic").strip().title()
+        if name not in {"Classic", "Thermal", "Traffic"}:
+            name = "Classic"
+        self.palette_combo.blockSignals(True)
+        self.palette_combo.setCurrentText(name)
+        self.palette_combo.blockSignals(False)
+        self._refresh_plot()
+
+    def _refresh_plot(self, *_args) -> None:
         # During construction, hidden radio buttons may emit toggled() before
         # the plot widget exists.  Ignore those early signals; the constructor
         # calls this method again immediately after _build_ui().
         if not hasattr(self, "plot"):
             return
         attr, label = self.selected_attr()
-        self.plot.set_display(attr, label, self.selected_vibs(), self.filtered_radio.isChecked())
+        mode = "Filtered" if self.filtered_radio.isChecked() else "Raw"
+        palette = self.palette_combo.currentText() if hasattr(self, "palette_combo") else "Classic"
+        connected = self.lines_check.isChecked() if hasattr(self, "lines_check") else False
+        if hasattr(self, "active_attr_label"):
+            self.active_attr_label.setText(f"Display: {label}  |  Mode: {mode}  |  Palette: {palette}  |  {'Connected points' if connected else 'Scatter'}")
+        self.plot.set_display(attr, label, self.selected_vibs(), self.filtered_radio.isChecked(), palette, connected)
         self.plot.set_records(self.records)
 
     def _set_status(self, text: str) -> None:
         self.status.setText(text)
+
+
+    def show_statistics_dialog(self) -> None:
+        if not self.records:
+            QMessageBox.information(self, "VAPS Statistics", "Load a VAPS/H26 file first.")
+            return
+        attr, label = self.selected_attr()
+        rows = self.plot._visible_records()
+        by_vib: dict[str, list[float]] = {}
+        for record in rows:
+            value = self.plot._value(record)
+            if value is None or not np.isfinite(value):
+                continue
+            vib = _VapsClassicPlot._norm_vib(record.vib)
+            by_vib.setdefault(vib, []).append(float(value))
+        dlg = QDialog(self)
+        dlg.setWindowTitle(f"VAPS Statistics — {label}")
+        layout = QVBoxLayout(dlg)
+        table = QTableWidget(0, 6)
+        table.setHorizontalHeaderLabels(["Vib", "Count", "Min", "Mean", "Max", "Std Dev"])
+        for vib, values in sorted(by_vib.items(), key=lambda kv: (int(kv[0]) if kv[0].isdigit() else 999, kv[0])):
+            arr = np.asarray(values, dtype=float)
+            row = table.rowCount(); table.insertRow(row)
+            out = [vib, str(arr.size), f"{np.nanmin(arr):.6g}", f"{np.nanmean(arr):.6g}", f"{np.nanmax(arr):.6g}", f"{np.nanstd(arr):.6g}"]
+            for col, text in enumerate(out):
+                table.setItem(row, col, QTableWidgetItem(text))
+        layout.addWidget(table)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+        buttons.rejected.connect(dlg.reject)
+        layout.addWidget(buttons)
+        dlg.resize(620, 360)
+        dlg.exec()
 
     def export_bmp(self) -> None:
         path, _ = QFileDialog.getSaveFileName(self, "Export VAPS analyser bitmap", "vaps_analyser.bmp", "BMP (*.bmp);;PNG (*.png)")

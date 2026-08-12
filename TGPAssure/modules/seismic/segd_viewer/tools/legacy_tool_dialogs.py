@@ -734,6 +734,8 @@ class FilterPanelsDialog(QDialog):
     def __init__(self, viewer: Any) -> None:
         super().__init__(viewer)
         self.viewer = viewer
+        self._last_read_error: str | None = None
+        self._batch_mode = False
         self.folder = ""
         self.setWindowTitle("Filter Panels")
         self.setStyleSheet(TOOL_STYLE + """
@@ -895,7 +897,14 @@ QListWidget{font-size:8pt;}
 
     def _read_window(self, low: float | None = None, high: float | None = None) -> tuple[np.ndarray, float]:
         path = self._preview_file()
-        reader = self.viewer.reader if path == self.viewer.file_path else SegdReader(path)
+        self._last_read_error = None
+        try:
+            reader = self.viewer.reader if path == self.viewer.file_path else SegdReader(path)
+        except (ValueError, OSError) as exc:
+            # SegdReader stays strict about malformed SEG-D files. This legacy
+            # preview tool must not let one bad file crash the whole application.
+            self._last_read_error = f"{path.name}: {exc}"
+            return np.array([]), 0.0
         t0 = max(0, int(float(self.trace_from.text() or 1)) - 1)
         t1 = min(reader.get_trace_count(), int(float(self.trace_to.text() or reader.get_trace_count())))
         si = max(0, int(float(self.time_from.text() or 0) / max(reader.get_sample_interval(), 1e-12)))
@@ -927,6 +936,14 @@ QListWidget{font-size:8pt;}
     def _apply_preview(self, *args) -> None:
         data, dt = self._read_window()
         self._draw_preview(data, dt)
+        if self._last_read_error and not getattr(self, "_batch_mode", False):
+            QMessageBox.warning(
+                self,
+                "SEG-D Preview Error",
+                "The selected file could not be read as a valid SEG-D file.\n\n"
+                f"{self._last_read_error}\n\n"
+                "The file was skipped and the application will continue running.",
+            )
 
     def _draw_preview(self, data: np.ndarray, dt: float) -> None:
         self.preview.clear()
@@ -968,13 +985,33 @@ QListWidget{font-size:8pt;}
             self._choose_folder()
         if not self.folder:
             return
-        for i in range(self.file_list.count()):
-            self.file_list.setCurrentRow(i)
-            self._apply_preview()
-            QApplication.processEvents()
-            if self.generate_bmp.isChecked():
-                self.preview.grab().save(str(Path(self.file_list.item(i).text()).with_suffix('.bmp')))
-        QMessageBox.information(self, "Filter Panels", "Batch test finished.")
+
+        invalid_files: list[str] = []
+        self._batch_mode = True
+        try:
+            for i in range(self.file_list.count()):
+                self.file_list.setCurrentRow(i)
+                self._apply_preview()
+                QApplication.processEvents()
+                if self._last_read_error:
+                    invalid_files.append(self._last_read_error)
+                    continue
+                if self.generate_bmp.isChecked():
+                    self.preview.grab().save(str(Path(self.file_list.item(i).text()).with_suffix('.bmp')))
+        finally:
+            self._batch_mode = False
+
+        if invalid_files:
+            preview = "\n".join(invalid_files[:8])
+            extra = f"\n\n...and {len(invalid_files) - 8} more." if len(invalid_files) > 8 else ""
+            QMessageBox.warning(
+                self,
+                "Filter Panels - Some Files Skipped",
+                "Batch test finished, but some files could not be read as valid SEG-D files.\n\n"
+                f"{preview}{extra}",
+            )
+        else:
+            QMessageBox.information(self, "Filter Panels", "Batch test finished.")
 
     def _save_cfg(self) -> None:
         path, _ = QFileDialog.getSaveFileName(self, "Save Filter Panel Setup", "filter_panels.json", "JSON (*.json)")

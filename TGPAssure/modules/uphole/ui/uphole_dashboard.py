@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
     QHeaderView,
     QLabel,
     QMessageBox,
+    QColorDialog,
     QPlainTextEdit,
     QPushButton,
     QRadioButton,
@@ -454,6 +455,10 @@ class UpholeDashboard(QWidget):
         self._current_path: str | None = None
         self.metric_values: dict[str, QLabel] = {}
         self._page_buttons: dict[int, QPushButton] = {}
+        self._loading_table = False
+        self.wig_color = "#020617"
+        self.va_color = "#EF4444"
+        self.fill_color = "#0EA5E9"
         self._build_ui()
         self._refresh_all()
 
@@ -577,12 +582,14 @@ class UpholeDashboard(QWidget):
         self.black_swatch.setObjectName("colorSwatch")
         self.black_swatch.setStyleSheet("QPushButton#colorSwatch { background:#020617; border:1px solid #CBD5E1; border-radius:4px; }")
         self.black_swatch.setToolTip("Wiggle / axis color")
+        self.black_swatch.clicked.connect(lambda: self._choose_plot_color("wig"))
         layout.addWidget(self.black_swatch)
 
         self.red_swatch = QPushButton("")
         self.red_swatch.setObjectName("colorSwatch")
         self.red_swatch.setStyleSheet("QPushButton#colorSwatch { background:#EF4444; border:1px solid #CBD5E1; border-radius:4px; }")
         self.red_swatch.setToolTip("Variable-area fill color")
+        self.red_swatch.clicked.connect(lambda: self._choose_plot_color("va"))
         layout.addWidget(self.red_swatch)
 
         self.clear_results_btn = QPushButton("Clear Results File")
@@ -705,6 +712,7 @@ class UpholeDashboard(QWidget):
         self.assignment_table.setHorizontalHeaderLabels(["File", "Shot", "Depth m", "Offset m", "Pick ms", "Corrected ms", "Channel", "dt ms", "Note"])
         self._prep_table(self.assignment_table)
         self.assignment_table.setEditTriggers(QTableWidget.DoubleClicked | QTableWidget.EditKeyPressed | QTableWidget.AnyKeyPressed)
+        self.assignment_table.itemChanged.connect(self._on_assignment_item_changed)
         layout.addWidget(self.assignment_table, 1)
         self.stack.addWidget(page)
 
@@ -866,7 +874,33 @@ class UpholeDashboard(QWidget):
     def next_page(self) -> None:
         self._set_page(self.stack.currentIndex() + 1)
 
-    def _on_display_mode_changed(self) -> None:
+    def _on_display_mode_changed(self, checked: bool = True) -> None:
+        if checked:
+            self._refresh_display_plot()
+
+
+    def _on_assignment_item_changed(self, _item: QTableWidgetItem | None = None) -> None:
+        if self._loading_table:
+            return
+        self._sync_from_table()
+        self.layers = self.interpreter.layers(self.records)
+        self._populate_layers()
+        self._populate_qc_tables()
+        self._refresh_display_plot()
+        self.status_label.setText("Pick/depth assignment updated")
+
+    def _choose_plot_color(self, target: str) -> None:
+        current = QColor(self.wig_color if target == "wig" else self.va_color)
+        color = QColorDialog.getColor(current, self, "Choose uphole display colour")
+        if not color.isValid():
+            return
+        html = color.name()
+        if target == "wig":
+            self.wig_color = html
+            self.black_swatch.setStyleSheet(f"QPushButton#colorSwatch {{ background:{html}; border:1px solid #CBD5E1; border-radius:4px; }}")
+        else:
+            self.va_color = html
+            self.red_swatch.setStyleSheet(f"QPushButton#colorSwatch {{ background:{html}; border:1px solid #CBD5E1; border-radius:4px; }}")
         self._refresh_display_plot()
 
     def _active_display_mode(self) -> str:
@@ -978,6 +1012,7 @@ class UpholeDashboard(QWidget):
             self._refresh_buttons()
 
     def _populate_assignment(self) -> None:
+        self._loading_table = True
         self.assignment_table.setRowCount(0)
         for r in self.records:
             row = self.assignment_table.rowCount()
@@ -986,6 +1021,7 @@ class UpholeDashboard(QWidget):
             for col, value in enumerate(values):
                 self.assignment_table.setItem(row, col, QTableWidgetItem("" if value is None else str(value)))
         self.assignment_table.resizeRowsToContents()
+        self._loading_table = False
 
     def _populate_headers(self) -> None:
         self.headers_table.setRowCount(0)
@@ -1017,16 +1053,24 @@ class UpholeDashboard(QWidget):
             self.display_plot.setYRange(0, 1, padding=0)
             self._update_metrics()
             return
-        pen = pg.mkPen("#0F172A", width=1.25 if mode == "wig" else 1.8)
-        symbol_brush = "#EF4444" if mode in {"va_plus", "va_both"} else "#0F172A"
-        self.display_plot.plot(x, y, pen=pen, symbol="o", symbolBrush=symbol_brush, symbolSize=5, symbolPen=pg.mkPen("#FFFFFF", width=1.2))
+        pen = pg.mkPen(self.wig_color, width=1.25 if mode == "wig" else 1.8)
+        symbol_brush = self.va_color if mode in {"va_plus", "va_both"} else self.wig_color
+        # Time-depth curve.  Y-axis is inverted because depth increases downward.
+        self.display_plot.plot(x, y, pen=pen, symbol="o", symbolBrush=symbol_brush, symbolSize=6, symbolPen=pg.mkPen("#FFFFFF", width=1.2))
         if mode in {"va_plus", "va_minus", "va_both"}:
-            brush = "#EF4444" if mode != "va_minus" else "#0F172A"
+            baseline = min(x) if x else 0.0
+            brush_pos = pg.mkBrush(QColor(self.va_color))
+            brush_neg = pg.mkBrush(QColor(self.wig_color))
             width = max(0.35, (max(x) - min(x)) / max(len(x) * 4, 1)) if len(x) > 1 else 0.35
             for xi, yi in zip(x, y):
-                self.display_plot.addItem(pg.BarGraphItem(x=[xi], height=[yi], width=width, brush=pg.mkBrush(brush), pen=None))
+                if mode in {"va_plus", "va_both"}:
+                    self.display_plot.addItem(pg.BarGraphItem(x=[xi], y0=[0], height=[yi], width=width, brush=brush_pos, pen=None))
+                if mode in {"va_minus", "va_both"}:
+                    self.display_plot.addItem(pg.BarGraphItem(x=[xi - width * 0.55], y0=[0], height=[yi], width=width * 0.45, brush=brush_neg, pen=None))
         if self.grad_fill_check.isChecked() and len(x) > 1:
-            self.display_plot.plot(x, y, pen=pg.mkPen("#0284C7", width=2), fillLevel=0, brush=(14, 165, 233, 45))
+            fill = QColor(self.fill_color); fill.setAlpha(45)
+            self.display_plot.plot(x, y, pen=pg.mkPen(self.fill_color, width=2), fillLevel=0, brush=pg.mkBrush(fill))
+        self.display_plot.invertY(True)
         self.plot_title_label.setText(f"UYH Uphole Interpretation — {self._display_mode_label(mode)}")
         self.display_plot.enableAutoRange()
         self._update_metrics()

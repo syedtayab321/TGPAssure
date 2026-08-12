@@ -45,7 +45,7 @@ from PySide6.QtWidgets import (
 
 from modules.seismic.segy_reader import SegyReader
 from modules.seismic.ui.interactive_trace_zoom import InteractiveTraceZoomCanvas
-from modules.seismic.ui.color_palette_dialog import ColorPaletteDialog, palette_to_rgb_array
+from modules.seismic.ui.color_palette_dialog import ColorPaletteDialog, COLOR_PALETTES, palette_icon, palette_to_rgb_array
 from modules.seismic.segy_viewer.segy_display import (
     DisplayGrid,
     apply_display_gain,
@@ -806,6 +806,8 @@ class SegyBusyOverlay(QFrame):
 
 
 class SegyViewerWidget(QWidget):
+    color_density_changed = Signal(bool)
+
     """Classic compact SEG-Y viewer for manual QC and display-only processing.
 
     This replaces the old SEG-Y dashboard with a small-font seismic viewer layout:
@@ -833,9 +835,9 @@ class SegyViewerWidget(QWidget):
         self.high_cut_hz = 0.0
         self.agc_window_ms = 100.0
         self.clip_percent = 99.0
+        self.color_palette_name = "Seismic"
         self._building_ui = True
         self._rendering_busy = False
-        self.color_palette_name = "Seismic"
         self._build_ui()
         self._building_ui = False
         self.open_file(self.file_path)
@@ -870,8 +872,6 @@ class SegyViewerWidget(QWidget):
             "QPushButton#menuButton{border:0;background:transparent;color:#0B4D82;font-size:7.8pt;font-weight:700;padding:1px 4px;}"
             "QPushButton#menuButton:hover{background:#DCEEFF;border:1px solid #8AB5E3;}"
             "QPushButton#processingParamButton{background:#FFF2D6;border:1px solid #C88919;color:#7A4B00;font-weight:700;}"
-            "QPushButton#colorPaletteButton{background:#E8F3FF;border:1px solid #5B91BB;color:#0B4D82;font-weight:700;min-height:20px;padding:2px 7px;}"
-            "QPushButton#colorPaletteButton:hover{background:#D5EAFC;border-color:#2D77B6;}"
             "QCheckBox,QRadioButton{font-size:7.4pt;background:transparent;color:#102033;}"
             "QCheckBox::indicator,QRadioButton::indicator{width:11px;height:11px;border:1px solid #6C8AA8;background:#FFFFFF;}"
             "QCheckBox::indicator:checked{background:#1F79BD;border:1px solid #0B4D82;}"
@@ -1034,13 +1034,6 @@ class SegyViewerWidget(QWidget):
         for i, cb in enumerate((self.wiggle_cb, self.gray_cb, self.color_cb, self.timelines_cb)):
             cb.toggled.connect(self._display_mode_from_checks)
             grid.addWidget(cb, i, 0)
-
-        self.color_palette_btn = QPushButton("Color Library")
-        self.color_palette_btn.setObjectName("colorPaletteButton")
-        self.color_palette_btn.setToolTip("Open the seismic color library for Color Density")
-        self.color_palette_btn.clicked.connect(self.open_color_palette_dialog)
-        self.color_palette_btn.setVisible(False)
-        grid.addWidget(self.color_palette_btn, 4, 0, 1, 2)
         row.addWidget(display)
 
         fill = QGroupBox("Wiggle Fill")
@@ -1543,7 +1536,6 @@ class SegyViewerWidget(QWidget):
             self.agc_cb.setChecked(False)
             self.norm_cb.setChecked(False)
             self.weight_cb.setChecked(False)
-            self.color_palette_name = "Seismic"
             self.trace_scale.setValue(155)
             self.time_scale.setValue(307)
             self.gain_w.setValue(22)
@@ -1562,7 +1554,6 @@ class SegyViewerWidget(QWidget):
         self._s0 = 0
         self._s1 = min(self.time_grid.sample_count, 4200)
         self.select_trace(0, render_after=False)
-        self._update_color_palette_button()
         self.measure_status.setText("Normal SEG-Y opening state restored")
         self.render()
 
@@ -1583,32 +1574,7 @@ class SegyViewerWidget(QWidget):
             return
         if not self.wiggle_cb.isChecked() and not self.gray_cb.isChecked() and not self.color_cb.isChecked():
             self.gray_cb.setChecked(True)
-        self._update_color_palette_button()
-        self.render()
-
-    def _update_color_palette_button(self) -> None:
-        """Show the color-library control only while Color Density is active."""
-        if not hasattr(self, "color_palette_btn"):
-            return
-        active = bool(self.color_cb.isChecked())
-        self.color_palette_btn.setVisible(active)
-        self.color_palette_btn.setText(f"Colors: {self.color_palette_name}" if active else "Color Library")
-
-    def open_color_palette_dialog(self) -> None:
-        """Open the visual color library and immediately redraw the main view on selection."""
-        dialog = ColorPaletteDialog(self.color_palette_name, self)
-        if dialog.exec() == QDialog.DialogCode.Accepted:
-            self.set_color_palette(dialog.selected_palette)
-
-    def set_color_palette(self, palette_name: str) -> None:
-        """Set the Color Density palette and redraw the viewer."""
-        name = str(palette_name).strip()
-        from modules.seismic.ui.color_palette_dialog import COLOR_PALETTES
-        if name not in COLOR_PALETTES:
-            matches = {key.lower(): key for key in COLOR_PALETTES}
-            name = matches.get(name.lower(), "Seismic")
-        self.color_palette_name = name
-        self._update_color_palette_button()
+        self.color_density_changed.emit(self.color_cb.isChecked())
         self.render()
 
     def _apply_compat_mode(self) -> None:
@@ -1633,7 +1599,6 @@ class SegyViewerWidget(QWidget):
             self.wiggle_cb.setChecked(False)
             self.gray_cb.setChecked(False)
             self.color_cb.setChecked(True)
-        self._update_color_palette_button()
         self.render()
 
     def _read_visible_data(self) -> tuple[list[int], np.ndarray]:
@@ -1783,11 +1748,9 @@ class SegyViewerWidget(QWidget):
         if color:
             rgb = np.full((height, width, 3), 255, dtype=np.uint8)
             values = np.clip(z[valid], -1.0, 1.0)
-            # Map normalized seismic amplitudes through the selected visual palette.
-            # The full library is interpolated to 256 colors, then sampled by amplitude.
             lut = palette_to_rgb_array(self.color_palette_name, 256)
-            indices = np.clip(((values + 1.0) * 0.5 * 255.0).round().astype(np.int16), 0, 255)
-            rgb[valid] = lut[indices]
+            palette_indices = np.clip(((values + 1.0) * 0.5 * 255.0).round().astype(np.int16), 0, 255)
+            rgb[valid] = lut[palette_indices]
         else:
             gray = np.full((height, width), 255, dtype=np.uint8)
             gray[valid] = np.clip((1.0 - ((z[valid] + 1.0) * 0.5)) * 255, 0, 255).astype(np.uint8)
@@ -2069,7 +2032,7 @@ class SegyViewerWidget(QWidget):
                 self.color_cb.setChecked(False)
         finally:
             self._building_ui = False
-        self._update_color_palette_button()
+        self.color_density_changed.emit(self.color_cb.isChecked())
         self.render()
 
     def set_display_layer(self, layer: str, enabled: Optional[bool] = None) -> None:
@@ -2087,7 +2050,7 @@ class SegyViewerWidget(QWidget):
         cb.setChecked((not cb.isChecked()) if enabled is None else bool(enabled))
         if not self.wiggle_cb.isChecked() and not self.gray_cb.isChecked() and not self.color_cb.isChecked():
             self.gray_cb.setChecked(True)
-        self._update_color_palette_button()
+        self.color_density_changed.emit(self.color_cb.isChecked())
         self.render()
 
     def set_fill_mode(self, mode: str) -> None:
@@ -2105,6 +2068,22 @@ class SegyViewerWidget(QWidget):
     def toggle_use_delay_header(self) -> None:
         self.use_delay_cb.setChecked(not self.use_delay_cb.isChecked())
         self.render()
+
+    def set_color_palette(self, palette: str) -> None:
+        requested = str(palette or "Seismic").strip()
+        for name in COLOR_PALETTES:
+            if name.lower() == requested.lower():
+                self.color_palette_name = name
+                self.render()
+                return
+        self.color_palette_name = "Seismic"
+        self.render()
+
+    def open_color_library(self) -> None:
+        current = self.color_palette_name
+        dialog = ColorPaletteDialog(current, self)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            self.set_color_palette(dialog.selected_palette)
 
     def choose_display_color(self, target: str) -> None:
         button = {

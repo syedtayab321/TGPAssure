@@ -70,27 +70,27 @@ def _bool(value: object) -> bool:
 
 
 _ALIASES: dict[str, tuple[str, ...]] = {
-    "vib": ("vib", "vibrator", "vib_no", "vib_number", "fleet", "unit"),
-    "vp": ("vp", "vpoint", "vibrator_point", "source_point", "shot", "station"),
-    "time": ("time", "date", "datetime", "timestamp", "gps_time"),
-    "drive_level_pct": ("drive", "drive_level", "drive_level_pct", "drive_pct", "dl"),
-    "avg_phase_deg": ("avg_phase", "average_phase", "mean_phase", "phase_avg"),
-    "peak_phase_deg": ("peak_phase", "max_phase", "phase_peak"),
-    "avg_distortion_pct": ("avg_distortion", "average_distortion", "distortion_avg", "mean_distortion"),
-    "peak_distortion_pct": ("peak_distortion", "max_distortion", "distortion_peak"),
+    "vib": ("vib", "vibrator", "vib_no", "vib_number", "fleet", "unit", "vib_id", "vibrator_id"),
+    "vp": ("vp", "vpoint", "vibrator_point", "source_point", "shot", "station", "point", "ffid"),
+    "time": ("time", "date", "datetime", "timestamp", "gps_time", "tb", "time_break", "acq_time"),
+    "drive_level_pct": ("drive", "drive_level", "drive_level_pct", "drive_pct", "drive_level_percent", "dl"),
+    "avg_phase_deg": ("avg_phase", "average_phase", "mean_phase", "phase_avg", "avg_phase_deg", "average_phase_deg"),
+    "peak_phase_deg": ("peak_phase", "max_phase", "phase_peak", "peak_phase_deg"),
+    "avg_distortion_pct": ("avg_distortion", "average_distortion", "distortion_avg", "mean_distortion", "avg_distortion_pct", "average_distortion_pct"),
+    "peak_distortion_pct": ("peak_distortion", "max_distortion", "distortion_peak", "peak_distortion_pct"),
     "avg_force": ("avg_force", "average_force", "mean_force", "force_avg"),
     "peak_force": ("peak_force", "max_force", "force_peak"),
     "avg_viscosity": ("avg_viscosity", "viscosity", "average_viscosity"),
     "avg_stiffness": ("avg_stiffness", "stiffness", "average_stiffness"),
-    "hdop": ("hdop", "gps_hdop", "dop"),
+    "hdop": ("hdop", "gps_hdop", "dop", "horizontal_accuracy", "horizontal_acc", "h_accuracy", "h_acc"),
     "status_code": ("status", "status_code", "vib_status"),
     "mass_warning": ("mass_warning", "mass_warn"),
     "plate_warning": ("plate_warning", "plate_warn", "baseplate_warning"),
-    "force_overload": ("force_overload", "force_ol"),
-    "pressure_overload": ("pressure_overload", "over_pressure", "hydraulic_pressure"),
+    "force_overload": ("force_overload", "force_ol", "force_over", "force_o_l"),
+    "pressure_overload": ("pressure_overload", "over_pressure", "hydraulic_pressure", "pressure_ol", "press_overload"),
     "mass_overload": ("mass_overload", "mass_ol"),
     "valve_overload": ("valve_overload", "valve_ol"),
-    "excitation_overload": ("excitation_overload", "excitation_ol", "exciter_overload"),
+    "excitation_overload": ("excitation_overload", "excitation_ol", "exciter_overload", "excitation_o_l"),
 }
 
 
@@ -183,7 +183,7 @@ class VapsReader:
                 "peak_phase_deg": (r"peak\s*phase\s*[:=]?\s*([-+]?\d+(?:\.\d+)?)",),
                 "avg_distortion_pct": (r"avg(?:erage)?\s*distortion\s*[:=]?\s*([-+]?\d+(?:\.\d+)?)",),
                 "peak_distortion_pct": (r"peak\s*distortion\s*[:=]?\s*([-+]?\d+(?:\.\d+)?)",),
-                "hdop": (r"hdop\s*[:=]?\s*([-+]?\d+(?:\.\d+)?)",),
+                "hdop": (r"hdop\s*[:=]?\s*([-+]?\d+(?:\.\d+)?)", r"horizontal\s+accuracy\s*[:=]?\s*([-+]?\d+(?:\.\d+)?)"),
             }.items():
                 for pattern in patterns:
                     m = re.search(pattern, line, re.I)

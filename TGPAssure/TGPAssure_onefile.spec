@@ -26,6 +26,8 @@ if resources_dir.is_dir():
 
 # QtAwesome ships icon-font data that is loaded at runtime.
 datas += collect_data_files("qtawesome", include_py_files=False)
+# pyproj needs its PROJ database for projected-coordinate hover conversion.
+datas += collect_data_files("pyproj", include_py_files=False)
 
 # Some TGPAssure modules are imported dynamically from strings. Explicitly
 # collect local package submodules so those runtime paths remain available.

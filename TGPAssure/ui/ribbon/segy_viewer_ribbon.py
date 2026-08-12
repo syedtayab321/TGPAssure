@@ -47,6 +47,12 @@ def ico(
 
 
 class SegyViewerRibbonProvider(RibbonProvider):
+    def __init__(self) -> None:
+        self._show_color_library = False
+
+    def set_color_library_visible(self, visible: bool) -> None:
+        self._show_color_library = bool(visible)
+
     """SEG-Y viewer-only ribbon with mixed text and compact icon controls.
 
     Main viewer commands keep readable text labels. Dense repeat actions such as
@@ -75,6 +81,7 @@ class SegyViewerRibbonProvider(RibbonProvider):
                     small("Wiggle", "segy_viewer_toggle_wiggle", "office-chart-line", checkable=True, checked=True),
                     small("Colour", "segy_viewer_toggle_color", "color-picker", checkable=True),
                     small("Normal", "segy_viewer_reset_normal", "view-refresh"),
+                    *([small("Color Library", "segy_viewer_color_library", "color-picker")] if self._show_color_library else []),
                 ],
             ),
             RibbonGroup(

@@ -7,26 +7,25 @@ from ui.ribbon.ribbon_provider import RibbonAction, RibbonGroup, RibbonProvider
 
 class MagneticRibbonProvider(RibbonProvider):
     def ribbon_tab_id(self) -> str:
-        return "magnetic"
+        return "magnetic_enmag"
 
     def build_ribbon_groups(self) -> List[RibbonGroup]:
         return [
             RibbonGroup(
-                "Magnetic Data",
+                "Data",
                 [
-                    RibbonAction("Open Rover", "magnetic_open_rover", icon="document-open", accent=True),
+                    RibbonAction("Open Folder", "magnetic_open_folder", icon="folder-open", accent=True),
+                    RibbonAction("Open Rover", "magnetic_open_rover", icon="document-open"),
                     RibbonAction("Open Base", "magnetic_open_base", icon="office-chart-line"),
                     RibbonAction("Boundary", "magnetic_open_boundary", icon="map"),
-                    RibbonAction("Dataset", "magnetic_open", icon="view-dashboard"),
                 ],
             ),
             RibbonGroup(
-                "Quality Control",
+                "Display",
                 [
-                    RibbonAction("Full QC", "magnetic_run_full", icon="media-playback-start", accent=True),
-                    RibbonAction("Raw QC", "magnetic_run_raw", icon="view-statistics"),
-                    RibbonAction("Processed QC", "magnetic_run_processed", icon="dialog-ok-apply"),
-                    RibbonAction("Cancel", "magnetic_cancel", icon="process-stop"),
+                    RibbonAction("Draw", "magnetic_grid", icon="view-grid", accent=True),
+                    RibbonAction("Profile", "magnetic_profile", icon="office-chart-line"),
+                    RibbonAction("Map", "magnetic_map", icon="map"),
                 ],
             ),
             RibbonGroup(
@@ -34,19 +33,15 @@ class MagneticRibbonProvider(RibbonProvider):
                 [
                     RibbonAction("Despike", "magnetic_despike", icon="edit-clear"),
                     RibbonAction("Diurnal", "magnetic_diurnal", icon="view-refresh"),
-                    RibbonAction("Leveling", "magnetic_level", icon="transform-move"),
+                    RibbonAction("Level", "magnetic_level", icon="transform-move"),
                     RibbonAction("Microlevel", "magnetic_microlevel", icon="transform-scale"),
-                    RibbonAction("Grid", "magnetic_grid", icon="view-grid"),
                 ],
             ),
             RibbonGroup(
-                "Review and Export",
+                "Export",
                 [
-                    RibbonAction("Map", "magnetic_map", icon="map"),
-                    RibbonAction("Profiles", "magnetic_profile", icon="office-chart-line"),
-                    RibbonAction("Export CSV", "magnetic_export_csv", icon="document-export"),
-                    RibbonAction("PDF Report", "magnetic_report_pdf", icon="application-pdf"),
-                    RibbonAction("Excel Report", "magnetic_report_xlsx", icon="x-office-spreadsheet"),
+                    RibbonAction("Export CSV", "magnetic_export_csv", icon="document-export", accent=True),
+                    RibbonAction("Report", "magnetic_report_pdf", icon="document-print"),
                 ],
             ),
         ]

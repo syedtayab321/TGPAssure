@@ -396,6 +396,16 @@ class VibroseisDashboard(QWidget):
             self.show_classic_vaps(); self.classic_vaps_analyser.set_raw_mode()
         elif action_id == "vibroseis_vaps_mode_filtered":
             self.show_classic_vaps(); self.classic_vaps_analyser.set_filtered_mode()
+        elif action_id == "vibroseis_vaps_connect":
+            self.show_classic_vaps(); self.classic_vaps_analyser.toggle_connect()
+        elif action_id == "vibroseis_vaps_palette_classic":
+            self.show_classic_vaps(); self.classic_vaps_analyser.set_palette("Classic")
+        elif action_id == "vibroseis_vaps_palette_thermal":
+            self.show_classic_vaps(); self.classic_vaps_analyser.set_palette("Thermal")
+        elif action_id == "vibroseis_vaps_palette_traffic":
+            self.show_classic_vaps(); self.classic_vaps_analyser.set_palette("Traffic")
+        elif action_id == "vibroseis_vaps_stats":
+            self.show_classic_vaps(); self.classic_vaps_analyser.show_statistics_dialog()
         elif action_id.startswith("vibroseis_vaps_attr_"):
             self.show_classic_vaps(); self.classic_vaps_analyser.set_attribute(action_id.replace("vibroseis_vaps_attr_", "", 1))
         elif action_id == "vibroseis_manual_add":

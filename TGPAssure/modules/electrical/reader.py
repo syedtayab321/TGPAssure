@@ -47,8 +47,10 @@ class ElectricalReader:
             "current_ma", "voltage_mv", "resistance_ohm", "apparent_resistivity_ohm_m",
             "chargeability_mv_v", "sp_mv", "frequency_hz", "phase_mrad", "phase_deg",
             "electric_field_mv_km", "electric_field_x_mv_km", "electric_field_y_mv_km",
+            "longitude", "latitude", "easting", "northing",
         }
-        is_candidate = bool(mapped_fields & measurement_fields)
+        has_decay_windows = any(str(field).startswith(("window_", "decay_")) for field in mapped_fields)
+        is_candidate = bool(mapped_fields & measurement_fields) or has_decay_windows
         return {
             "source_path": str(source),
             "source_file": source.name,
@@ -112,6 +114,8 @@ class ElectricalReader:
 
     @staticmethod
     def infer_method(fields: set[str]) -> ElectricalMethod:
+        if any(str(field).startswith(("window_", "decay_")) for field in fields):
+            return ElectricalMethod.TDIP
         if "frequency_hz" in fields and ("phase_mrad" in fields or "phase_deg" in fields):
             return ElectricalMethod.SIP
         if "frequency_hz" in fields and "chargeability_mv_v" in fields:

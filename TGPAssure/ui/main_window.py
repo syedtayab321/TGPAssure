@@ -38,6 +38,7 @@ from ui.ribbon.gravity_ribbon import GravityRibbonProvider
 from ui.ribbon.electrical_ribbon import ElectricalRibbonProvider
 from ui.ribbon.converter_ribbon import ConverterRibbonProvider
 from ui.ribbon.vibroseis_ribbon import VibroseisRibbonProvider
+from ui.ribbon.seismatters_ribbon import SercelInstrumentTestAnalysisRibbonProvider, SercelLogAnalysisRibbonProvider
 from ui.empty_workspace import EmptyWorkspace
 from ui.widgets.full_page_loader import FullPageLoader
 from ui.dialogs.subscription_dialog import SubscriptionDialog
@@ -281,8 +282,11 @@ class MainWindow(QMainWindow):
             "home": [("home", "Home")],
             "seismic": [
                 ("segd", "SEGD"),
+                ("sercel_log_analysis", "SLX Recorder QC"),
+                ("sercel_instrument_test_analysis", "SITA Instrument Tests"),
                 ("segd_scanner", "428 Header Scanner"),
                 ("uphole", "Uphole"),
+                ("array_response", "Array Response"),
                 ("receiver_qc", "Receiver QC"),
                 ("smt", "SMT"),
                 ("vibroseis", "Vibroseis QC"),
@@ -291,18 +295,10 @@ class MainWindow(QMainWindow):
                 ("visualization", "2D/3D Viewer"),
             ],
             "magnetic": [
-                ("magnetic_data", "Data"),
-                ("magnetic_qc", "QC"),
-                ("magnetic_processing", "Processing"),
-                ("magnetic_viewer", "2D/3D & Satellite"),
-                ("magnetic_reports", "Reports"),
+                ("magnetic_enmag", "Magnetic Processor"),
             ],
             "electrical": [
-                ("electrical_data", "Data & Methods"),
-                ("electrical_qc", "QC"),
-                ("electrical_processing", "Processing"),
-                ("electrical_viewer", "2D/3D & Satellite"),
-                ("electrical_reports", "Reports"),
+                ("electrical_prosys", "Prosys II"),
             ],
             "gravity": [
                 ("gravity_data", "Data"),
@@ -312,11 +308,7 @@ class MainWindow(QMainWindow):
                 ("gravity_reports", "Reports"),
             ],
             "geodetic": [
-                ("geodetic_data", "DC Examiner"),
-                ("geodetic_qc", "QC & Graphs"),
-                ("geodetic_coordinates", "Coordinates & Datum"),
-                ("geodetic_viewer", "2D/3D & Satellite"),
-                ("geodetic_reports", "Reports & Export"),
+                ("geodetic_data", "DC File Examiner"),
             ],
         }
         self._responsive_mode = ""
@@ -327,9 +319,12 @@ class MainWindow(QMainWindow):
         self._vibroseis_dashboard = None
         self._geodetic_dashboard = None
         self._segd_scanner_dashboard = None
+        self._sercel_log_analysis_dashboard = None
+        self._sercel_instrument_test_analysis_dashboard = None
         self._receiver_qc_dashboard = None
         self._smt_dashboard = None
         self._uphole_dashboard = None
+        self._array_response_dashboard = None
         self._qc_history_page = None
         self._selected_project_path: Path | None = None
         self._busy_tasks: dict[str, dict[str, Any]] = {}
@@ -341,6 +336,8 @@ class MainWindow(QMainWindow):
             "home": ("Home", "Home", "Home"),
             "seismic": ("Seismic", "Seismic", "Seismic"),
             "segd": ("SEG-D", "SEG-D", "SEG-D"),
+            "sercel_log_analysis": ("SLX Recorder QC", "SLX QC", "SLX"),
+            "sercel_instrument_test_analysis": ("SITA Instrument Tests", "SITA Tests", "SITA"),
             "segy_viewer": ("SEG-Y Viewer", "SEG-Y View", "SEG-Y"),
             "visualization": ("2D/3D View", "2D/3D", "View"),
             "converter": ("Converter", "Converter", "Convert"),
@@ -349,6 +346,7 @@ class MainWindow(QMainWindow):
             "magnetic": ("Magnetic", "Magnetic", "Magnetic"),
             "gravity": ("Gravity", "Gravity", "Gravity"),
             "electrical": ("Electrical", "Electrical", "Electrical"),
+            "electrical_prosys": ("Prosys II", "Prosys II", "Prosys"),
             "geodetic": ("Geodetic", "Geodetic", "Geodetic"),
             "view": ("Layout", "Layout", "Layout"),
             "tools": ("Tools", "Tools", "Tools"),
@@ -377,11 +375,15 @@ class MainWindow(QMainWindow):
         
         self._register_ribbon_provider(HomeRibbonProvider())
         self._register_ribbon_provider(SegdRibbonProvider())
+        self._register_ribbon_provider(SercelLogAnalysisRibbonProvider())
+        self._register_ribbon_provider(SercelInstrumentTestAnalysisRibbonProvider())
         self._register_ribbon_provider(SegyViewerRibbonProvider())
         self._vibroseis_ribbon_context = "vaps"
         self._register_ribbon_provider(VibroseisRibbonProvider(lambda: getattr(self, "_vibroseis_ribbon_context", "vaps")))
         self._register_ribbon_provider(ConverterRibbonProvider())
         self._register_ribbon_provider(SeismicVisualizationRibbonProvider())
+        self._register_ribbon_provider(ElectricalRibbonProvider())
+        self._register_ribbon_provider(MagneticRibbonProvider())
         for provider in workflow_providers():
             self._register_ribbon_provider(provider)
         for provider in geodetic_providers():
@@ -477,6 +479,8 @@ class MainWindow(QMainWindow):
         if context in {"seismic", "magnetic", "electrical", "gravity", "geodetic"}:
             return self._is_main_tab_licensed(context)
         if context.startswith("vibroseis"):
+            return self._is_provider_licensed(context) or self._is_main_tab_licensed("seismic")
+        if context in {"sercel_log_analysis", "sercel_instrument_test_analysis"}:
             return self._is_provider_licensed(context) or self._is_main_tab_licensed("seismic")
         return self._is_provider_licensed(context)
 
@@ -1261,6 +1265,12 @@ class MainWindow(QMainWindow):
                 if self._activate_existing_workspace("segy_viewer") is None:
                     self._open_segy_file()
                 return
+            if context == "sercel_instrument_test_analysis":
+                self._open_sercel_instrument_test_analysis_dashboard()
+                return
+            if context == "sercel_log_analysis":
+                self._open_sercel_log_analysis_dashboard()
+                return
             if context == "segd_scanner":
                 self._open_segd_scanner_dashboard()
                 return
@@ -1272,6 +1282,9 @@ class MainWindow(QMainWindow):
                 return
             if context == "uphole":
                 self._open_uphole_dashboard()
+                return
+            if context == "array_response":
+                self._open_array_response_dashboard()
                 return
             if context == "converter":
                 self._open_converter_page()
@@ -1298,18 +1311,8 @@ class MainWindow(QMainWindow):
 
             if context.startswith("electrical"):
                 dashboard = self._open_electrical_dashboard()
-                if dashboard is not None:
-                    widget_map = {
-                        "electrical_data": getattr(dashboard, "overview_tab", None),
-                        "electrical_qc": getattr(dashboard, "qc_tab", None),
-                        "electrical_processing": getattr(dashboard, "plot_tab", None),
-                        "electrical_viewer": getattr(dashboard, "spatial_tab", None),
-                        "electrical_reports": getattr(dashboard, "guide_tab", None),
-                    }
-                    target = widget_map.get(context)
-                    tabs = getattr(dashboard, "tabs", None)
-                    if tabs is not None and target is not None:
-                        tabs.setCurrentWidget(target)
+                if dashboard is not None and hasattr(dashboard, "show_prosys_workspace"):
+                    dashboard.show_prosys_workspace()
                 return
 
             if context.startswith("gravity"):
@@ -1344,12 +1347,8 @@ class MainWindow(QMainWindow):
                 dashboard = self._open_geodetic_dashboard()
                 if dashboard is not None:
                     page_map = {
-                        "geodetic": getattr(dashboard, "TAB_OVERVIEW", 0),
-                        "geodetic_data": getattr(dashboard, "TAB_EXAMINER", 1),
-                        "geodetic_qc": getattr(dashboard, "TAB_QC", 2),
-                        "geodetic_coordinates": getattr(dashboard, "TAB_COORDINATES", 3),
-                        "geodetic_viewer": getattr(dashboard, "TAB_SPATIAL", 4),
-                        "geodetic_reports": getattr(dashboard, "TAB_REPORT", 6),
+                        "geodetic": getattr(dashboard, "TAB_EXAMINER", 0),
+                        "geodetic_data": getattr(dashboard, "TAB_EXAMINER", 0),
                     }
                     target = page_map.get(context)
                     show_page = getattr(dashboard, "_show_page", None)
@@ -1408,12 +1407,15 @@ class MainWindow(QMainWindow):
             "geodetic": "geodetic",
             "segy_viewer": "seismic",
             "segd": "seismic",
+            "sercel_instrument_test_analysis": "seismic",
+            "sercel_log_analysis": "seismic",
             "converter": "seismic",
             "visualization": "seismic",
             "segd_scanner": "seismic",
             "receiver_qc": "seismic",
             "smt": "seismic",
             "uphole": "seismic",
+            "array_response": "seismic",
         })
 
     def _default_provider_for_main(self, main_id: str) -> str:
@@ -1442,8 +1444,12 @@ class MainWindow(QMainWindow):
                 selected_index = idx
         self.ribbon_sub_tab_bar.setCurrentIndex(selected_index if items else -1)
         self.ribbon_sub_tab_bar.blockSignals(False)
-        # Home is intentionally flat; all technical modules use a secondary row.
-        self.ribbon_sub_header.setVisible(len(items) > 1)
+        # Home is intentionally flat. Technical modules keep the secondary row
+        # visible even when there is only one submodule, so Electrical now shows
+        # Prosys II exactly like seismic shows Uphole / SEG-D / SEG-Y. More
+        # Electrical submodules can be appended to _ribbon_structure["electrical"]
+        # later without changing the navigation logic.
+        self.ribbon_sub_header.setVisible(main_id != "home" and len(items) > 0)
 
     def _set_active_module(self, module_id: str) -> None:
         requested = str(module_id or "home")
@@ -1471,6 +1477,27 @@ class MainWindow(QMainWindow):
         self._populate_ribbon_subtabs(main_id, provider_id)
         self._update_ribbon()
 
+    def _sync_color_library_ribbon_state(self) -> None:
+        """Keep the SEG-D ribbon Color Library command in sync with the active viewer."""
+        provider = self._ribbon_providers.get("segd")
+        if provider is None or not hasattr(provider, "set_color_library_visible"):
+            return
+        viewer = self._active_segd_viewer() if hasattr(self, "tab_widget") else None
+        visible = False
+        if viewer is not None:
+            try:
+                visible = str(viewer.display_combo.currentData() or "") == "color_density"
+            except Exception:
+                visible = False
+        provider.set_color_library_visible(visible)
+
+    def _on_segd_color_density_changed(self, visible: bool) -> None:
+        """Refresh the SEG-D ribbon when the viewer changes its display mode."""
+        provider = self._ribbon_providers.get("segd")
+        if provider is not None and hasattr(provider, "set_color_library_visible"):
+            provider.set_color_library_visible(bool(visible))
+        self._update_ribbon()
+
     def _update_ribbon(self) -> None:
         # QTabWidget can emit currentChanged while the central workspace is being
         # constructed, before the ribbon widgets exist. Ignore those bootstrap
@@ -1478,6 +1505,7 @@ class MainWindow(QMainWindow):
         if not hasattr(self, "ribbon_groups_layout") or not hasattr(self, "ribbon_groups_background"):
             return
         self._clear_ribbon_groups()
+        self._sync_color_library_ribbon_state()
         
         if self._active_module in self._ribbon_providers and self._ribbon_providers[self._active_module]:
             try:
@@ -1570,10 +1598,11 @@ class MainWindow(QMainWindow):
             "subscription_modules", "logout_account",
             "toggle_properties", "toggle_console", "save_layout", "load_layout",
             "segd_open_file", "segd_open_viewer", "segd_open_2d3d", "segy_open_file",
+            "sercel_log_open", "sita_open",
             "visualization_open",
             "magnetic_open", "magnetic_open_rover", "magnetic_open_base", "magnetic_open_boundary",
             "gravity_open", "gravity_open_observations", "gravity_open_base",
-            "electrical_open", "electrical_open_data", "electrical_thresholds",
+            "electrical_open", "electrical_open_data", "electrical_prosys",
             "geodetic_open", "geodetic_examiner",
             "segd_scanner_open", "segd_scanner_folder", "receiver_open", "receiver_limits",
             "smt_project",
@@ -1585,6 +1614,18 @@ class MainWindow(QMainWindow):
         project_open = self._workspace_manager.current_project_file is not None
         if action_id in {"save_project", "import_file", "export_data", "project_properties", "refresh_project", "qc_history"}:
             return project_open
+
+        if action_id.startswith("sita_"):
+            dashboard = self._sercel_instrument_test_analysis_dashboard
+            if dashboard is None:
+                return action_id == "sita_open"
+            return True
+
+        if action_id.startswith("sercel_log_"):
+            dashboard = self._sercel_log_analysis_dashboard
+            if dashboard is None:
+                return action_id == "sercel_log_open"
+            return True
 
         if action_id.startswith("segd_scanner_"):
             dashboard = self._segd_scanner_dashboard
@@ -1651,17 +1692,11 @@ class MainWindow(QMainWindow):
         if action_id.startswith("electrical_"):
             dashboard = self._electrical_dashboard
             if dashboard is None:
-                return action_id.startswith("electrical_method_")
+                return action_id in {"electrical_open", "electrical_open_data", "electrical_prosys"}
             resolver = getattr(dashboard, "can_execute", None)
             if callable(resolver):
                 return bool(resolver(action_id))
-            has_data = getattr(dashboard, "dataset", None) is not None
-            has_qc = getattr(dashboard, "qc_result", None) is not None
-            if action_id in {"electrical_report_pdf", "electrical_report_xlsx", "electrical_results"}:
-                return has_qc
-            if action_id.startswith("electrical_method_"):
-                return True
-            return has_data
+            return getattr(dashboard, "dataset", None) is not None
 
         if action_id.startswith("vibroseis_"):
             dashboard = self._vibroseis_dashboard
@@ -1711,6 +1746,50 @@ class MainWindow(QMainWindow):
             self._logout_account()
         elif action_id in {"segd_open_file", "segd_open_viewer"}:
             self._open_segd_viewer()
+        elif action_id == "sita_open":
+            dashboard = self._open_sercel_instrument_test_analysis_dashboard()
+            if dashboard is not None:
+                dashboard.select_folder()
+        elif action_id == "sita_show":
+            dashboard = self._open_sercel_instrument_test_analysis_dashboard()
+            if dashboard is not None:
+                dashboard.show_results()
+        elif action_id == "sita_sort":
+            dashboard = self._open_sercel_instrument_test_analysis_dashboard()
+            if dashboard is not None:
+                dashboard.toggle_sort()
+        elif action_id == "sita_failures":
+            dashboard = self._open_sercel_instrument_test_analysis_dashboard()
+            if dashboard is not None:
+                dashboard.list_failures()
+        elif action_id == "sita_csv":
+            dashboard = self._open_sercel_instrument_test_analysis_dashboard()
+            if dashboard is not None:
+                dashboard.export_csv()
+        elif action_id == "sita_export_image":
+            dashboard = self._open_sercel_instrument_test_analysis_dashboard()
+            if dashboard is not None:
+                dashboard.export_image()
+        elif action_id == "sercel_log_open":
+            dashboard = self._open_sercel_log_analysis_dashboard()
+            if dashboard is not None:
+                dashboard.open_folder()
+        elif action_id == "sercel_log_reload":
+            dashboard = self._open_sercel_log_analysis_dashboard()
+            if dashboard is not None:
+                dashboard.reload_folder()
+        elif action_id == "sercel_log_qc":
+            dashboard = self._open_sercel_log_analysis_dashboard()
+            if dashboard is not None:
+                dashboard.run_qc()
+        elif action_id == "sercel_log_crc":
+            dashboard = self._open_sercel_log_analysis_dashboard()
+            if dashboard is not None:
+                dashboard.export_crc_csv()
+        elif action_id == "sercel_log_export_image":
+            dashboard = self._open_sercel_log_analysis_dashboard()
+            if dashboard is not None:
+                dashboard.export_image()
         elif action_id == "seismic_reset_active_view":
             segd_viewer = self._active_segd_viewer()
             segy_viewer = self._active_segy_viewer()
@@ -1732,6 +1811,9 @@ class MainWindow(QMainWindow):
             self._apply_to_active_segd("set_display_mode", "variable_density")
         elif action_id == "segd_display_color":
             self._apply_to_active_segd("set_display_mode", "color_density")
+            self._update_ribbon()
+        elif action_id == "segd_color_library":
+            self._apply_to_active_segd("open_color_library")
         elif action_id == "segd_display_wiggle_color":
             self._apply_to_active_segd("set_display_mode", "wiggle_color")
         elif action_id == "segd_display_va":
@@ -1944,6 +2026,12 @@ class MainWindow(QMainWindow):
             self._open_uphole_dashboard().show_layers()
         elif action_id == "uphole_guide":
             self._open_uphole_dashboard().show_guide()
+        elif action_id.startswith("array_response_"):
+            dashboard = self._open_array_response_dashboard()
+            if dashboard is not None:
+                handler = getattr(dashboard, "handle_ribbon_action", None)
+                if callable(handler):
+                    handler(action_id)
         elif action_id == "converter_open":
             self._open_converter_page().open_single_file()
         elif action_id == "converter_add":
@@ -2006,6 +2094,8 @@ class MainWindow(QMainWindow):
             self._apply_to_geodetic("generate_report")
         elif action_id == "magnetic_open":
             self._open_magnetic_dashboard()
+        elif action_id == "magnetic_open_folder":
+            self._apply_to_magnetic("select_folder")
         elif action_id == "magnetic_open_rover":
             self._apply_to_magnetic("open_rover")
         elif action_id == "magnetic_open_base":
@@ -2122,6 +2212,20 @@ class MainWindow(QMainWindow):
             self._apply_to_electrical("configure_qc")
         elif action_id == "electrical_results":
             self._apply_to_electrical("show_qc_results")
+        elif action_id == "electrical_prosys":
+            self._apply_to_electrical("show_prosys_workspace")
+        elif action_id == "electrical_prosys_filter":
+            self._apply_to_electrical("apply_range_filter")
+        elif action_id == "electrical_prosys_reject":
+            self._apply_to_electrical("reject_selected_rows")
+        elif action_id == "electrical_prosys_median":
+            self._apply_to_electrical("apply_median_average")
+        elif action_id == "electrical_prosys_sliding":
+            self._apply_to_electrical("apply_sliding_average")
+        elif action_id == "electrical_prosys_topography":
+            self._apply_to_electrical("import_topography")
+        elif action_id == "electrical_prosys_elevation":
+            self._apply_to_electrical("apply_elevation_offset")
         elif action_id == "electrical_sp_drift":
             self._apply_to_electrical("apply_sp_drift_correction")
         elif action_id == "electrical_despike":
@@ -2132,6 +2236,10 @@ class MainWindow(QMainWindow):
             self._apply_to_electrical("show_profile")
         elif action_id == "electrical_export_csv":
             self._apply_to_electrical("export_csv")
+        elif action_id == "electrical_export_res2dinv":
+            self._apply_to_electrical("export_res2dinv")
+        elif action_id == "electrical_export_res3dinv":
+            self._apply_to_electrical("export_res3dinv")
         elif action_id == "electrical_report_pdf":
             self._apply_to_electrical("generate_report", "pdf")
         elif action_id == "electrical_report_xlsx":
@@ -2738,6 +2846,58 @@ class MainWindow(QMainWindow):
         self._set_active_module("converter")
         return page
 
+    def _open_sercel_instrument_test_analysis_dashboard(self):
+        dashboard = self._sercel_instrument_test_analysis_dashboard
+        if dashboard is None or not is_qobject_valid(dashboard):
+            try:
+                from modules.seismic.seismatters import SercelInstrumentTestAnalysisWidget
+                dashboard = SercelInstrumentTestAnalysisWidget(self)
+                self._sercel_instrument_test_analysis_dashboard = dashboard
+                dashboard.destroyed.connect(lambda *_: setattr(self, "_sercel_instrument_test_analysis_dashboard", None))
+                index = self._add_document_tab(
+                    dashboard,
+                    "SITA Instrument Tests",
+                    icon=get_icon("view-statistics", color="#2563EB", size=16),
+                    closable=True,
+                )
+            except Exception as exc:
+                QMessageBox.critical(self, "SITA Instrument Tests", f"Unable to open SITA Instrument Tests:\n{exc}")
+                return None
+        else:
+            index = self.tab_widget.indexOf(dashboard)
+            if index < 0:
+                index = self._add_document_tab(dashboard, "SITA Instrument Tests", closable=True)
+        self.tab_widget.setCurrentIndex(index)
+        self._set_active_module("sercel_instrument_test_analysis")
+        dashboard.show(); dashboard.raise_(); dashboard.setFocus(Qt.OtherFocusReason)
+        return dashboard
+
+    def _open_sercel_log_analysis_dashboard(self):
+        dashboard = self._sercel_log_analysis_dashboard
+        if dashboard is None or not is_qobject_valid(dashboard):
+            try:
+                from modules.seismic.seismatters import SercelLogAnalysisWidget
+                dashboard = SercelLogAnalysisWidget(self)
+                self._sercel_log_analysis_dashboard = dashboard
+                dashboard.destroyed.connect(lambda *_: setattr(self, "_sercel_log_analysis_dashboard", None))
+                index = self._add_document_tab(
+                    dashboard,
+                    "SLX Recorder QC",
+                    icon=get_icon("view-statistics", color="#0E7490", size=16),
+                    closable=True,
+                )
+            except Exception as exc:
+                QMessageBox.critical(self, "SLX Recorder QC", f"Unable to open SLX Recorder QC:\n{exc}")
+                return None
+        else:
+            index = self.tab_widget.indexOf(dashboard)
+            if index < 0:
+                index = self._add_document_tab(dashboard, "SLX Recorder QC", closable=True)
+        self.tab_widget.setCurrentIndex(index)
+        self._set_active_module("sercel_log_analysis")
+        dashboard.show(); dashboard.raise_(); dashboard.setFocus(Qt.OtherFocusReason)
+        return dashboard
+
     def _open_segd_scanner_dashboard(self):
         dashboard = self._segd_scanner_dashboard
         if dashboard is None or not is_qobject_valid(dashboard):
@@ -2842,6 +3002,32 @@ class MainWindow(QMainWindow):
         dashboard.show(); dashboard.raise_(); dashboard.setFocus(Qt.OtherFocusReason)
         return dashboard
 
+    def _open_array_response_dashboard(self):
+        dashboard = self._array_response_dashboard
+        if dashboard is None or not is_qobject_valid(dashboard):
+            try:
+                from modules.geophone_array.ui import ArrayResponseDashboard
+                dashboard = ArrayResponseDashboard(self)
+                self._array_response_dashboard = dashboard
+                dashboard.destroyed.connect(lambda *_: setattr(self, "_array_response_dashboard", None))
+                index = self._add_document_tab(
+                    dashboard,
+                    "Geophone Array Response",
+                    icon=get_icon("office-chart-line", color="#0E7490", size=16),
+                    closable=True,
+                )
+            except Exception as exc:
+                QMessageBox.critical(self, "Array Response", f"Unable to open Array Response module:\n{exc}")
+                return None
+        else:
+            index = self.tab_widget.indexOf(dashboard)
+            if index < 0:
+                index = self._add_document_tab(dashboard, "Geophone Array Response", closable=True)
+        self.tab_widget.setCurrentIndex(index)
+        self._set_active_module("array_response")
+        dashboard.show(); dashboard.raise_(); dashboard.setFocus(Qt.OtherFocusReason)
+        return dashboard
+
     def _on_vibroseis_page_changed(self, page: str) -> None:
         self._vibroseis_ribbon_context = str(page or "vaps")
         if getattr(self, "_active_module", None) == "vibroseis":
@@ -2930,7 +3116,7 @@ class MainWindow(QMainWindow):
                 )
                 index = self._add_document_tab(
                     dashboard,
-                    "Geodetic Survey QC",
+                    "RW's DC File Examiner",
                     icon=get_icon("map", color="#0B6FA4", size=16),
                     closable=True,
                 )
@@ -2940,7 +3126,7 @@ class MainWindow(QMainWindow):
         else:
             index = self.tab_widget.indexOf(dashboard)
             if index < 0:
-                index = self._add_document_tab(dashboard, "Geodetic Survey QC", closable=True)
+                index = self._add_document_tab(dashboard, "RW's DC File Examiner", closable=True)
         self.tab_widget.setCurrentIndex(index)
         self._set_active_module("geodetic")
         dashboard.show(); dashboard.raise_(); dashboard.setFocus(Qt.OtherFocusReason)
@@ -2967,7 +3153,7 @@ class MainWindow(QMainWindow):
             task_id = "magnetic:workspace"
             self.begin_busy_task(
                 task_id,
-                "Opening Magnetic QC",
+                "Opening Magnetic Processor",
                 "Initializing magnetic readers, processing tools and dashboard",
             )
             try:
@@ -3003,17 +3189,17 @@ class MainWindow(QMainWindow):
                     lambda *_: self.end_busy_task("magnetic:dashboard")
                 )
                 self._magnetic_dashboard = dashboard
-                self.update_busy_task(task_id, 100, "Magnetic QC workspace is ready")
+                self.update_busy_task(task_id, 100, "Magnetic Processor workspace is ready")
             except Exception as exc:
                 self.end_busy_task(task_id)
-                QMessageBox.critical(self, "Magnetic QC", f"Unable to open the Magnetic QC module:\n{exc}")
+                QMessageBox.critical(self, "Magnetic Processor", f"Unable to open the Magnetic Processor module:\n{exc}")
                 return None
             self.end_busy_task(task_id)
         index = self.tab_widget.indexOf(dashboard)
         if index < 0:
             index = self._add_document_tab(
                 dashboard,
-                "Magnetic QC",
+                "Magnetic Processor",
                 icon=get_icon("office-chart-line", size=15),
                 closable=True,
             )
@@ -3034,7 +3220,7 @@ class MainWindow(QMainWindow):
             return
         method = getattr(dashboard, method_name, None)
         if method is None:
-            QMessageBox.warning(self, "Magnetic QC", f"The Magnetic QC module does not support: {method_name}")
+            QMessageBox.warning(self, "Magnetic Processor", f"The Magnetic QC module does not support: {method_name}")
             return
         try:
             method(*args)
@@ -3115,14 +3301,14 @@ class MainWindow(QMainWindow):
             task_id = "electrical:workspace"
             self.begin_busy_task(
                 task_id,
-                "Opening Electrical QC",
-                "Initializing electrical readers, QC engine, processing and visualization tools",
+                "Opening Prosys II",
+                "Initializing Prosys II electrical/IP workspace",
             )
             try:
                 from core.data_access.db_engine import DatabaseEngine
                 from modules.electrical.ui.electrical_dashboard import ElectricalDashboard
 
-                self.update_busy_task(task_id, 45, "Creating Electrical Methods workspace")
+                self.update_busy_task(task_id, 45, "Creating Prosys II workspace")
                 dashboard = ElectricalDashboard(self.container.resolve(DatabaseEngine), self)
                 dashboard.destroyed.connect(self._clear_electrical_dashboard_reference)
                 dashboard.activity_started.connect(
@@ -3142,17 +3328,17 @@ class MainWindow(QMainWindow):
                     lambda *_: self.end_busy_task("electrical:dashboard")
                 )
                 self._electrical_dashboard = dashboard
-                self.update_busy_task(task_id, 100, "Electrical QC workspace is ready")
+                self.update_busy_task(task_id, 100, "Prosys II workspace is ready")
             except Exception as exc:
                 self.end_busy_task(task_id)
-                QMessageBox.critical(self, "Electrical QC", f"Unable to open the Electrical QC module:\n{exc}")
+                QMessageBox.critical(self, "Prosys II", f"Unable to open the Prosys II module:\n{exc}")
                 return None
             self.end_busy_task(task_id)
         index = self.tab_widget.indexOf(dashboard)
         if index < 0:
             index = self._add_document_tab(
                 dashboard,
-                "Electrical QC",
+                "Prosys II",
                 icon=get_icon("electrical", size=15),
                 closable=True,
             )
@@ -3173,12 +3359,12 @@ class MainWindow(QMainWindow):
             return
         method = getattr(dashboard, method_name, None)
         if method is None:
-            QMessageBox.warning(self, "Electrical QC", f"The Electrical QC module does not support: {method_name}")
+            QMessageBox.warning(self, "Prosys II", f"The Electrical QC module does not support: {method_name}")
             return
         try:
             method(*args)
         except Exception as exc:
-            QMessageBox.critical(self, "Electrical QC Error", str(exc))
+            QMessageBox.critical(self, "Prosys II Error", str(exc))
         finally:
             self._update_ribbon()
 
@@ -3240,6 +3426,7 @@ class MainWindow(QMainWindow):
             "receiver_qc": self._open_receiver_qc_dashboard,
             "smt": self._open_smt_dashboard,
             "uphole": self._open_uphole_dashboard,
+            "array_response": self._open_array_response_dashboard,
             "visualization": self._open_visualization,
             "magnetic": self._open_magnetic_dashboard,
             "gravity": self._open_gravity_dashboard,
@@ -3934,6 +4121,8 @@ class MainWindow(QMainWindow):
             viewer.loading_finished.connect(self._hide_full_page_loader)
             viewer.setProperty("module_id", "segd")
             viewer.setProperty("segd_file_path", resolved)
+            if hasattr(viewer, "color_density_changed"):
+                viewer.color_density_changed.connect(self._on_segd_color_density_changed)
             index = self._add_document_tab(
                 viewer,
                 f"SEG-D: {Path(file_path).name}",

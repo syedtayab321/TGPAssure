@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-# SEG-D tool implementations are kept separate from the main SEG-D viewer so
-# dialog/UI updates cannot change the main dashboard layout.
 from modules.seismic.segd_viewer.tools.legacy_tool_dialogs import (
     dsd_bin_files,
     filters,
