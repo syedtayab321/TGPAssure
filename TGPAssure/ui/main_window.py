@@ -287,7 +287,6 @@ class MainWindow(QMainWindow):
                 ("segd_scanner", "428 Header Scanner"),
                 ("uphole", "Uphole"),
                 ("array_response", "Array Response"),
-                ("receiver_qc", "Receiver QC"),
                 ("smt", "SMT"),
                 ("vibroseis", "Vibroseis QC"),
                 ("segy_viewer", "SEGY"),
@@ -301,11 +300,7 @@ class MainWindow(QMainWindow):
                 ("electrical_prosys", "Prosys II"),
             ],
             "gravity": [
-                ("gravity_data", "Data"),
-                ("gravity_qc", "QC"),
-                ("gravity_processing", "Reduction"),
-                ("gravity_viewer", "2D/3D & Satellite"),
-                ("gravity_reports", "Reports"),
+                ("gravity_oasis", "Oasis Mapping"),
             ],
             "geodetic": [
                 ("geodetic_data", "DC File Examiner"),
@@ -1317,17 +1312,10 @@ class MainWindow(QMainWindow):
 
             if context.startswith("gravity"):
                 dashboard = self._open_gravity_dashboard()
-                tabs = getattr(dashboard, "tabs", None) if dashboard is not None else None
-                if tabs is not None:
-                    index_map = {
-                        "gravity_data": getattr(dashboard, "TAB_OBSERVATIONS", getattr(dashboard, "TAB_OVERVIEW", 0)),
-                        "gravity_qc": getattr(dashboard, "TAB_QC", 2),
-                        "gravity_processing": getattr(dashboard, "TAB_PROCESSING", 3),
-                        "gravity_viewer": getattr(dashboard, "TAB_SPATIAL", getattr(dashboard, "TAB_MAP", 4)),
-                        "gravity_reports": getattr(dashboard, "TAB_REPORTS", getattr(dashboard, "TAB_QC", 2)),
-                    }
-                    if context in index_map:
-                        tabs.setCurrentIndex(index_map[context])
+                if dashboard is not None and context == "gravity_oasis":
+                    tabs = getattr(dashboard, "tabs", None)
+                    if tabs is not None:
+                        tabs.setCurrentIndex(getattr(dashboard, "TAB_MAP", 1))
                 return
 
             if context.startswith("vibroseis"):
@@ -1601,7 +1589,7 @@ class MainWindow(QMainWindow):
             "sercel_log_open", "sita_open",
             "visualization_open",
             "magnetic_open", "magnetic_open_rover", "magnetic_open_base", "magnetic_open_boundary",
-            "gravity_open", "gravity_open_observations", "gravity_open_base",
+            "gravity_open", "gravity_open_observations", "gravity_open_base", "gravity_oasis",
             "electrical_open", "electrical_open_data", "electrical_prosys",
             "geodetic_open", "geodetic_examiner",
             "segd_scanner_open", "segd_scanner_folder", "receiver_open", "receiver_limits",
@@ -1685,9 +1673,9 @@ class MainWindow(QMainWindow):
         if action_id.startswith("gravity_"):
             dashboard = self._gravity_dashboard
             if dashboard is None:
-                return False
+                return action_id in {"gravity_open", "gravity_open_observations", "gravity_open_base", "gravity_oasis"}
             resolver = getattr(dashboard, "can_execute", None)
-            return bool(resolver(action_id)) if callable(resolver) else getattr(dashboard, "observations", None) is not None
+            return bool(resolver(action_id)) if callable(resolver) else True
 
         if action_id.startswith("electrical_"):
             dashboard = self._electrical_dashboard
@@ -2140,12 +2128,14 @@ class MainWindow(QMainWindow):
             self._apply_to_magnetic("generate_report", "xlsx")
         elif action_id == "gravity_open":
             self._open_gravity_dashboard()
+        elif action_id == "gravity_oasis":
+            self._open_gravity_dashboard()
         elif action_id == "gravity_open_observations":
             self._apply_to_gravity("open_observations")
         elif action_id == "gravity_open_base":
             self._apply_to_gravity("open_base")
         elif action_id == "gravity_view_2d":
-            self._apply_to_gravity("show_native_view", "2d")
+            self._apply_to_gravity("show_map")
         elif action_id == "gravity_view_3d":
             self._apply_to_gravity("show_native_view", "3d")
         elif action_id == "gravity_satellite":
@@ -3233,31 +3223,32 @@ class MainWindow(QMainWindow):
         dashboard = self._gravity_dashboard
         if dashboard is None:
             task_id = "gravity:workspace"
-            self.begin_busy_task(task_id, "Opening Gravity QC", "Initializing gravity readers, QC, reductions and visualization tools")
+            self.begin_busy_task(task_id, "Opening Oasis Gravity", "Initializing gravity mapping, gridding and profile workspace")
             try:
                 from core.data_access.db_engine import DatabaseEngine
                 from core.infrastructure.job_manager import JobManager
                 from modules.gravity.gravity_controller import GravityQcController
                 from modules.gravity.ui.gravity_dashboard import GravityDashboard
 
-                self.update_busy_task(task_id, 40, "Creating Gravity QC controller")
+                self.update_busy_task(task_id, 40, "Creating Gravity workspace controller")
                 controller = GravityQcController(
                     self.container.resolve(DatabaseEngine),
                     self.container.resolve(JobManager),
                     self,
                 )
-                self.update_busy_task(task_id, 70, "Building Gravity QC workspace")
+                self.update_busy_task(task_id, 70, "Building Oasis Gravity workspace")
                 dashboard = GravityDashboard(controller, self)
                 dashboard.destroyed.connect(self._clear_gravity_dashboard_reference)
+                dashboard.activity_started_cancellable.connect(lambda title, message, cancel: self.begin_busy_task("gravity:dashboard", title, message, cancel_callback=cancel))
                 dashboard.activity_started.connect(lambda title, message: self.begin_busy_task("gravity:dashboard", title, message))
                 dashboard.activity_progress.connect(lambda value, message: self.update_busy_task("gravity:dashboard", value, message))
                 dashboard.activity_finished.connect(lambda: (self.end_busy_task("gravity:dashboard"), self._update_ribbon()))
                 dashboard.state_changed.connect(self._update_ribbon)
                 dashboard.destroyed.connect(lambda *_: self.end_busy_task("gravity:dashboard"))
                 self._gravity_dashboard = dashboard
-                self.update_busy_task(task_id, 100, "Gravity QC workspace is ready")
+                self.update_busy_task(task_id, 100, "Oasis Gravity workspace is ready")
             except Exception as exc:
-                QMessageBox.critical(self, "Gravity QC", f"Unable to open the Gravity QC module:\n{exc}")
+                QMessageBox.critical(self, "Oasis Gravity", f"Unable to open the Oasis Gravity module:\n{exc}")
                 return None
             finally:
                 self.end_busy_task(task_id)
@@ -3265,8 +3256,8 @@ class MainWindow(QMainWindow):
         if index < 0:
             index = self._add_document_tab(
                 dashboard,
-                "Gravity QC",
-                icon=get_icon("view-statistics", size=15),
+                "Oasis Gravity",
+                icon=get_icon("map", size=15),
                 closable=True,
             )
         self.tab_widget.setCurrentIndex(index)
@@ -3286,12 +3277,12 @@ class MainWindow(QMainWindow):
             return
         method = getattr(dashboard, method_name, None)
         if method is None:
-            QMessageBox.warning(self, "Gravity QC", f"The Gravity QC module does not support: {method_name}")
+            QMessageBox.warning(self, "Oasis Gravity", f"The Oasis Gravity module does not support: {method_name}")
             return
         try:
             method(*args)
         except Exception as exc:
-            QMessageBox.critical(self, "Gravity QC Error", str(exc))
+            QMessageBox.critical(self, "Oasis Gravity Error", str(exc))
         finally:
             self._update_ribbon()
 

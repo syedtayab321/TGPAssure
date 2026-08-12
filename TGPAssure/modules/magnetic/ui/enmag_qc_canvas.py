@@ -146,7 +146,8 @@ class EnMagPreviewCanvas(QWidget):
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self.setMouseTracking(True)
-        self.setMinimumSize(540, 320)
+        self.setCursor(Qt.CursorShape.OpenHandCursor)
+        self.setMinimumSize(500, 300)
         self._data: EnMagQcData | None = None
         self._grid_result: GridResult | None = None
         self._grid_image: QImage | None = None
@@ -165,6 +166,8 @@ class EnMagPreviewCanvas(QWidget):
         self._hover_values: np.ndarray | None = None
         self._hover_circular = False
         self._transformer = None
+        self._point_source_cache_key = None
+        self._last_cursor_hover: QPointF | None = None
 
     def set_data(self, data: EnMagQcData | None) -> None:
         self._data = data
@@ -174,6 +177,7 @@ class EnMagPreviewCanvas(QWidget):
         self._visible_mask = None
         self._coordinate_index = None
         self._transformer = None
+        self._point_source_cache_key = None
         if data is not None:
             self.fit_to_data()
             self._prepare_transformer()
@@ -320,6 +324,13 @@ class EnMagPreviewCanvas(QWidget):
         painter.restore()
 
     def _draw_points(self, painter: QPainter) -> None:
+        """Draw visible samples as stable EnMag-style point markers.
+
+        The reference screen shows raw fixes over the raster as clear yellow dots
+        with a dark outline.  These markers are generated in screen space with a
+        constant pixel radius, so they stay visible during zoom/pan instead of
+        becoming single-pixel hairlines.
+        """
         if self._data is None:
             return
         mask = self._visible_mask
@@ -328,18 +339,50 @@ class EnMagPreviewCanvas(QWidget):
         indices = np.flatnonzero(mask)
         if indices.size == 0:
             return
-        # Drawing every point remains practical at the target 25k-50k scale;
-        # cap only pathological displays while preserving the actual survey shape.
-        step = max(1, int(math.ceil(indices.size / 80_000)))
-        indices = indices[::step]
+
+        rect = self._plot_rect()
+        width = max(1, int(rect.width()))
+        height = max(1, int(rect.height()))
         sx, sy = self.world_to_screen(self._data.x[indices], self._data.y[indices])
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-        painter.setPen(QPen(QColor(30, 48, 58, 210), 0.55))
-        painter.setBrush(QColor(244, 204, 64, 230))
-        radius = 2.0 if self._mode.lower() != "points" else 2.8
-        for px, py in zip(sx, sy):
-            painter.drawEllipse(QPointF(float(px), float(py)), radius, radius)
-        painter.setBrush(Qt.BrushStyle.NoBrush)
+        px = np.rint(sx - rect.left()).astype(np.int64)
+        py = np.rint(sy - rect.top()).astype(np.int64)
+        inside = (px >= 0) & (px < width) & (py >= 0) & (py < height)
+        if not np.any(inside):
+            return
+        px = px[inside]
+        py = py[inside]
+
+        rgba = np.zeros((height, width, 4), dtype=np.uint8)
+        # Fixed screen-pixel radii.  Points mode is intentionally slightly
+        # larger; grid mode matches the reference overlay without hiding cells.
+        outer_r = 3 if self._mode.lower() == "points" else 2
+        inner_r = 2 if self._mode.lower() == "points" else 1
+
+        def stamp_disk(radius: int, color: tuple[int, int, int, int]) -> None:
+            for oy in range(-radius, radius + 1):
+                for ox in range(-radius, radius + 1):
+                    if ox * ox + oy * oy > radius * radius:
+                        continue
+                    xx = px + ox
+                    yy = py + oy
+                    valid = (xx >= 0) & (xx < width) & (yy >= 0) & (yy < height)
+                    if not np.any(valid):
+                        continue
+                    xvv = xx[valid]
+                    yvv = yy[valid]
+                    rgba[yvv, xvv, 0] = color[0]
+                    rgba[yvv, xvv, 1] = color[1]
+                    rgba[yvv, xvv, 2] = color[2]
+                    rgba[yvv, xvv, 3] = color[3]
+
+        # Outer dark halo then yellow fill.  The halo keeps points readable over
+        # blue/green/red raster cells and the yellow fill matches EnMag preview.
+        stamp_disk(outer_r, (28, 39, 49, 230))
+        stamp_disk(inner_r, (244, 214, 72, 246))
+
+        rgba = np.ascontiguousarray(rgba)
+        image = QImage(rgba.data, width, height, width * 4, QImage.Format.Format_RGBA8888).copy()
+        painter.drawImage(rect, image)
 
     def paintEvent(self, _event) -> None:
         painter = QPainter(self)
@@ -370,8 +413,9 @@ class EnMagPreviewCanvas(QWidget):
             dx = event.position().x() - self._drag_origin.x()
             dy = event.position().y() - self._drag_origin.y()
             xmin, xmax, ymin, ymax = self._drag_view
-            wx_per_px = (xmax - xmin) / max(self.width(), 1)
-            wy_per_px = (ymax - ymin) / max(self.height(), 1)
+            rect = self._plot_rect()
+            wx_per_px = (xmax - xmin) / max(rect.width(), 1.0)
+            wy_per_px = (ymax - ymin) / max(rect.height(), 1.0)
             self._view_bounds = (xmin - dx * wx_per_px, xmax - dx * wx_per_px, ymin + dy * wy_per_px, ymax + dy * wy_per_px)
             self.update()
             event.accept()
@@ -475,14 +519,14 @@ class EnMagCanvasContainer(QWidget):
         self.zoom_out = QPushButton("−", self)
         for button in (self.zoom_in, self.zoom_out):
             button.setObjectName("enmagZoomButton")
-            button.setFixedSize(32, 32)
+            button.setFixedSize(28, 28)
             button.raise_()
         self.zoom_in.clicked.connect(lambda: self.canvas.zoom_by(1.25))
         self.zoom_out.clicked.connect(lambda: self.canvas.zoom_by(1.0 / 1.25))
 
     def resizeEvent(self, event) -> None:
         self.canvas.setGeometry(self.rect())
-        self.zoom_in.move(16, 18)
-        self.zoom_out.move(16, 55)
+        self.zoom_in.move(14, 16)
+        self.zoom_out.move(14, 48)
         self.zoom_in.raise_(); self.zoom_out.raise_()
         super().resizeEvent(event)

@@ -46,9 +46,9 @@ QWidget#smtDashboard {
 }
 QWidget#smtDashboard QLabel { background:transparent; color:#142536; }
 QFrame#classicWindow {
-    background:#F5F8FA;
-    border:1px solid #B4C3CD;
-    border-radius:7px;
+    background:qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 #F7FBFD, stop:1 #EAF2F7);
+    border:1px solid #AFC3D1;
+    border-radius:8px;
 }
 QFrame#classicTitleBar {
     min-height:30px;
@@ -65,20 +65,21 @@ QLabel#classicTitle {
     font-weight:900;
 }
 QFrame#launcherPanel {
-    background:#E7EEF3;
-    border:1px solid #BCD0DB;
-    border-radius:6px;
+    background:qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 #F1F7FA, stop:1 #DFEAF1);
+    border:1px solid #B6CBD8;
+    border-radius:7px;
 }
 QPushButton#launcherButton {
-    min-height:44px;
-    max-height:46px;
-    padding:3px 8px;
-    border:1px solid #B4C5CF;
-    border-radius:5px;
-    background:qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 #FFFFFF, stop:1 #E1EBF1);
+    min-height:46px;
+    max-height:48px;
+    padding:4px 9px;
+    border:1px solid #AABECB;
+    border-left:5px solid #1687A7;
+    border-radius:6px;
+    background:qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 #FFFFFF, stop:1 #E0ECF3);
     color:#172A39;
     font-size:8pt;
-    font-weight:750;
+    font-weight:800;
     text-align:left;
 }
 QPushButton#launcherButton:hover { background:#E7F7FC; border-color:#5CA8C4; }
@@ -98,9 +99,9 @@ QPushButton#exitButton {
 }
 QPushButton#exitButton:hover { background:#F8DDDD; border-color:#B56A6A; }
 QFrame#displayPanel {
-    background:#FFFFFF;
+    background:qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 #FFFFFF, stop:1 #F4F8FB);
     border:1px solid #BCD0DB;
-    border-radius:6px;
+    border-radius:7px;
 }
 QLabel#projectName {
     min-height:30px;
@@ -396,7 +397,9 @@ class SmtDashboard(QWidget):
         return self.database
 
     def new_select_project(self) -> None:
-        dialog = ProjectSelectionDialog(self)
+        directory = self.database.path.parent if self.database is not None else None
+        current = self.database.path if self.database is not None else None
+        dialog = ProjectSelectionDialog(self, directory=directory, current_path=current)
         if dialog.exec() != ProjectSelectionDialog.DialogCode.Accepted or dialog.selected_path is None:
             return
         self._open_database(dialog.selected_path)

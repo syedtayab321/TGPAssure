@@ -3,7 +3,7 @@ from __future__ import annotations
 import csv
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
 import numpy as np
 
@@ -16,19 +16,29 @@ _ALIASES: dict[str, tuple[str, ...]] = {
     "date": ("date", "reading_date"),
     "station_id": ("station", "station_id", "stationno", "station_no", "point", "point_id", "id"),
     "line_id": ("line", "line_id", "lineno", "line_no", "profile", "profile_id"),
-    "latitude": ("latitude", "lat", "y_lat"),
-    "longitude": ("longitude", "lon", "long", "lng", "x_lon"),
-    "x": ("x", "easting", "east", "utm_e", "x_coord"),
-    "y": ("y", "northing", "north", "utm_n", "y_coord"),
-    "elevation": ("elevation_m", "elevation", "elev", "height", "rl", "z", "altitude"),
-    RAW_GRAVITY: ("observed_gravity_mgal", "gravity", "observed_gravity", "gobs", "raw_gravity", "reading", "gravity_mgal"),
+    "latitude": ("latitude", "lat", "y_lat", "lat_deg", "latitude_deg"),
+    "longitude": ("longitude", "lon", "long", "lng", "x_lon", "long_deg", "longitude_deg"),
+    "x": ("x", "easting", "east", "utm_e", "x_coord", "xcoordinate", "x_coordinate", "east_m"),
+    "y": ("y", "northing", "north", "utm_n", "y_coord", "ycoordinate", "y_coordinate", "north_m"),
+    "elevation": ("elevation_m", "elevation", "elev", "height", "rl", "z", "altitude", "elev_m", "height_m"),
+    RAW_GRAVITY: (
+        "observed_gravity_mgal", "gravity", "observed_gravity", "gobs", "raw_gravity", "reading",
+        "gravity_mgal", "g_mgal", "obs_gravity", "absolute_gravity", "meter_reading", "mgal",
+    ),
     TIDE_CORRECTION: ("tide_correction_mgal", "tide", "tidal", "earth_tide", "tide_corr"),
     TERRAIN_CORRECTION: ("terrain_correction_mgal", "terrain", "terrain_corr", "tc"),
 }
 
 
 def _clean(name: Any) -> str:
-    return str(name or "").strip().lower().replace(" ", "_").replace("-", "_").replace("/", "_")
+    text = str(name or "").strip().lower()
+    for token in ("\ufeff", "(", ")", "[", "]", "{", "}", "."):
+        text = text.replace(token, "")
+    for token in (" ", "-", "/", "\\", ":"):
+        text = text.replace(token, "_")
+    while "__" in text:
+        text = text.replace("__", "_")
+    return text.strip("_")
 
 
 def _first(mapping: dict[str, str], canonical: str) -> str | None:
@@ -138,9 +148,11 @@ class GravityReader:
         if not gravity_col:
             raise ValueError("Gravity input requires an observed/raw gravity column (for example gravity, gobs, observed_gravity_mgal)")
         if role == GravityDataRole.OBSERVATIONS and not columns.get("elevation"):
-            raise ValueError("Gravity observations require elevation/height values")
-        if role == GravityDataRole.OBSERVATIONS and not columns.get("latitude") and not columns.get("x"):
-            raise ValueError("Gravity observations require geographic or projected coordinates")
+            # Allow imported databases without elevation to open for inspection/map display.
+            # Reduction/QC stages will flag the missing elevation instead of leaving the UI stuck at loading.
+            columns["elevation"] = None
+        if role == GravityDataRole.OBSERVATIONS and not ((columns.get("latitude") and columns.get("longitude")) or (columns.get("x") and columns.get("y"))):
+            raise ValueError("Gravity observations require coordinate pairs: latitude/longitude or x/y/easting/northing")
 
         n = len(rows)
         timestamps = np.empty(n, dtype="datetime64[ms]")
@@ -158,13 +170,17 @@ class GravityReader:
         date_col = columns.get("date")
         for i, row in enumerate(rows):
             timestamps[i] = _timestamp(row.get(time_col) if time_col else None, row.get(date_col) if date_col else None, i)
-            station[i] = str(row.get(columns.get("station_id"), "") or f"S{i + 1}").strip()
-            line[i] = str(row.get(columns.get("line_id"), "") or "").strip()
+            station_col = columns.get("station_id")
+            line_col = columns.get("line_id")
+            station_value = row.get(station_col, "") if station_col else ""
+            line_value = row.get(line_col, "") if line_col else ""
+            station[i] = str(station_value or f"S{i + 1}").strip() or f"S{i + 1}"
+            line[i] = str(line_value or "").strip()
             latitude[i] = _float(row.get(columns.get("latitude"))) if columns.get("latitude") else np.nan
             longitude[i] = _float(row.get(columns.get("longitude"))) if columns.get("longitude") else np.nan
             x[i] = _float(row.get(columns.get("x"))) if columns.get("x") else np.nan
             y[i] = _float(row.get(columns.get("y"))) if columns.get("y") else np.nan
-            elevation[i] = _float(row.get(columns.get("elevation"))) if columns.get("elevation") else 0.0
+            elevation[i] = _float(row.get(columns.get("elevation"))) if columns.get("elevation") else np.nan
             raw[i] = _float(row.get(gravity_col))
             if columns.get(TIDE_CORRECTION):
                 tide[i] = _float(row.get(columns[TIDE_CORRECTION]))
@@ -194,7 +210,11 @@ class GravityReader:
             station_id=station,
             line_id=line,
             is_base=np.full(n, role == GravityDataRole.BASE, dtype=bool),
-            metadata={"column_mapping": {k: v for k, v in columns.items() if v}, "imported_at": datetime.now(timezone.utc).isoformat()},
+            metadata={
+                "column_mapping": {k: v for k, v in columns.items() if v},
+                "imported_at": datetime.now(timezone.utc).isoformat(),
+                "missing_elevation": not bool(columns.get("elevation")),
+            },
             crs=inferred_crs,
         )
 
@@ -221,32 +241,56 @@ class GravityReader:
                     break
             workbook.close()
             return rows
-        sample = path.read_text(encoding="utf-8-sig", errors="replace")[:8192]
+        text = path.read_text(encoding="utf-8-sig", errors="replace")
+        sample = text[:16384]
+        lines = [line.strip() for line in text.splitlines() if line.strip() and not line.lstrip().startswith(("#", "//"))]
+        if not lines:
+            return []
         try:
             dialect = csv.Sniffer().sniff(sample, delimiters=",;\t|")
+            delimiter = dialect.delimiter
         except csv.Error:
-            dialect = csv.excel
-            dialect.delimiter = "," if "," in sample else "\t" if "\t" in sample else None
-        if getattr(dialect, "delimiter", None) is None:
-            lines = [line.strip() for line in sample.splitlines() if line.strip()]
-            if not lines:
-                return []
-            headers = lines[0].split()
-            rows = []
-            all_lines = path.read_text(encoding="utf-8-sig", errors="replace").splitlines()[1:]
-            for line in all_lines:
+            delimiter = self._guess_delimiter(lines[:20])
+        if delimiter is None:
+            headers = self._split_whitespace_header(lines[0])
+            rows: list[dict[str, Any]] = []
+            for line in lines[1:]:
                 values = line.split()
-                if values:
-                    rows.append(dict(zip(headers, values)))
+                if not values:
+                    continue
+                row = {headers[i]: values[i] if i < len(values) else "" for i in range(len(headers))}
+                if any(value not in (None, "") for value in row.values()):
+                    rows.append(row)
                 if limit and len(rows) >= limit:
                     break
             return rows
         with path.open("r", newline="", encoding="utf-8-sig", errors="replace") as stream:
-            reader = csv.DictReader(stream, dialect=dialect)
+            reader = csv.DictReader((line for line in stream if line.strip() and not line.lstrip().startswith(("#", "//"))), delimiter=delimiter)
             rows = []
             for row in reader:
-                if row and any(value not in (None, "") for value in row.values()):
-                    rows.append(dict(row))
+                clean_row = {str(key or "").strip(): value for key, value in dict(row).items() if key is not None}
+                if clean_row and any(value not in (None, "") for value in clean_row.values()):
+                    rows.append(clean_row)
                 if limit and len(rows) >= limit:
                     break
             return rows
+
+    @staticmethod
+    def _guess_delimiter(lines: list[str]) -> str | None:
+        scores = []
+        for delimiter in (",", ";", "\t", "|"):
+            counts = [len(line.split(delimiter)) for line in lines if delimiter in line]
+            if counts:
+                scores.append((max(counts), -abs(max(counts) - min(counts)), delimiter))
+        if scores:
+            best = max(scores)
+            if best[0] > 1:
+                return best[2]
+        return None
+
+    @staticmethod
+    def _split_whitespace_header(line: str) -> list[str]:
+        headers = [value.strip() for value in line.split() if value.strip()]
+        if not headers:
+            return ["col_1"]
+        return headers

@@ -24,73 +24,69 @@ from modules.electrical.ui.prosys_qc_panel import ProsysQcPanel
 
 _QSS = """
 QWidget#electricalDashboard {
-    background: #F4F6F8;
-    color: #1B2733;
-    font-size: 8.5pt;
+    background:#F3F6FA;
+    color:#17212B;
+    font-family:"Segoe UI", Arial, sans-serif;
+    font-size:8pt;
 }
-
 QFrame#prosysToolbar {
-    background: #FFFFFF;
-    border: 0;
-    border-bottom: 1px solid #DDE3E9;
+    background:#FFFFFF;
+    border:1px solid #D5DCE5;
+    border-radius:8px;
 }
-
 QLabel#prosysToolbarTitle {
-    color: #1B2733;
-    font-size: 9.5pt;
-    font-weight: 700;
+    color:#143A5A;
+    font-size:10pt;
+    font-weight:800;
 }
-
 QLabel#prosysToolbarStatus {
-    color: #64707B;
-    font-size: 8pt;
-    font-weight: 500;
+    color:#53616F;
+    font-size:8pt;
+    font-weight:600;
+    padding:3px 8px;
+    background:#F3F8FD;
+    border:1px solid #D5E4F2;
+    border-radius:5px;
 }
-
 QFrame#prosysToolbarDivider {
-    background: #E3E8EC;
-    max-width: 1px;
-    min-width: 1px;
+    background:#DDE6EF;
+    max-width:1px;
+    min-width:1px;
 }
-
 QPushButton#prosysToolButton {
-    background: #FFFFFF;
-    color: #2B3846;
-    border: 1px solid #CBD3DA;
-    border-radius: 4px;
-    padding: 5px 12px;
-    font-weight: 600;
-    font-size: 8.5pt;
+    background:#FFFFFF;
+    color:#2B3846;
+    border:1px solid #C7D1DD;
+    border-radius:6px;
+    padding:4px 10px;
+    font-weight:700;
+    font-size:8pt;
+    min-height:24px;
 }
 QPushButton#prosysToolButton:hover {
-    background: #F0F3F6;
-    border-color: #AEB8C0;
+    background:#F0F6FC;
+    border-color:#8DB4DC;
 }
-QPushButton#prosysToolButton:pressed {
-    background: #E4E9ED;
+QPushButton#prosysToolButton[role="open"] {
+    background:#FFF2D7;
+    color:#744C00;
+    border-color:#D6AA46;
 }
-
 QPushButton#prosysToolButton[role="process"] {
-    background: #1B6FA8;
-    color: #FFFFFF;
-    border-color: #175E8F;
+    background:#1F78B4;
+    color:#FFFFFF;
+    border-color:#175E8F;
 }
 QPushButton#prosysToolButton[role="process"]:hover {
-    background: #1F7FC0;
+    background:#2288CC;
 }
-QPushButton#prosysToolButton[role="process"]:pressed {
-    background: #175E8F;
-}
-
 QPushButton#prosysToolButton[role="export"] {
-    background: #FFFFFF;
-    color: #1B6FA8;
-    border-color: #A9C7DC;
-}
-QPushButton#prosysToolButton[role="export"]:hover {
-    background: #EAF3FA;
+    background:#F0E8FF;
+    color:#4D278A;
+    border-color:#B59BE3;
 }
 """
+
 
 
 class ElectricalDashboard(QWidget):
@@ -125,13 +121,13 @@ class ElectricalDashboard(QWidget):
     # ------------------------------------------------------------------
     def _build_ui(self) -> None:
         root = QVBoxLayout(self)
-        root.setContentsMargins(0, 0, 0, 0)
-        root.setSpacing(0)
+        root.setContentsMargins(8, 8, 8, 8)
+        root.setSpacing(8)
 
         root.addWidget(self._build_toolbar())
 
         body = QVBoxLayout()
-        body.setContentsMargins(8, 8, 8, 8)
+        body.setContentsMargins(0, 0, 0, 0)
         body.setSpacing(6)
         self.prosys_panel = ProsysQcPanel(self, self)
         body.addWidget(self.prosys_panel, 1)
@@ -144,10 +140,10 @@ class ElectricalDashboard(QWidget):
         bar = QFrame()
         bar.setObjectName("prosysToolbar")
         layout = QHBoxLayout(bar)
-        layout.setContentsMargins(12, 8, 12, 8)
+        layout.setContentsMargins(12, 9, 12, 9)
         layout.setSpacing(10)
 
-        title = QLabel("Prosys II Electrical / IP")
+        title = QLabel("Electrical / IP Processing — Prosys II")
         title.setObjectName("prosysToolbarTitle")
         layout.addWidget(title)
 
@@ -163,6 +159,7 @@ class ElectricalDashboard(QWidget):
 
         open_btn = QPushButton("Open Data")
         open_btn.setObjectName("prosysToolButton")
+        open_btn.setProperty("role", "open")
         open_btn.setCursor(Qt.PointingHandCursor)
         open_btn.clicked.connect(self.open_data)
         layout.addWidget(open_btn)

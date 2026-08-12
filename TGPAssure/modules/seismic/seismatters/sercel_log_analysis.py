@@ -505,25 +505,25 @@ class SercelLogAnalysisWidget(QWidget):
     def _apply_style(self) -> None:
         self.setStyleSheet(
             """
-            QWidget { font-size: 8px; }
-            QTabWidget::pane { border: 1px solid #A8B0B8; background: #F8FAFC; }
-            QTabBar::tab { font-size: 8px; padding: 4px 8px; min-width: 78px; background: #E8EEF5; border: 1px solid #BAC7D3; border-bottom: none; }
-            QTabBar::tab:selected { background: #FFFFFF; color: #0F766E; font-weight: 700; }
-            QPushButton { font-size: 8px; padding: 3px 8px; min-height: 20px; border-radius: 4px; color: white; font-weight: 700; }
-            QPushButton[kind="primary"] { background: #2563EB; }
-            QPushButton[kind="info"] { background: #0891B2; }
-            QPushButton[kind="success"] { background: #16A34A; }
-            QPushButton[kind="warning"] { background: #D97706; }
-            QPushButton[kind="purple"] { background: #7C3AED; }
+            QWidget { font-size: 8px; background:#EEF4F8; color:#152637; }
+            QTabWidget::pane { border: 1px solid #9FB4C5; background: #F8FAFC; border-radius:6px; }
+            QTabBar::tab { font-size: 8px; padding: 5px 10px; min-width: 82px; background: #E3ECF3; border: 1px solid #B5C6D4; border-bottom: none; border-top-left-radius:5px; border-top-right-radius:5px; font-weight:700; }
+            QTabBar::tab:selected { background: #FFFFFF; color: #075985; font-weight: 900; border-top:3px solid #0891B2; }
+            QPushButton { font-size: 8px; padding: 4px 10px; min-height: 23px; border-radius: 5px; color: white; font-weight: 800; border:1px solid rgba(0,0,0,45); }
+            QPushButton[kind="primary"] { background: qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 #3B82F6, stop:1 #1D4ED8); }
+            QPushButton[kind="info"] { background: qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 #22A7C7, stop:1 #087B96); }
+            QPushButton[kind="success"] { background: qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 #2FBA68, stop:1 #15803D); }
+            QPushButton[kind="warning"] { background: qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 #F59E0B, stop:1 #B45309); }
+            QPushButton[kind="purple"] { background: qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 #8B5CF6, stop:1 #6D28D9); }
             QLabel { font-size: 8px; }
-            QLabel#pathLabel { padding: 3px 6px; background: #FFFFFF; color: #334155; border: 1px solid #CBD5E1; }
-            QGroupBox { font-size: 8px; font-weight: 700; margin-top: 8px; border: 1px solid #CBD5E1; border-radius: 5px; background: #FFFFFF; }
-            QGroupBox::title { subcontrol-origin: margin; left: 7px; padding: 0 3px; color: #0F766E; }
-            QLineEdit, QPlainTextEdit, QTableWidget, QListWidget { font-size: 8px; background: #FFFFFF; selection-background-color: #0EA5E9; }
-            QHeaderView::section { font-size: 8px; padding: 3px 4px; background: #E2E8F0; color: #0F172A; font-weight: 700; }
-            QFrame#miniStatus { border: 1px solid #CBD5E1; border-radius: 6px; background: #FFFFFF; }
-            QLabel#miniTitle { color: #64748B; font-size: 7px; }
-            QLabel#miniValue { font-size: 14px; font-weight: 800; }
+            QLabel#pathLabel { padding: 4px 8px; background: #FFFFFF; color: #243647; border: 1px solid #B8CBD9; border-radius:5px; font-weight:700; }
+            QGroupBox { font-size: 8px; font-weight: 800; margin-top: 8px; border: 1px solid #C6D4DF; border-radius: 6px; background: #FFFFFF; }
+            QGroupBox::title { subcontrol-origin: margin; left: 8px; padding: 0 4px; color: #075985; }
+            QLineEdit, QPlainTextEdit, QTableWidget, QListWidget { font-size: 8px; background: #FFFFFF; selection-background-color: #BAE6FD; selection-color:#0F172A; border:1px solid #C9D6E0; border-radius:4px; }
+            QHeaderView::section { font-size: 8px; padding: 4px 5px; background: #E2EAF2; color: #0F172A; font-weight: 800; border:0; border-right:1px solid #CAD6E0; border-bottom:1px solid #CAD6E0; }
+            QFrame#miniStatus { border: 1px solid #C5D4E0; border-left:5px solid #0EA5E9; border-radius: 7px; background: #FFFFFF; }
+            QLabel#miniTitle { color: #64748B; font-size: 7px; font-weight:750; }
+            QLabel#miniValue { font-size: 15px; font-weight: 900; }
             """
         )
 

@@ -67,7 +67,7 @@ class HomePage(QWidget):
             ("Vibroseis", "Sweep design, VAPS/H26 field QC, pilot correlation, ground-force and productivity.", "vibroseis", "media-playback-start", "#B26A21"),
             ("2D / 3D Seismic", "Sections, volume/slice views, geometry map, picking and interpretation support.", "visualization", "applications-graphics", "#0F7A72"),
             ("Magnetic QC", "Diurnal/base workflows, line QC, leveling, gridding, maps and profiles.", "magnetic", "office-chart-line", "#5E4D91"),
-            ("Gravity QC", "Standard gravity reduction, drift/tide corrections, anomaly QC and mapping.", "gravity", "view-statistics", "#356859"),
+            ("Oasis Gravity", "Gravity database, reduction, gridding, map and profile interpretation workspace.", "gravity", "map", "#356859"),
             ("Electrical QC", "ERT/IP/VES QC, geometry, reciprocity, pseudosections and reporting.", "electrical", "network-wired", "#9B4D58"),
         ]
         for i, (name, desc, module, icon, color) in enumerate(cards):

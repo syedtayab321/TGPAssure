@@ -10,7 +10,7 @@ from typing import Any, Iterable
 
 import numpy as np
 import pyqtgraph as pg
-from PySide6.QtCore import QDate, Qt
+from PySide6.QtCore import QDate, Qt, QTimer
 from PySide6.QtGui import QColor, QFont, QPainter
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -37,6 +37,7 @@ from PySide6.QtWidgets import (
     QProgressBar,
     QPushButton,
     QRadioButton,
+    QScrollArea,
     QSpinBox,
     QStackedWidget,
     QStyle,
@@ -211,6 +212,72 @@ def _set_classic(widget: QWidget) -> None:
     widget.setStyleSheet(_CLASSIC_QSS)
 
 
+
+def _center_on_parent_or_screen(dialog: QDialog) -> None:
+    parent = dialog.parentWidget()
+    if parent is not None and parent.isVisible():
+        target = parent.frameGeometry().center()
+        available = parent.screen().availableGeometry() if parent.screen() else QApplication.primaryScreen().availableGeometry()
+    else:
+        screen = QApplication.primaryScreen()
+        available = screen.availableGeometry() if screen else dialog.frameGeometry()
+        target = available.center()
+    frame = dialog.frameGeometry()
+    frame.moveCenter(target)
+    if frame.left() < available.left():
+        frame.moveLeft(available.left() + 8)
+    if frame.top() < available.top():
+        frame.moveTop(available.top() + 8)
+    if frame.right() > available.right():
+        frame.moveRight(available.right() - 8)
+    if frame.bottom() > available.bottom():
+        frame.moveBottom(available.bottom() - 8)
+    dialog.move(frame.topLeft())
+
+
+def _fit_dialog_to_screen(dialog: QDialog, preferred_width: int, preferred_height: int, min_width: int = 760, min_height: int = 520) -> None:
+    screen = dialog.parentWidget().screen() if dialog.parentWidget() is not None and dialog.parentWidget().screen() else QApplication.primaryScreen()
+    available = screen.availableGeometry() if screen else dialog.frameGeometry()
+    width = max(min_width, min(preferred_width, available.width() - 56))
+    height = max(min_height, min(preferred_height, available.height() - 72))
+    dialog.resize(width, height)
+
+
+_RESULTS_QSS = _CLASSIC_QSS + """
+QDialog#smtResultsDialog {
+    background:#F2F5F8;
+    font-size:7pt;
+}
+QDialog#smtResultsDialog QWidget#classicPage {
+    background:#FFFFFF;
+    border:1px solid #D3DCE6;
+    border-radius:6px;
+}
+QDialog#smtResultsDialog QGroupBox {
+    background:#FFFFFF;
+    border:1px solid #CDD8E3;
+    border-radius:6px;
+    margin-top:8px;
+    padding-top:8px;
+}
+QDialog#smtResultsDialog QPushButton {
+    min-height:22px;
+    border-radius:5px;
+    font-weight:700;
+}
+QDialog#smtResultsDialog QPushButton#primaryClassic {
+    background:#DCECF7;
+    color:#123F68;
+    border-color:#6E9DBB;
+}
+QDialog#smtResultsDialog QTableWidget {
+    font-size:7pt;
+}
+QDialog#smtResultsDialog QPlainTextEdit {
+    font-size:7pt;
+}
+"""
+
 def _icon(widget: QWidget, pixmap: QStyle.StandardPixmap):
     return widget.style().standardIcon(pixmap)
 
@@ -334,13 +401,14 @@ def _statistics_text(database: SmtProjectDatabase, stats: dict[str, Any]) -> str
 class ProjectSelectionDialog(QDialog):
     """Classic SMTAN2 New/Select Project screen."""
 
-    def __init__(self, parent: QWidget | None = None, directory: str | Path | None = None) -> None:
+    def __init__(self, parent: QWidget | None = None, directory: str | Path | None = None, current_path: str | Path | None = None) -> None:
         super().__init__(parent)
         self.setWindowTitle("New Or Select Project")
         self.resize(560, 360)
         _set_classic(self)
         self.directory = Path(directory) if directory else default_project_directory()
         self.selected_path: Path | None = None
+        self.current_path = Path(current_path).resolve() if current_path else None
 
         root = QVBoxLayout(self)
         root.setContentsMargins(6, 6, 6, 6)
@@ -401,8 +469,12 @@ class ProjectSelectionDialog(QDialog):
         for path in SmtProjectDatabase.list_projects(self.directory):
             item = QListWidgetItem(path.stem)
             item.setData(Qt.ItemDataRole.UserRole, str(path))
+            if self.current_path is not None and path.resolve() == self.current_path:
+                item.setToolTip("Currently open project")
             self.list_widget.addItem(item)
-        self.status.setText(f"{self.list_widget.count()} SMT project database(s)")
+        self.list_widget.clearSelection()
+        self.list_widget.setCurrentRow(-1)
+        self.status.setText(f"{self.list_widget.count()} SMT project database(s). Select a project explicitly or type a new name.")
 
     def _ok(self) -> None:
         name = self.name_edit.text().strip()
@@ -977,16 +1049,19 @@ class ResultsDialog(QDialog):
         self.database = database
         self.config = database.load_configuration()
         self.rows: list[dict[str, Any]] = []
-        self.setWindowTitle("Results")
-        self.resize(1080, 650)
-        _set_classic(self)
+        self.setWindowTitle("SMT Results")
+        self.setObjectName("smtResultsDialog")
+        _fit_dialog_to_screen(self, 1180, 720)
+        self.setMinimumSize(760, 520)
+        self.setStyleSheet(_RESULTS_QSS)
 
         root = QVBoxLayout(self)
-        root.setContentsMargins(4, 4, 4, 4)
+        root.setContentsMargins(6, 6, 6, 6)
+        root.setSpacing(6)
         root.addWidget(_classic_title("Results"))
         body = QHBoxLayout()
         left = QVBoxLayout()
-        left.setSpacing(4)
+        left.setSpacing(5)
 
         top_buttons = QGridLayout()
         print_button = QPushButton("Print")
@@ -998,6 +1073,8 @@ class ResultsDialog(QDialog):
         close = QPushButton("Close")
         close.setIcon(_icon(self, QStyle.StandardPixmap.SP_DialogCancelButton))
         close.clicked.connect(self.accept)
+        print_button.setObjectName("primaryClassic")
+        png.setObjectName("primaryClassic")
         top_buttons.addWidget(print_button, 0, 0); top_buttons.addWidget(close, 0, 1); top_buttons.addWidget(png, 1, 0)
         left.addLayout(top_buttons)
 
@@ -1076,8 +1153,14 @@ class ResultsDialog(QDialog):
         selection.addWidget(self.measure_box)
         left.addLayout(selection)
         left.addStretch(1)
-        left_panel = QWidget(); left_panel.setObjectName("classicPage"); left_panel.setLayout(left); left_panel.setFixedWidth(270)
-        body.addWidget(left_panel)
+        left_panel = QWidget(); left_panel.setObjectName("classicPage"); left_panel.setLayout(left); left_panel.setFixedWidth(245)
+        left_scroll = QScrollArea()
+        left_scroll.setWidgetResizable(True)
+        left_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        left_scroll.setMinimumWidth(265)
+        left_scroll.setMaximumWidth(285)
+        left_scroll.setWidget(left_panel)
+        body.addWidget(left_scroll)
 
         self.output_stack = QStackedWidget()
         self.plot = pg.PlotWidget(background="w")
@@ -1093,13 +1176,37 @@ class ResultsDialog(QDialog):
         body.addWidget(self.output_stack, 1)
         root.addLayout(body, 1)
         self.plot_type_group.buttonToggled.connect(lambda *_: self._update_measure_controls())
+        self.period_group.buttonToggled.connect(lambda *_: self._update_date_controls())
+        self.show_group.buttonToggled.connect(lambda *_: self.refresh())
+        self.unique_only.toggled.connect(lambda *_: self.refresh())
+        self.all_serials.toggled.connect(lambda *_: self.refresh())
+        for check in self.measure_checks.values():
+            check.toggled.connect(lambda *_: self.refresh())
+        self.measure_group.buttonToggled.connect(lambda *_: self.refresh())
+        self.x_field.currentIndexChanged.connect(lambda *_: self.refresh())
+        self.y_field.currentIndexChanged.connect(lambda *_: self.refresh())
         self._update_measure_controls()
+        self._update_date_controls()
         self.refresh()
+        QTimer.singleShot(0, self._position_on_screen)
+
+    def _position_on_screen(self) -> None:
+        _fit_dialog_to_screen(self, 1180, 720)
+        _center_on_parent_or_screen(self)
+
+    def showEvent(self, event) -> None:  # noqa: N802
+        super().showEvent(event)
+        QTimer.singleShot(0, self._position_on_screen)
 
     @staticmethod
     def _checked_value(group: QButtonGroup, default: str) -> str:
         button = group.checkedButton()
         return str(button.property("value")) if button else default
+
+    def _update_date_controls(self) -> None:
+        key = self._checked_value(self.period_group, "all")
+        self.start.setEnabled(key in {"specific", "range"})
+        self.end.setEnabled(key == "range")
 
     def _date_range(self) -> tuple[date | None, date | None]:
         key = self._checked_value(self.period_group, "all")
@@ -1126,7 +1233,7 @@ class ResultsDialog(QDialog):
 
     def _selected_rows(self) -> list[dict[str, Any]]:
         start, end = self._date_range()
-        rows = self.database.query_records(start=start, end=end, result="All", limit=200000, ascending=True)
+        rows = self.database.query_records(start=start, end=end, result="All", limit=None, ascending=True)
         mode = self._checked_value(self.show_group, "all")
         if mode == "good":
             rows = [row for row in rows if row["status"] == "PASS"]
@@ -1180,23 +1287,29 @@ class ResultsDialog(QDialog):
     def _histogram(self) -> None:
         field_name = self._checked_value(self.measure_group, "resistance")
         values = np.asarray([float(row[field_name]) for row in self.rows if row[field_name] is not None], dtype=float)
-        self.plot.setBackground("#FFFF00")
+        self.plot.setBackground("#FFFFFF")
         self.plot.setTitle(MEASUREMENT_LABELS[field_name])
         self.plot.setLabel("left", "Count")
         self.plot.setLabel("bottom", MEASUREMENT_LABELS[field_name])
         if values.size:
             counts, edges = np.histogram(values, bins=self.config.histogram_bins)
-            self.plot.addItem(pg.BarGraphItem(x=(edges[:-1] + edges[1:]) / 2, height=counts, width=np.diff(edges) * 0.93, brush="#00F83A", pen="#008000"))
+            self.plot.addItem(pg.BarGraphItem(x=(edges[:-1] + edges[1:]) / 2, height=counts, width=np.diff(edges) * 0.93, brush="#4FA3E3", pen="#1F5D8A"))
         limit = self.config.limits[field_name]
         for value, label in ((limit.minimum, "Min"), (limit.nominal, "Nom"), (limit.maximum, "Max")):
             if value is not None:
-                line = pg.InfiniteLine(pos=float(value), angle=90, pen=pg.mkPen("#FF0000", width=2), label=f"{label} {value:g}")
+                line = pg.InfiniteLine(pos=float(value), angle=90, pen=pg.mkPen("#D33F49", width=2), label=f"{label} {value:g}")
                 self.plot.addItem(line)
         failures = sum(1 for row in self.rows if row["status"] == "FAIL")
         self.plot.setTitle(f"{MEASUREMENT_LABELS[field_name]}   Entries: {len(values):,}   Failures: {failures:,}")
 
     def _scatter(self) -> None:
         self.plot.setBackground("w")
+        try:
+            if getattr(self.plot.plotItem, "legend", None) is not None:
+                self.plot.plotItem.legend.scene().removeItem(self.plot.plotItem.legend)
+                self.plot.plotItem.legend = None
+        except Exception:
+            pass
         palette = [self.config.limits[field].color for field in MEASUREMENT_FIELDS]
         for idx, field_name in enumerate(MEASUREMENT_FIELDS):
             if not self.measure_checks[field_name].isChecked():
@@ -1254,6 +1367,7 @@ class ResultsDialog(QDialog):
             for col, value in enumerate(values):
                 self.numeric_table.setItem(row, col, QTableWidgetItem(_format_number(value)))
         self.numeric_table.setSortingEnabled(True)
+        self.numeric_table.verticalHeader().setDefaultSectionSize(20)
         self.numeric_table.resizeColumnsToContents()
 
 

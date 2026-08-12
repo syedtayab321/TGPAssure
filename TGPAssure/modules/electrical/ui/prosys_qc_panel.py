@@ -34,22 +34,27 @@ from modules.electrical.models import ElectricalDataset
 
 _PROSYS_QSS = """
 QWidget#prosysPanel {
-    background:#F4F6F8;
-    color:#1B2733;
-    font-size:8.1pt;
+    background:#F3F6FA;
+    color:#17212B;
+    font-family:"Segoe UI", Arial, sans-serif;
+    font-size:8pt;
 }
 QFrame#prosysToolbar {
     background:#FFFFFF;
-    border:1px solid #DDE3E9;
-    border-radius:5px;
+    border:1px solid #D5DCE5;
+    border-radius:8px;
 }
 QLabel#prosysStatus {
-    color:#5B6770;
-    font-size:7.9pt;
-    font-weight:500;
+    color:#445566;
+    font-size:8pt;
+    font-weight:600;
+    padding:3px 6px;
+    background:#F4F9FE;
+    border:1px solid #D5E4F2;
+    border-radius:5px;
 }
 QLabel#prosysSmall {
-    color:#5B6770;
+    color:#53616F;
     font-size:7.8pt;
 }
 QFrame#prosysDivider {
@@ -58,17 +63,21 @@ QFrame#prosysDivider {
     min-width:1px;
 }
 QTabWidget::pane {
-    border:1px solid #DDE3E9;
+    border:1px solid #D5DCE5;
     background:#FFFFFF;
+    border-radius:7px;
 }
 QTabBar::tab {
-    background:#EDF0F3;
-    color:#3A4750;
-    border:1px solid #DDE3E9;
-    padding:4px 10px;
+    background:#EEF3F8;
+    color:#344150;
+    border:1px solid #C7D1DD;
+    padding:5px 10px;
     min-height:18px;
     font-weight:700;
     font-size:8pt;
+    margin-right:2px;
+    border-top-left-radius:6px;
+    border-top-right-radius:6px;
 }
 QTabBar::tab:selected {
     background:#FFFFFF;
@@ -76,70 +85,74 @@ QTabBar::tab:selected {
     border-bottom-color:#FFFFFF;
 }
 QPushButton {
-    min-height:24px;
-    padding:3px 11px;
-    border-radius:4px;
-    border:1px solid #CBD3DA;
+    min-height:23px;
+    padding:3px 9px;
+    border-radius:6px;
+    border:1px solid #C7D1DD;
     background:#FFFFFF;
     color:#2B3846;
     font-size:8pt;
-    font-weight:600;
+    font-weight:700;
 }
-QPushButton:hover { background:#F0F3F6; border-color:#AEB8C0; }
-QPushButton:pressed { background:#E4E9ED; }
-
-/* Primary action: Run QC / process-type operations */
+QPushButton:hover { background:#F0F6FC; border-color:#8DB4DC; }
+QPushButton:pressed { background:#E2ECF7; }
 QPushButton#prosysProcess {
-    background:#1B6FA8;
+    background:#1F78B4;
     color:#FFFFFF;
     border-color:#175E8F;
 }
-QPushButton#prosysProcess:hover { background:#1F7FC0; }
-QPushButton#prosysProcess:pressed { background:#175E8F; }
-
-/* Secondary action: Open / neutral */
-QPushButton#prosysOpen { background:#FFFFFF; color:#2B3846; border-color:#CBD3DA; }
-
-/* Filter action: light accent outline */
-QPushButton#prosysFilter { background:#EAF3FA; color:#175E8F; border-color:#A9C7DC; }
-QPushButton#prosysFilter:hover { background:#DCEBF5; }
-
-/* Reject / destructive: muted, not alarming */
-QPushButton#prosysReject { background:#FFFFFF; color:#B4453D; border-color:#E0B8B4; }
-QPushButton#prosysReject:hover { background:#FBEDEC; }
-
-/* Export: outline accent, consistent with filter family */
-QPushButton#prosysExport { background:#FFFFFF; color:#1B6FA8; border-color:#A9C7DC; }
-QPushButton#prosysExport:hover { background:#EAF3FA; }
-
+QPushButton#prosysProcess:hover { background:#2288CC; }
+QPushButton#prosysOpen {
+    background:#FFF2D7;
+    color:#744C00;
+    border-color:#D6AA46;
+}
+QPushButton#prosysFilter {
+    background:#E7F5EF;
+    color:#0B6235;
+    border-color:#87C5A5;
+}
+QPushButton#prosysReject {
+    background:#FFF0F0;
+    color:#A22A2A;
+    border-color:#D19A9A;
+}
+QPushButton#prosysExport {
+    background:#F0E8FF;
+    color:#4D278A;
+    border-color:#B59BE3;
+}
 QPushButton#prosysNeutral { background:#FFFFFF; }
-
 QTableWidget {
     background:#FFFFFF;
-    alternate-background-color:#F7F9FA;
-    border:1px solid #DDE3E9;
-    gridline-color:#EAEEF1;
+    alternate-background-color:#F8FAFC;
+    border:1px solid #D5DCE5;
+    border-radius:6px;
+    gridline-color:#E5EAF0;
     font-size:7.9pt;
+    selection-background-color:#D8ECFF;
+    selection-color:#17212B;
 }
 QHeaderView::section {
-    background:#EDF0F3;
+    background:#E8EEF5;
     color:#2B3846;
     border:0;
-    border-right:1px solid #DDE3E9;
-    border-bottom:1px solid #DDE3E9;
-    padding:3px;
+    border-right:1px solid #D5DCE5;
+    border-bottom:1px solid #D5DCE5;
+    padding:4px;
     font-size:7.9pt;
-    font-weight:700;
+    font-weight:800;
 }
 QComboBox, QDoubleSpinBox {
     min-height:22px;
     background:#FFFFFF;
-    border:1px solid #CBD3DA;
-    border-radius:3px;
-    padding:1px 4px;
+    border:1px solid #C7D1DD;
+    border-radius:5px;
+    padding:1px 5px;
     font-size:8pt;
 }
 """
+
 
 
 class ProsysQcPanel(QWidget):
@@ -191,13 +204,13 @@ class ProsysQcPanel(QWidget):
     # ------------------------------------------------------------------
     def _build_ui(self) -> None:
         root = QVBoxLayout(self)
-        root.setContentsMargins(5, 5, 5, 5)
-        root.setSpacing(5)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(7)
 
         root.addWidget(self._build_toolbar())
 
         self.tabs = QTabWidget(self)
-        self.tabs.setDocumentMode(True)
+        self.tabs.setDocumentMode(False)
         self.tabs.setUsesScrollButtons(True)
         root.addWidget(self.tabs, 1)
 
@@ -232,7 +245,7 @@ class ProsysQcPanel(QWidget):
         bar = QFrame(self)
         bar.setObjectName("prosysToolbar")
         outer = QVBoxLayout(bar)
-        outer.setContentsMargins(10, 6, 10, 6)
+        outer.setContentsMargins(10, 8, 10, 8)
         outer.setSpacing(3)
 
         actions = QHBoxLayout()
@@ -306,7 +319,9 @@ class ProsysQcPanel(QWidget):
         controls.addStretch(1)
         layout.addLayout(controls)
         self.section_plot = pg.PlotWidget(background="#FFFFFF")
-        self.section_plot.showGrid(x=True, y=True, alpha=0.2)
+        self.section_plot.showGrid(x=True, y=True, alpha=0.25)
+        self.section_plot.setLabel("left", "Pseudo depth / value")
+        self.section_plot.setLabel("bottom", "Station / profile")
         layout.addWidget(self.section_plot, 1)
 
     def _build_decay_tab(self) -> None:
@@ -320,7 +335,9 @@ class ProsysQcPanel(QWidget):
         controls.addStretch(1)
         layout.addLayout(controls)
         self.decay_plot = pg.PlotWidget(background="#FFFFFF")
-        self.decay_plot.showGrid(x=True, y=True, alpha=0.2)
+        self.decay_plot.showGrid(x=True, y=True, alpha=0.25)
+        self.decay_plot.setLabel("left", "IP decay")
+        self.decay_plot.setLabel("bottom", "Window")
         layout.addWidget(self.decay_plot, 1)
 
     def _build_track_tab(self) -> None:
@@ -328,7 +345,9 @@ class ProsysQcPanel(QWidget):
         layout.setContentsMargins(5, 5, 5, 5)
         splitter = QHBoxLayout()
         self.track_plot = pg.PlotWidget(background="w")
-        self.track_plot.showGrid(x=True, y=True, alpha=0.2)
+        self.track_plot.showGrid(x=True, y=True, alpha=0.25)
+        self.track_plot.setLabel("left", "Northing / Latitude")
+        self.track_plot.setLabel("bottom", "Easting / Longitude")
         splitter.addWidget(self.track_plot, 2)
         self.track_table = self._table(["Metric", "Value"])
         splitter.addWidget(self.track_table, 1)
@@ -519,13 +538,13 @@ class ProsysQcPanel(QWidget):
         colors = self._value_colors(display_values)
         spots = []
         for px, py, color, raw in zip(x[valid], y[valid], colors, values[valid]):
-            spots.append({"pos": (float(px), float(py)), "brush": color, "pen": pg.mkPen("#34495E", width=0.2), "size": 8, "data": float(raw)})
+            spots.append({"pos": (float(px), float(py)), "brush": color, "pen": pg.mkPen("#243746", width=0.35), "size": 9, "data": float(raw)})
         scatter = pg.ScatterPlotItem(spots=spots)
         plot.addItem(scatter)
         if np.count_nonzero(valid) < 300:
             try:
                 order = np.argsort(x[valid])
-                plot.plot(x[valid][order], y[valid][order], pen=pg.mkPen("#777777", width=0.6))
+                plot.plot(x[valid][order], y[valid][order], pen=pg.mkPen("#6B7280", width=0.8))
             except Exception:
                 pass
         plot.setLabel("bottom", "Station / X")
@@ -556,7 +575,7 @@ class ProsysQcPanel(QWidget):
         if not np.any(valid):
             plot.setTitle(f"Reading {row + 1}: no valid IP decay windows")
             return
-        plot.plot(x[valid], y[valid], pen=pg.mkPen("#1B6FA8", width=2), symbol="o", symbolSize=5, symbolBrush="#2E9E5B")
+        plot.plot(x[valid], y[valid], pen=pg.mkPen("#1F78B4", width=2.2), symbol="o", symbolSize=6, symbolBrush="#2E9E5B", symbolPen=pg.mkPen("#174A7C", width=0.8))
         plot.setLabel("bottom", "IP decay window")
         plot.setLabel("left", "Chargeability / window value")
         plot.setTitle(f"IP decay curve — reading {row + 1}")
@@ -588,7 +607,7 @@ class ProsysQcPanel(QWidget):
             self.track_plot.setTitle("No valid coordinate pairs available")
             self._fill_key_value(self.track_table, [("Valid coordinate points", 0)])
             return
-        self.track_plot.plot(x[valid], y[valid], pen=pg.mkPen("#B4453D", width=2), symbol="o", symbolSize=4, symbolBrush="#1B6FA8")
+        self.track_plot.plot(x[valid], y[valid], pen=pg.mkPen("#C24A3A", width=2), symbol="o", symbolSize=5, symbolBrush="#1F78B4", symbolPen=pg.mkPen("#174A7C", width=0.7))
         self.track_plot.setLabel("bottom", axis[0])
         self.track_plot.setLabel("left", axis[1])
         self.track_plot.setTitle("GPS / acquisition track")

@@ -43,7 +43,7 @@ from modules.magnetic.models import MagneticDataRole, MagneticDataset, MagneticS
 from modules.magnetic.reader import MagneticReader
 from modules.magnetic.readers.boundary_reader import MagneticBoundaryReader
 from modules.magnetic.ui.enmag_qc_canvas import EnMagCanvasContainer, EnMagColorBar, EnMagPreviewCanvas
-from modules.magnetic.ui.spatial_filter_dialog import SpatialFilterDialog
+from modules.magnetic.ui.enmag_spatial_filter_dialog import EnMagSpatialFilterDialog
 
 
 _ENMAG_STYLE = """
@@ -51,7 +51,7 @@ QWidget#enmagDataQcScreen {
     background:#F3F4F6;
     color:#1E242B;
     font-family:"Segoe UI", Arial, sans-serif;
-    font-size:8pt;
+    font-size:7pt;
 }
 QFrame#sidebarShell, QFrame#previewShell {
     background:#F8F9FB;
@@ -60,7 +60,7 @@ QFrame#sidebarShell, QFrame#previewShell {
 }
 QLabel#panelTitle {
     color:#4A525B;
-    font-size:9pt;
+    font-size:7.5pt;
     font-weight:600;
 }
 QLabel#statusPrimary { font-weight:600; color:#1A5E21; }
@@ -83,15 +83,15 @@ QComboBox, QSpinBox, QDoubleSpinBox, QLineEdit, QTextEdit {
     background:#FFFFFF;
     border:1px solid #B8C1CB;
     border-radius:4px;
-    min-height:21px;
-    padding:2px 6px;
+    min-height:18px;
+    padding:1px 5px;
     selection-background-color:#BFD8FF;
 }
 QTextEdit { padding:4px 6px; }
 QLineEdit:read-only { background:#EEF1F4; color:#68737E; }
 QScrollArea { border:none; background:transparent; }
 QTabWidget::pane { border:1px solid #D3D7DD; border-radius:4px; background:#FFFFFF; }
-QTabBar::tab { background:#EEF2F6; border:1px solid #C5CDD6; padding:4px 10px; margin-right:2px; border-top-left-radius:4px; border-top-right-radius:4px; }
+QTabBar::tab { background:#EEF2F6; border:1px solid #C5CDD6; padding:2px 8px; margin-right:2px; border-top-left-radius:4px; border-top-right-radius:4px; }
 QTabBar::tab:selected { background:#FFFFFF; color:#174A7C; font-weight:600; }
 QScrollBar:vertical {
     background:#EEF1F4; width:12px; margin:0; border-radius:5px;
@@ -100,8 +100,8 @@ QScrollBar::handle:vertical {
     background:#BAC4CF; min-height:24px; border-radius:5px;
 }
 QPushButton {
-    min-height:23px;
-    padding:2px 8px;
+    min-height:20px;
+    padding:1px 7px;
     background:#EFF2F5;
     border:1px solid #B8C1CB;
     border-radius:4px;
@@ -127,11 +127,17 @@ QPushButton#enmagZoomButton {
     background:#30343A;
     color:#FFFFFF;
     border:0;
-    font-size:16pt;
+    font-size:13pt;
     font-weight:700;
     padding:0;
     border-radius:4px;
 }
+
+QPushButton#drawAction { background:#D9ECFF; border-color:#7FB2E3; color:#093B66; font-weight:700; }
+QPushButton#drawAction:hover { background:#C8E2FA; }
+QPushButton#filterAction { background:#E7F5EF; border-color:#87C5A5; color:#0B6235; font-weight:700; }
+QPushButton#exportAction { background:#F0E8FF; border-color:#B59BE3; color:#4D278A; font-weight:700; }
+
 QPushButton:disabled, QComboBox:disabled, QSpinBox:disabled, QDoubleSpinBox:disabled, QLineEdit:disabled, QSlider:disabled {
     color:#97A0AA;
     background:#F1F3F5;
@@ -216,9 +222,9 @@ class EnMagDataQcScreen(QWidget):
 
         self.sidebar_shell = QFrame()
         self.sidebar_shell.setObjectName("sidebarShell")
-        self.sidebar_shell.setFixedWidth(330)
+        self.sidebar_shell.setFixedWidth(300)
         sidebar_layout = QVBoxLayout(self.sidebar_shell)
-        sidebar_layout.setContentsMargins(10, 10, 10, 10)
+        sidebar_layout.setContentsMargins(7, 7, 7, 7)
         sidebar_layout.setSpacing(8)
         sidebar_header = QHBoxLayout()
         sidebar_header.setContentsMargins(0, 0, 0, 0)
@@ -242,8 +248,8 @@ class EnMagDataQcScreen(QWidget):
         settings_content = QWidget()
         left = QGridLayout(settings_content)
         left.setContentsMargins(6, 6, 6, 6)
-        left.setHorizontalSpacing(8)
-        left.setVerticalSpacing(6)
+        left.setHorizontalSpacing(6)
+        left.setVerticalSpacing(4)
         left.setColumnStretch(1, 1)
         row = 0
 
@@ -304,7 +310,7 @@ class EnMagDataQcScreen(QWidget):
         summary_layout.addWidget(summary_label)
         self.summary = QTextEdit()
         self.summary.setReadOnly(True)
-        self.summary.setMinimumHeight(180)
+        self.summary.setMinimumHeight(135)
         summary_layout.addWidget(self.summary, 1)
         self.sidebar_tabs.addTab(summary_page, "Summary")
         sidebar_layout.addWidget(self.sidebar_tabs, 1)
@@ -314,7 +320,7 @@ class EnMagDataQcScreen(QWidget):
         preview_shell.setObjectName("previewShell")
         preview_layout = QVBoxLayout(preview_shell)
         preview_layout.setContentsMargins(10, 8, 10, 8)
-        preview_layout.setSpacing(7)
+        preview_layout.setSpacing(4)
         preview_title = QLabel("Preview")
         preview_title.setObjectName("panelTitle")
         preview_layout.addWidget(preview_title)
@@ -329,7 +335,7 @@ class EnMagDataQcScreen(QWidget):
         self.pan_btn = QPushButton("Pan"); self.pan_btn.setCheckable(True); self.pan_btn.setChecked(True)
         self.pan_btn.setObjectName("accentAction")
         self.filter_btn = QPushButton("Filter")
-        self.filter_btn.setObjectName("accentAction")
+        self.filter_btn.setObjectName("filterAction")
         self.reset_filter_btn = QPushButton("Reset Filter")
         self.reset_filter_btn.setObjectName("warningAction")
         self.filter_combo = QComboBox(); self.filter_combo.addItem("None"); self.filter_combo.setMinimumWidth(140)
@@ -350,8 +356,8 @@ class EnMagDataQcScreen(QWidget):
         self.status_filter.setObjectName("mutedLabel")
         status_box.addWidget(self.status_primary); status_box.addWidget(self.status_filter)
         bottom.addLayout(status_box, 1)
-        self.draw_btn = QPushButton("Draw"); self.draw_btn.setObjectName("primaryAction"); self.draw_btn.clicked.connect(self.draw)
-        self.export_btn = QPushButton("Export"); self.export_btn.setObjectName("successAction"); self.export_btn.clicked.connect(self.export_csv)
+        self.draw_btn = QPushButton("Draw"); self.draw_btn.setObjectName("drawAction"); self.draw_btn.clicked.connect(lambda: self.draw(show_error=True))
+        self.export_btn = QPushButton("Export"); self.export_btn.setObjectName("exportAction"); self.export_btn.clicked.connect(self.export_csv)
         bottom.addWidget(self.draw_btn); bottom.addWidget(self.export_btn)
         root.addLayout(bottom)
 
@@ -362,16 +368,22 @@ class EnMagDataQcScreen(QWidget):
         self.interpolation.currentTextChanged.connect(self._update_control_states)
         self.preview_mode.currentTextChanged.connect(self._on_preview_mode_changed)
         self.include_invalid.toggled.connect(self._on_visibility_changed)
-        self.pan_btn.toggled.connect(self.canvas.set_pan_enabled)
+        self.pan_btn.clicked.connect(self._activate_pan_mode)
+        self.canvas.set_pan_enabled(True)
         self.filter_btn.clicked.connect(self.open_spatial_filter)
         self.reset_filter_btn.clicked.connect(self.reset_filter)
         self.filter_combo.currentTextChanged.connect(self._on_filter_combo_changed)
         self.canvas.hover_changed.connect(self.hover_info.setText)
 
+    def _activate_pan_mode(self) -> None:
+        self.pan_btn.setChecked(True)
+        self.canvas.set_pan_enabled(True)
+        self.hover_info.setText("Pan mode active: drag the map to move, mouse wheel to zoom.")
+
     def _toggle_sidebar(self) -> None:
         visible = self.sidebar_tabs.isVisible()
         self.sidebar_tabs.setVisible(not visible)
-        self.sidebar_shell.setFixedWidth(330 if not visible else 34)
+        self.sidebar_shell.setFixedWidth(300 if not visible else 32)
         self.sidebar_title.setVisible(not visible)
         self.sidebar_toggle_btn.setText("◀" if not visible else "▶")
 
@@ -391,7 +403,8 @@ class EnMagDataQcScreen(QWidget):
 
     def _schedule_grid_redraw(self, *_args) -> None:
         if self.data is not None and self.preview_mode.currentText() == "Grid":
-            self._redraw_timer.start()
+            self.status_primary.setStyleSheet("color:#8A5A00; font-weight:600;")
+            self.status_primary.setText("Settings changed — click Draw")
 
     def _update_control_states(self, *_args) -> None:
         grid_mode = self.preview_mode.currentText() == "Grid"
@@ -678,9 +691,9 @@ class EnMagDataQcScreen(QWidget):
                 self.draw()
 
     # -------------------------------------------------------------- drawing
-    def draw(self) -> None:
+    def draw(self, show_error: bool = False) -> None:
         if self.data is None:
-            self._set_draw_failed("No magnetic data is loaded")
+            self._set_draw_failed("No magnetic data is loaded", show_dialog=show_error)
             return
         try:
             values, grid_label, unit, circular = self._values_for_current_grid_type()
@@ -726,13 +739,15 @@ class EnMagDataQcScreen(QWidget):
             self._update_filter_status()
             self._update_summary()
         except Exception as exc:
-            self._set_draw_failed(str(exc))
+            self._set_draw_failed(str(exc), show_dialog=show_error)
 
-    def _set_draw_failed(self, reason: str) -> None:
+    def _set_draw_failed(self, reason: str, *, show_dialog: bool = False) -> None:
         self.status_primary.setStyleSheet("color:#9B1C1C; font-weight:600;")
         self.status_primary.setText("Draw failed")
         self.status_primary.setToolTip(reason)
         self.hover_info.setText(f"Draw failed: {reason}")
+        if show_dialog:
+            QMessageBox.warning(self, "Magnetic Draw Failed", f"Draw failed.\n\nReason:\n{reason}")
         self._update_filter_status(); self._update_summary()
 
     # -------------------------------------------------------------- filters
@@ -740,7 +755,7 @@ class EnMagDataQcScreen(QWidget):
         if self.data is None:
             self._set_draw_failed("Load a magnetic log before creating a spatial filter")
             return
-        dialog = SpatialFilterDialog(
+        dialog = EnMagSpatialFilterDialog(
             self.data.x,
             self.data.y,
             self._base_visible_without_spatial(),
