@@ -38,7 +38,7 @@ from ui.ribbon.gravity_ribbon import GravityRibbonProvider
 from ui.ribbon.electrical_ribbon import ElectricalRibbonProvider
 from ui.ribbon.converter_ribbon import ConverterRibbonProvider
 from ui.ribbon.vibroseis_ribbon import VibroseisRibbonProvider
-from ui.ribbon.seismatters_ribbon import SercelInstrumentTestAnalysisRibbonProvider, SercelLogAnalysisRibbonProvider
+from ui.ribbon.seismatters_ribbon import SercelInstrumentTestAnalysisRibbonProvider, SercelLogAnalysisRibbonProvider, TGPGroundForceLookRibbonProvider
 from ui.empty_workspace import EmptyWorkspace
 from ui.widgets.full_page_loader import FullPageLoader
 from ui.dialogs.subscription_dialog import SubscriptionDialog
@@ -289,6 +289,7 @@ class MainWindow(QMainWindow):
                 ("array_response", "Array Response"),
                 ("smt", "SMT"),
                 ("vibroseis", "Vibroseis QC"),
+                ("gflook", "Ground Force QC"),
                 ("segy_viewer", "SEGY"),
                 ("converter", "Converter"),
                 ("visualization", "2D/3D Viewer"),
@@ -316,6 +317,7 @@ class MainWindow(QMainWindow):
         self._segd_scanner_dashboard = None
         self._sercel_log_analysis_dashboard = None
         self._sercel_instrument_test_analysis_dashboard = None
+        self._gflook_dashboard = None
         self._receiver_qc_dashboard = None
         self._smt_dashboard = None
         self._uphole_dashboard = None
@@ -338,6 +340,7 @@ class MainWindow(QMainWindow):
             "converter": ("Converter", "Converter", "Convert"),
             "smt": ("SMT Database", "SMT", "SMT"),
             "vibroseis": ("Vibroseis", "Vibroseis", "Vibroseis"),
+            "gflook": ("Ground Force QC", "GF QC", "GF QC"),
             "magnetic": ("Magnetic", "Magnetic", "Magnetic"),
             "gravity": ("Gravity", "Gravity", "Gravity"),
             "electrical": ("Electrical", "Electrical", "Electrical"),
@@ -372,6 +375,7 @@ class MainWindow(QMainWindow):
         self._register_ribbon_provider(SegdRibbonProvider())
         self._register_ribbon_provider(SercelLogAnalysisRibbonProvider())
         self._register_ribbon_provider(SercelInstrumentTestAnalysisRibbonProvider())
+        self._register_ribbon_provider(TGPGroundForceLookRibbonProvider())
         self._register_ribbon_provider(SegyViewerRibbonProvider())
         self._vibroseis_ribbon_context = "vaps"
         self._register_ribbon_provider(VibroseisRibbonProvider(lambda: getattr(self, "_vibroseis_ribbon_context", "vaps")))
@@ -1586,7 +1590,7 @@ class MainWindow(QMainWindow):
             "subscription_modules", "logout_account",
             "toggle_properties", "toggle_console", "save_layout", "load_layout",
             "segd_open_file", "segd_open_viewer", "segd_open_2d3d", "segy_open_file",
-            "sercel_log_open", "sita_open",
+            "sercel_log_open", "sita_open", "gflook_open_folder", "gflook_open_file",
             "visualization_open",
             "magnetic_open", "magnetic_open_rover", "magnetic_open_base", "magnetic_open_boundary",
             "gravity_open", "gravity_open_observations", "gravity_open_base", "gravity_oasis",
@@ -1614,6 +1618,14 @@ class MainWindow(QMainWindow):
             if dashboard is None:
                 return action_id == "sercel_log_open"
             return True
+
+
+        if action_id.startswith("gflook_"):
+            dashboard = self._gflook_dashboard
+            if dashboard is None:
+                return True
+            resolver = getattr(dashboard, "can_execute", None)
+            return bool(resolver(action_id)) if callable(resolver) else True
 
         if action_id.startswith("segd_scanner_"):
             dashboard = self._segd_scanner_dashboard
@@ -1778,6 +1790,13 @@ class MainWindow(QMainWindow):
             dashboard = self._open_sercel_log_analysis_dashboard()
             if dashboard is not None:
                 dashboard.export_image()
+
+        elif action_id.startswith("gflook_"):
+            dashboard = self._open_gflook_dashboard()
+            if dashboard is not None:
+                handler = getattr(dashboard, "handle_ribbon_action", None)
+                if callable(handler):
+                    handler(action_id)
         elif action_id == "seismic_reset_active_view":
             segd_viewer = self._active_segd_viewer()
             segy_viewer = self._active_segy_viewer()
@@ -2885,6 +2904,35 @@ class MainWindow(QMainWindow):
                 index = self._add_document_tab(dashboard, "SLX Recorder QC", closable=True)
         self.tab_widget.setCurrentIndex(index)
         self._set_active_module("sercel_log_analysis")
+        dashboard.show(); dashboard.raise_(); dashboard.setFocus(Qt.OtherFocusReason)
+        return dashboard
+
+
+    def _open_gflook_dashboard(self):
+        dashboard = self._gflook_dashboard
+        if dashboard is None or not is_qobject_valid(dashboard):
+            try:
+                from modules.seismic.gflook import TGPGroundForceLookWidget
+                dashboard = TGPGroundForceLookWidget(self)
+                self._gflook_dashboard = dashboard
+                dashboard.destroyed.connect(lambda *_: setattr(self, "_gflook_dashboard", None))
+                if hasattr(dashboard, "state_changed"):
+                    dashboard.state_changed.connect(self._update_ribbon)
+                index = self._add_document_tab(
+                    dashboard,
+                    "Ground Force QC",
+                    icon=get_icon("view-statistics", color="#0E7490", size=16),
+                    closable=True,
+                )
+            except Exception as exc:
+                QMessageBox.critical(self, "Ground Force QC", f"Unable to open Ground Force QC:\n{exc}")
+                return None
+        else:
+            index = self.tab_widget.indexOf(dashboard)
+            if index < 0:
+                index = self._add_document_tab(dashboard, "Ground Force QC", closable=True)
+        self.tab_widget.setCurrentIndex(index)
+        self._set_active_module("gflook")
         dashboard.show(); dashboard.raise_(); dashboard.setFocus(Qt.OtherFocusReason)
         return dashboard
 

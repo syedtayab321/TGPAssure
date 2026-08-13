@@ -27,6 +27,7 @@ FEATURES: tuple[FeatureDef, ...] = (
     FeatureDef("seismic.segd", "seismic", "SEG-D Viewer", "Open and inspect SEG-D/field records.", 12000),
     FeatureDef("seismic.segd_analysis", "seismic", "SEG-D Analysis", "Classic SEG-D record analysis with wiggle, variable-area, gain and filter controls.", 12000),
     FeatureDef("seismic.sercel_logs", "seismic", "SLX Recorder QC", "Sercel SN408/SN428 daily recorder QC log, test and CRC analysis.", 9000),
+    FeatureDef("seismic.gflook", "seismic", "Ground Force QC", "Sercel VE464 GF/Ground Force viewer, analysis, GIS output, SEG-Y conversion and QC listing.", 12000),
     FeatureDef("seismic.viewer", "seismic", "SEG-Y / 2D Viewer", "Open SEG-Y and use 2D/3D seismic visualization.", 18000),
     FeatureDef("seismic.converter", "seismic", "Converters", "SEG-Y/SEG-D conversion and export tools.", 12000),
     FeatureDef("seismic.smt", "seismic", "SMT Results Database", "SMT200/300/400 and SGT-II receiver-test database, analysis, retest and export workflows.", 11000),
@@ -101,6 +102,7 @@ PROVIDER_FEATURE_MAP = {
     "segd": "seismic.segd",
     "segd_analysis": "seismic.segd_analysis",
     "sercel_log_analysis": "seismic.sercel_logs",
+    "gflook": "seismic.gflook",
     "segd_scanner": "seismic.scanner",
     "uphole": "seismic.uphole",
     "smt": "seismic.smt",
@@ -133,6 +135,7 @@ PROVIDER_FEATURE_MAP = {
 ACTION_FEATURE_PREFIXES = (
     ("segd_analysis_", "seismic.segd_analysis"),
     ("sercel_log_", "seismic.sercel_logs"),
+    ("gflook_", "seismic.gflook"),
     ("segd_scanner_", "seismic.scanner"),
     ("smt_", "seismic.smt"),
     ("uphole_", "seismic.uphole"),
