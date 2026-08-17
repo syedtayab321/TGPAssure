@@ -29,9 +29,12 @@ from PySide6.QtWidgets import (
     QMenu,
     QMenuBar,
     QMessageBox,
+    QMdiArea,
+    QMdiSubWindow,
     QPushButton,
     QSizePolicy,
     QSplitter,
+    QStackedWidget,
     QTabWidget,
     QTableWidget,
     QTableWidgetItem,
@@ -190,6 +193,25 @@ QGroupBox {
     font-size:6.0pt;
 }
 QGroupBox::title { subcontrol-origin: margin; left:6px; padding:0 3px; }
+
+QMdiArea#ipiMdiArea {
+    background:#D7DEE6;
+    border:1px solid #AEB8C4;
+}
+QMdiSubWindow {
+    background:#FFFFFF;
+    border:1px solid #92A9BF;
+}
+QMdiSubWindow::title {
+    background:qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 #D9ECFF, stop:1 #A8C6DE);
+    color:#133452;
+    padding:2px;
+}
+QLabel#legacyTitle {
+    color:#2E3D4E;
+    font-size:13pt;
+    font-weight:600;
+}
 """
 
 
@@ -198,7 +220,7 @@ class IpWin2Dashboard(QWidget):
 
     The screen layout, command names and data-entry workflow follow the supplied
     IPI2Win reference captures, but this is an original TGPAssure implementation.
-    It keeps Prosys II independent while providing a separate IPWin2 module with
+    It keeps Prosys II independent while providing a separate VES/IP Studio module with
     classic menus, ribbon-callable commands, dock-like windows, dialogs, editable
     VES tables, model layers, apparent/synthetic curves and pseudo/resistivity
     section displays.
@@ -226,8 +248,16 @@ class IpWin2Dashboard(QWidget):
         self._auto_scale = True
         self._selected_curve_index: int | None = None
         self._drag_model_handle: int | None = None
+        self._drag_curve_index: int | None = None
+        self._window_mode = "free"
         self._last_model_snapshot: list[ModelLayer] = []
         self._build_ui()
+        # point_label used to live only on the removed legacy toolbar.  Keep a
+        # real status label in the visible header so refresh() cannot fail while
+        # opening the standalone VES/IP Studio from the main ribbon.
+        if not hasattr(self, "point_label"):
+            self.point_label = QLabel("0/0", self)
+            self.point_label.setObjectName("smallStatus")
         self.reset_blank_project("Ready — open a DAT file or create a new VES point")
 
     def can_execute(self, action_id: str) -> bool:
@@ -235,7 +265,7 @@ class IpWin2Dashboard(QWidget):
             return True
         return True
 
-    # Ribbon/MainWindow compatibility aliases.  The IPWin2 ribbon uses stable
+    # Ribbon/MainWindow compatibility aliases.  The VES/IP Studio ribbon uses stable
     # ``electrical_ipi_*`` action ids; MainWindow maps those ids to these
     # wrapper methods so the standalone dashboard can be opened without the
     # Prosys II electrical workspace.
@@ -278,8 +308,8 @@ class IpWin2Dashboard(QWidget):
     def ipi_auto_scale(self) -> None: self.toggle_auto_scale()
     def ipi_classic_layout(self) -> None: self.show_classic_layout()
     def ipi_data_window(self) -> None: self.workspace_tabs.setCurrentIndex(1)
-    def ipi_curve_window(self) -> None: self.workspace_tabs.setCurrentIndex(2)
-    def ipi_section_window(self) -> None: self.workspace_tabs.setCurrentIndex(3)
+    def ipi_curve_window(self) -> None: self._activate_curve_window()
+    def ipi_section_window(self) -> None: self._activate_section_window()
     def ipi_results_window(self) -> None: self.workspace_tabs.setCurrentIndex(4)
 
     # ------------------------------------------------------------------ UI
@@ -287,8 +317,10 @@ class IpWin2Dashboard(QWidget):
         root = QVBoxLayout(self)
         root.setContentsMargins(2, 2, 2, 2)
         root.setSpacing(2)
-        root.addWidget(self._build_menu_bar())
-        root.addWidget(self._build_toolbar())
+        # The global TGPAssure ribbon already exposes file/edit/model/section
+        # commands.  Keep this module workspace clean and avoid showing a
+        # second legacy toolbar/menu below the main ribbon.
+        root.addWidget(self._build_workspace_header())
 
         body = QSplitter(Qt.Horizontal, self)
         body.setChildrenCollapsible(False)
@@ -307,6 +339,42 @@ class IpWin2Dashboard(QWidget):
         self.scale_label.setObjectName("smallStatus")
         footer.addWidget(self.scale_label)
         root.addLayout(footer)
+
+    def _build_workspace_header(self) -> QFrame:
+        frame = QFrame(self)
+        frame.setObjectName("classicStrip")
+        layout = QHBoxLayout(frame)
+        layout.setContentsMargins(6, 3, 6, 3)
+        layout.setSpacing(6)
+
+        title = QLabel("VES/IP Studio")
+        title.setObjectName("sectionTitle")
+        layout.addWidget(title)
+
+        self.window_mode_label = QLabel("Window mode: Free")
+        self.window_mode_label.setObjectName("smallStatus")
+        layout.addWidget(self.window_mode_label)
+
+        self.point_label = QLabel("0/0")
+        self.point_label.setObjectName("smallStatus")
+        self.point_label.setToolTip("Current VES point / total VES points")
+        layout.addWidget(self.point_label)
+        layout.addStretch(1)
+
+        for text, slot, obj in [
+            ("Tabbed", self.tab_windows, "blueButton"),
+            ("Free Windows", self.free_windows, "primaryButton"),
+            ("Tile", self.tile_windows, "tealButton"),
+            ("Cascade", self.cascade_windows, "purpleButton"),
+            ("Min", self.minimize_active_window, "warningButton"),
+            ("Max", self.maximize_active_window, "blueButton"),
+            ("Restore", self.restore_active_window, "primaryButton"),
+        ]:
+            btn = QPushButton(text)
+            btn.setObjectName(obj)
+            btn.clicked.connect(slot)
+            layout.addWidget(btn)
+        return frame
 
     def _build_menu_bar(self) -> QMenuBar:
         bar = QMenuBar(self)
@@ -388,8 +456,8 @@ class IpWin2Dashboard(QWidget):
         self._add_menu(bar, "Window", [
             ("Classic layout", self.show_classic_layout, ""),
             ("Data table", lambda: self.workspace_tabs.setCurrentIndex(1), ""),
-            ("Curves", lambda: self.workspace_tabs.setCurrentIndex(2), ""),
-            ("Sections", lambda: self.workspace_tabs.setCurrentIndex(3), ""),
+            ("Curves", self._activate_curve_window, ""),
+            ("Sections", self._activate_section_window, ""),
             ("Results", lambda: self.workspace_tabs.setCurrentIndex(4), ""),
             ("Tile windows", self.tile_windows, ""),
             ("Cascade windows", self.cascade_windows, ""),
@@ -447,7 +515,7 @@ class IpWin2Dashboard(QWidget):
         layout.setContentsMargins(5, 5, 5, 5)
         layout.setSpacing(4)
 
-        title = QLabel("IPWin2 Control Center")
+        title = QLabel("VES/IP Control Center")
         title.setObjectName("sectionTitle")
         layout.addWidget(title)
 
@@ -573,11 +641,16 @@ class IpWin2Dashboard(QWidget):
         wgrid = QGridLayout(windows)
         wgrid.setContentsMargins(5, 7, 5, 5)
         wgrid.setSpacing(3)
-        for idx, (text, index) in enumerate([
-            ("Classic", 0), ("Data", 1), ("Curve", 2), ("Sections", 3), ("Results", 4),
-        ]):
+        window_actions = [
+            ("Classic", self.show_classic_layout),
+            ("Data", lambda: self.workspace_tabs.setCurrentIndex(1)),
+            ("Curve", self._activate_curve_window),
+            ("Sections", self._activate_section_window),
+            ("Results", lambda: self.workspace_tabs.setCurrentIndex(4)),
+        ]
+        for idx, (text, slot) in enumerate(window_actions):
             btn = QPushButton(text)
-            btn.clicked.connect(lambda checked=False, i=index: self.workspace_tabs.setCurrentIndex(i))
+            btn.clicked.connect(slot)
             wgrid.addWidget(btn, idx // 2, idx % 2)
         layout.addWidget(windows)
         layout.addStretch(1)
@@ -593,13 +666,22 @@ class IpWin2Dashboard(QWidget):
         layout.addWidget(self.results_box, 1)
         return page
 
-    def _build_workspace_tabs(self) -> QTabWidget:
-        self.workspace_tabs = QTabWidget(self)
-        self.workspace_tabs.addTab(self._build_classic_layout(), "Interpretation")
-        self.workspace_tabs.addTab(self._build_data_tab(), "VES table")
-        self.workspace_tabs.addTab(self._build_curve_tab(), "Curves")
-        self.workspace_tabs.addTab(self._build_section_tab(), "Sections")
-        self.workspace_tabs.addTab(self._build_results_tab(), "Results")
+    def _build_workspace_tabs(self) -> QStackedWidget:
+        """Build an old-IP2Win style internal-window workspace.
+
+        The original IP2Win presents each graph/table as an independently movable
+        child window.  This implementation keeps that behaviour inside the
+        TGPAssure module using an MDI area instead of fixed tabs, so the section,
+        curve and model table can be moved/resized by the user.  The name
+        ``workspace_tabs`` is retained for ribbon compatibility; it is a stacked
+        widget rather than a visible tab bar.
+        """
+        self.workspace_tabs = QStackedWidget(self)
+        self.workspace_tabs.addWidget(self._build_classic_layout())
+        self.workspace_tabs.addWidget(self._build_data_tab())
+        self.workspace_tabs.addWidget(self._build_curve_tab())
+        self.workspace_tabs.addWidget(self._build_section_tab())
+        self.workspace_tabs.addWidget(self._build_results_tab())
         return self.workspace_tabs
 
     def _classic_window(self, title: str) -> tuple[QFrame, QVBoxLayout]:
@@ -616,22 +698,60 @@ class IpWin2Dashboard(QWidget):
     def _build_classic_layout(self) -> QWidget:
         page = QWidget(self)
         layout = QVBoxLayout(page)
-        layout.setContentsMargins(3, 3, 3, 3)
-        layout.setSpacing(3)
-        self.main_splitter = QSplitter(Qt.Vertical, page)
-        self.main_splitter.setChildrenCollapsible(False)
-        self.main_splitter.addWidget(self._build_section_window())
-        bottom = QSplitter(Qt.Horizontal, page)
-        bottom.setChildrenCollapsible(False)
-        bottom.addWidget(self._build_curve_window())
-        bottom.addWidget(self._build_model_table_window())
-        bottom.setStretchFactor(0, 4)
-        bottom.setStretchFactor(1, 1)
-        self.main_splitter.addWidget(bottom)
-        self.main_splitter.setStretchFactor(0, 2)
-        self.main_splitter.setStretchFactor(1, 3)
-        layout.addWidget(self.main_splitter, 1)
+        layout.setContentsMargins(2, 2, 2, 2)
+        layout.setSpacing(2)
+
+        self.mdi_area = QMdiArea(page)
+        self.mdi_area.setObjectName("ipiMdiArea")
+        self.mdi_area.setViewMode(QMdiArea.SubWindowView)
+        self.mdi_area.setActivationOrder(QMdiArea.CreationOrder)
+        self.mdi_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.mdi_area.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        layout.addWidget(self.mdi_area, 1)
+
+        # Build all internal windows once.  These are true child windows: each
+        # can be dragged, resized, minimized/maximized and tiled/cascaded just
+        # like the supplied legacy IP2Win screen.
+        self.section_subwindow = self._add_mdi_window(
+            self._build_section_window(),
+            "Pseudo cross-section and resistivity section",
+            6,
+            6,
+            1180,
+            260,
+        )
+        self.curve_subwindow = self._add_mdi_window(
+            self._build_curve_window(),
+            "Apparent resistivity curve",
+            6,
+            280,
+            760,
+            360,
+        )
+        self.model_subwindow = self._add_mdi_window(
+            self._build_model_table_window(),
+            "Error = --",
+            780,
+            280,
+            360,
+            360,
+        )
+        self.mdi_area.setActiveSubWindow(self.curve_subwindow)
         return page
+
+    def _add_mdi_window(self, widget: QWidget, title: str, x: int, y: int, w: int, h: int) -> QMdiSubWindow:
+        sub = QMdiSubWindow(self.mdi_area)
+        sub.setWidget(widget)
+        sub.setWindowTitle(title)
+        sub.setAttribute(Qt.WA_DeleteOnClose, False)
+        sub.setWindowFlags(Qt.SubWindow | Qt.WindowTitleHint | Qt.WindowSystemMenuHint | Qt.WindowMinimizeButtonHint | Qt.WindowMaximizeButtonHint | Qt.WindowCloseButtonHint)
+        sub.setOption(QMdiSubWindow.RubberBandMove, True)
+        sub.setOption(QMdiSubWindow.RubberBandResize, True)
+        sub.resize(w, h)
+        sub.move(x, y)
+        self.mdi_area.addSubWindow(sub)
+        sub.show()
+        return sub
 
     def _build_section_window(self) -> QFrame:
         frame, layout = self._classic_window("Pseudo cross-section and resistivity section")
@@ -733,7 +853,7 @@ class IpWin2Dashboard(QWidget):
 
     # ------------------------------------------------------------------ file/data
     def reset_blank_project(self, message: str = "New empty VES/IP profile created") -> None:
-        """Clear the IPWin2 workspace without inserting sample data."""
+        """Clear the VES/IP Studio workspace without inserting sample data."""
         self.source_path = None
         self.rows = []
         self.profiles = []
@@ -742,6 +862,7 @@ class IpWin2Dashboard(QWidget):
         self.total_points = 0
         self._selected_curve_index = None
         self._drag_model_handle = None
+        self._drag_curve_index = None
         self._last_model_snapshot = []
         self.refresh(message)
 
@@ -769,13 +890,13 @@ class IpWin2Dashboard(QWidget):
         self.refresh("New VES/IP point created")
 
     def open_file(self) -> None:
-        path, _ = QFileDialog.getOpenFileName(self, "Open IPWin2 / VES-IP file", str(Path.home()), "VES/IP data (*.dat *.txt *.csv *.ves);;All Files (*.*)")
+        path, _ = QFileDialog.getOpenFileName(self, "Open VES/IP Studio file", str(Path.home()), "VES/IP data (*.dat *.txt *.csv *.ves);;All Files (*.*)")
         if path:
             self.open_path(path)
 
     def open_path(self, path: str | Path) -> None:
         p = Path(path).expanduser().resolve()
-        self.activity_started.emit("Opening IPWin2 / VES-IP file", p.name)
+        self.activity_started.emit("Opening VES/IP Studio file", p.name)
         error: Exception | None = None
         try:
             profiles = self._read_profiles(p)
@@ -796,7 +917,7 @@ class IpWin2Dashboard(QWidget):
         finally:
             self.activity_finished.emit()
         if error is not None:
-            QMessageBox.critical(self, "IPWin2 / VES-IP", f"Unable to open file:\n{error}")
+            QMessageBox.critical(self, "VES/IP Studio", f"Unable to open file:\n{error}")
 
     def _read_profiles(self, path: Path) -> list[tuple[str, list[VesRow]]]:
         text = path.read_text(errors="ignore")
@@ -938,7 +1059,7 @@ class IpWin2Dashboard(QWidget):
         self.refresh(f"Saved {self.source_path.name}")
 
     def save_file_as(self) -> None:
-        path, _ = QFileDialog.getSaveFileName(self, "Save IPWin2 / VES-IP data", str(Path.home() / "ves_ipwin2.dat"), "DAT (*.dat);;TXT (*.txt);;CSV (*.csv)")
+        path, _ = QFileDialog.getSaveFileName(self, "Save VES/IP Studio data", str(Path.home() / "ves_ip_studio.dat"), "DAT (*.dat);;TXT (*.txt);;CSV (*.csv)")
         if path:
             self.source_path = Path(path).expanduser().resolve()
             self.save_file()
@@ -956,6 +1077,9 @@ class IpWin2Dashboard(QWidget):
         self._pull_rows_from_table(silent=True)
         point_total = max(self.total_points, 0)
         point_no = self.current_point + 1 if point_total else 0
+        if not hasattr(self, "point_label"):
+            self.point_label = QLabel("0/0", self)
+            self.point_label.setObjectName("smallStatus")
         self.point_label.setText(f"{point_no}/{point_total}")
         profile_name = self.profiles[self.current_point][0] if self.profiles and 0 <= self.current_point < len(self.profiles) else "--"
         self.metric_point.setText(f"VES: {point_no} / {point_total}  {profile_name}")
@@ -1044,7 +1168,8 @@ class IpWin2Dashboard(QWidget):
         if x.size == 0:
             plot.setTitle("No apparent resistivity data")
             return
-        plot.plot(x, y, pen=pg.mkPen("#111111", width=1.0), symbol="s", symbolSize=5, symbolPen="#333333", symbolBrush="#FFFFFF")
+        apparent = plot.plot(x, y, pen=pg.mkPen("#111111", width=1.0), symbol="s", symbolSize=5, symbolPen="#333333", symbolBrush="#FFFFFF")
+        apparent.setZValue(5)
         sx, sy = self.synthetic_curve()
         if sx.size:
             plot.plot(sx, sy, pen=pg.mkPen("#E11D24", width=1.5))
@@ -1181,6 +1306,8 @@ class IpWin2Dashboard(QWidget):
         table.blockSignals(False)
         error = self.model_error()
         self.error_label.setText(f"Error = {error:.2f}%" if np.isfinite(error) else "Error = --")
+        if hasattr(self, "model_subwindow"):
+            self.model_subwindow.setWindowTitle(self.error_label.text())
 
     def _refresh_results(self) -> None:
         text = self.results_text(include_curve=True)
@@ -1423,9 +1550,9 @@ class IpWin2Dashboard(QWidget):
         if IpiSectionOptionsDialog(self).exec() == QDialog.Accepted:
             self.refresh("Section options updated")
     def show_pseudosection_only(self) -> None:
-        self._section_mode = "pseudo"; self.mode_combo.setCurrentText("Pseudo only"); self.workspace_tabs.setCurrentIndex(3); self.refresh("Pseudo-section view selected")
+        self._section_mode = "pseudo"; self.mode_combo.setCurrentText("Pseudo only"); self._activate_section_window(); self.refresh("Pseudo-section view selected")
     def show_resistivity_only(self) -> None:
-        self._section_mode = "resistivity"; self.mode_combo.setCurrentText("Resistivity only"); self.workspace_tabs.setCurrentIndex(3); self.refresh("Resistivity section view selected")
+        self._section_mode = "resistivity"; self.mode_combo.setCurrentText("Resistivity only"); self._activate_section_window(); self.refresh("Resistivity section view selected")
     def show_both_sections(self) -> None:
         self._section_mode = "both"; self.mode_combo.setCurrentText("Both sections"); self.workspace_tabs.setCurrentIndex(0); self.refresh("Both sections shown")
     def toggle_log_scale(self, set_to: bool | None = None) -> None:
@@ -1440,11 +1567,79 @@ class IpWin2Dashboard(QWidget):
         if IpiAxesLimitsDialog(self).exec() == QDialog.Accepted:
             self.fit_profile(); self.status.setText("Axes limits updated")
     def tile_windows(self) -> None:
-        self.show_classic_layout(); self.status.setText("Windows tiled in interpretation layout")
+        self.free_windows()
+        if hasattr(self, "mdi_area"):
+            self.mdi_area.tileSubWindows()
+        self.status.setText("Windows tiled")
     def cascade_windows(self) -> None:
-        self.show_classic_layout(); self.main_splitter.setSizes([220, 420]); self.status.setText("Windows arranged")
+        self.free_windows()
+        if hasattr(self, "mdi_area"):
+            self.mdi_area.cascadeSubWindows()
+        self.status.setText("Windows cascaded")
     def show_classic_layout(self) -> None:
         self.workspace_tabs.setCurrentIndex(0)
+
+    def tab_windows(self) -> None:
+        self.show_classic_layout()
+        if hasattr(self, "mdi_area"):
+            self.mdi_area.setViewMode(QMdiArea.TabbedView)
+            self._window_mode = "tabbed"
+            if hasattr(self, "window_mode_label"):
+                self.window_mode_label.setText("Window mode: Tabbed")
+            self.status.setText("Windows are tabbed. Use Free Windows to detach and arrange on one screen.")
+
+    def free_windows(self) -> None:
+        self.show_classic_layout()
+        if hasattr(self, "mdi_area"):
+            self.mdi_area.setViewMode(QMdiArea.SubWindowView)
+            self._window_mode = "free"
+            if hasattr(self, "window_mode_label"):
+                self.window_mode_label.setText("Window mode: Free")
+            for sub in (getattr(self, "section_subwindow", None), getattr(self, "curve_subwindow", None), getattr(self, "model_subwindow", None)):
+                if sub is not None:
+                    sub.showNormal()
+            self.status.setText("Windows are free: drag title bars, resize edges, minimize or maximize.")
+
+    def _active_mdi_subwindow(self) -> QMdiSubWindow | None:
+        if not hasattr(self, "mdi_area"):
+            return None
+        return self.mdi_area.activeSubWindow() or getattr(self, "curve_subwindow", None)
+
+    def minimize_active_window(self) -> None:
+        sub = self._active_mdi_subwindow()
+        if sub is not None:
+            sub.showMinimized()
+            self.status.setText(f"Minimized: {sub.windowTitle()}")
+
+    def maximize_active_window(self) -> None:
+        sub = self._active_mdi_subwindow()
+        if sub is not None:
+            sub.showMaximized()
+            self.status.setText(f"Maximized: {sub.windowTitle()}")
+
+    def restore_active_window(self) -> None:
+        sub = self._active_mdi_subwindow()
+        if sub is not None:
+            sub.showNormal()
+            self.status.setText(f"Restored: {sub.windowTitle()}")
+
+    def _activate_section_window(self) -> None:
+        self.show_classic_layout()
+        if hasattr(self, "section_subwindow"):
+            self.section_subwindow.showNormal()
+            self.mdi_area.setActiveSubWindow(self.section_subwindow)
+
+    def _activate_curve_window(self) -> None:
+        self.show_classic_layout()
+        if hasattr(self, "curve_subwindow"):
+            self.curve_subwindow.showNormal()
+            self.mdi_area.setActiveSubWindow(self.curve_subwindow)
+
+    def _activate_model_window(self) -> None:
+        self.show_classic_layout()
+        if hasattr(self, "model_subwindow"):
+            self.model_subwindow.showNormal()
+            self.mdi_area.setActiveSubWindow(self.model_subwindow)
 
     def profile_information(self) -> None:
         dialog = ProfileInformationDialog(self.profile_comments, self.array_type, parent=self)
@@ -1478,7 +1673,7 @@ class IpWin2Dashboard(QWidget):
         self.status.setText("Print/export view prepared")
 
     def about_dialog(self) -> None:
-        QMessageBox.information(self, "IPWin2 / VES-IP 1D", "TGPAssure Electrical IPWin2 module: VES/IP table entry, apparent curve, quick model, pseudo-section and resistivity-section visualization.")
+        QMessageBox.information(self, "VES/IP Studio", "TGPAssure Electrical VES/IP Studio module: VES/IP table entry, apparent curve, quick model, pseudo-section and resistivity-section visualization.")
 
     # ------------------------------------------------------------------ interactions/helpers
     def _curve_hover_on_plot(self, plot: pg.PlotWidget, pos: Any) -> None:
@@ -1486,9 +1681,19 @@ class IpWin2Dashboard(QWidget):
             return
         point = plot.plotItem.vb.mapSceneToView(pos)
         xval, yval = float(point.x()), float(point.y())
+        left_down = bool(QApplication.mouseButtons() & Qt.LeftButton)
+        if self._drag_curve_index is not None:
+            if left_down:
+                self._apply_curve_point_drag(self._drag_curve_index, xval, yval)
+                return
+            self._drag_curve_index = None
+            self.status.setText("Curve point released; table and graph values updated")
         if self._drag_model_handle is not None:
-            self._apply_model_handle_drag(self._drag_model_handle, xval, yval)
-            return
+            if left_down:
+                self._apply_model_handle_drag(self._drag_model_handle, xval, yval)
+                return
+            self._drag_model_handle = None
+            self.status.setText("Model handle released; layer table updated")
         handle = self._nearest_model_handle(xval, yval)
         if handle is not None:
             self.status.setText("Blue model handle: left-click to edit/drag, right-click to release")
@@ -1504,22 +1709,25 @@ class IpWin2Dashboard(QWidget):
         xval, yval = float(point.x()), float(point.y())
         if event.button() == Qt.RightButton:
             self._drag_model_handle = None
-            self.status.setText("Model drag released")
+            self._drag_curve_index = None
+            self.status.setText("Drag/edit released")
             return
         handle = self._nearest_model_handle(xval, yval)
         if handle is not None:
+            self._drag_curve_index = None
             self._drag_model_handle = handle
             self._snapshot_model()
             self._apply_model_handle_drag(handle, xval, yval)
-            self.status.setText("Blue model line selected — move mouse to reshape model; right-click to release")
+            self.status.setText("Blue model line selected — hold left mouse and move to reshape; right-click to release")
             return
         self._drag_model_handle = None
         idx = self._nearest_curve_index(xval, yval)
         if idx is not None:
             self._selected_curve_index = idx
-            x, y = self._curve_arrays()
-            QMessageBox.information(self, "VES point", f"Point: {idx + 1}\nAB/2: {display_value(x[idx])}\nρa: {display_value(y[idx])} Ωm\nArray: {self.array_type}")
-            self.refresh()
+            self._drag_curve_index = idx
+            self._apply_curve_point_drag(idx, xval, yval)
+            self.status.setText("Black apparent point selected — hold left mouse and move to update AB/2 and ρa; right-click to release")
+            return
 
     def _nearest_curve_index(self, xval: float, yval: float) -> int | None:
         x, y = self._curve_arrays()
@@ -1546,6 +1754,27 @@ class IpWin2Dashboard(QWidget):
         idx = int(np.nanargmin(dist))
         threshold = 0.045 if self._log_enabled else max(np.nanmax(step_x) - np.nanmin(step_x), 1.0) * 0.012
         return idx if np.isfinite(dist[idx]) and dist[idx] <= threshold else None
+
+    def _apply_curve_point_drag(self, curve_index: int, xval: float, yval: float) -> None:
+        if not self.rows or not (0 <= curve_index < len(self.rows)):
+            return
+        if not np.isfinite(xval) or not np.isfinite(yval) or xval <= 0 or yval <= 0:
+            return
+        row = self.rows[curve_index]
+        row.ab2 = float(np.clip(xval, 1e-6, 1_000_000.0))
+        row.rhoa = float(np.clip(yval, 1e-6, 1_000_000.0))
+        complete = complete_row(row, self.array_type)
+        self.rows[curve_index] = complete
+        if self.profiles and 0 <= self.current_point < len(self.profiles):
+            name = self.profiles[self.current_point][0]
+            self.profiles[self.current_point] = (name, self.rows)
+        if hasattr(self, "data_table"):
+            self._refresh_data_table()
+        self._refresh_curve()
+        self._refresh_detail_curve()
+        self._refresh_sections()
+        self._refresh_detail_section()
+        self.status.setText(f"Curve point {curve_index + 1}: AB/2={display_value(complete.ab2)}, ρa={display_value(complete.rhoa)} Ωm")
 
     def _apply_model_handle_drag(self, handle_index: int, xval: float, yval: float) -> None:
         if not self.layers or not np.isfinite(xval) or not np.isfinite(yval) or yval <= 0:
@@ -1590,7 +1819,7 @@ class IpWin2Dashboard(QWidget):
 
     def results_text(self, include_curve: bool = False) -> str:
         lines = [
-            "TGPAssure IPWin2 / VES-IP 1D Results",
+            "TGPAssure VES/IP Studio Results",
             f"Source: {self.source_path.name if self.source_path else 'unsaved profile'}",
             f"Array: {self.array_type}",
             f"VES point: {(self.current_point + 1) if self.total_points else 0}/{self.total_points}",

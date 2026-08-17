@@ -42,7 +42,7 @@ class ElectricalRibbonProvider(RibbonProvider):
 
 
 class IPWin2RibbonProvider(RibbonProvider):
-    """Standalone IPWin2 / VES-IP 1D ribbon, separate from Prosys II."""
+    """Standalone VES/IP Studio ribbon, separate from Prosys II."""
 
     def ribbon_tab_id(self) -> str:
         return "electrical_ipwin2"

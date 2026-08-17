@@ -299,7 +299,7 @@ class MainWindow(QMainWindow):
             ],
             "electrical": [
                 ("electrical_prosys", "Prosys II"),
-                ("electrical_ipwin2", "IPWin2"),
+                ("electrical_ipwin2", "VES/IP Studio"),
             ],
             "gravity": [
                 ("gravity_oasis", "Oasis Mapping"),
@@ -347,7 +347,7 @@ class MainWindow(QMainWindow):
             "gravity": ("Gravity", "Gravity", "Gravity"),
             "electrical": ("Electrical", "Electrical", "Electrical"),
             "electrical_prosys": ("Prosys II", "Prosys II", "Prosys"),
-            "electrical_ipwin2": ("IPWin2", "IPWin2", "IPWin2"),
+            "electrical_ipwin2": ("VES/IP Studio", "VES/IP Studio", "VES/IP Studio"),
             "geodetic": ("Geodetic", "Geodetic", "Geodetic"),
             "view": ("Layout", "Layout", "Layout"),
             "tools": ("Tools", "Tools", "Tools"),
@@ -3504,13 +3504,13 @@ class MainWindow(QMainWindow):
             task_id = "electrical:ipwin2"
             self.begin_busy_task(
                 task_id,
-                "Opening IPWin2",
-                "Initializing IPWin2 / VES-IP 1D workspace",
+                "Opening VES/IP Studio",
+                "Initializing VES/IP Studio workspace",
             )
             try:
                 from modules.electrical.ipWin2.dashboard import IpWin2Dashboard
 
-                self.update_busy_task(task_id, 45, "Creating IPWin2 workspace")
+                self.update_busy_task(task_id, 45, "Creating VES/IP Studio workspace")
                 dashboard = IpWin2Dashboard(self)
                 dashboard.destroyed.connect(self._clear_ipwin2_dashboard_reference)
                 dashboard.activity_started.connect(
@@ -3530,17 +3530,17 @@ class MainWindow(QMainWindow):
                     lambda *_: self.end_busy_task("electrical:ipwin2:activity")
                 )
                 self._ipwin2_dashboard = dashboard
-                self.update_busy_task(task_id, 100, "IPWin2 workspace is ready")
+                self.update_busy_task(task_id, 100, "VES/IP Studio workspace is ready")
             except Exception as exc:
                 self.end_busy_task(task_id)
-                QMessageBox.critical(self, "IPWin2", f"Unable to open the IPWin2 module:\n{exc}")
+                QMessageBox.critical(self, "VES/IP Studio", f"Unable to open the VES/IP Studio module:\n{exc}")
                 return None
             self.end_busy_task(task_id)
         index = self.tab_widget.indexOf(dashboard)
         if index < 0:
             index = self._add_document_tab(
                 dashboard,
-                "IPWin2",
+                "VES/IP Studio",
                 icon=get_icon("electrical", size=15),
                 closable=True,
             )
@@ -3561,12 +3561,12 @@ class MainWindow(QMainWindow):
             return
         method = getattr(dashboard, method_name, None)
         if method is None:
-            QMessageBox.warning(self, "IPWin2", f"The IPWin2 module does not support: {method_name}")
+            QMessageBox.warning(self, "VES/IP Studio", f"The VES/IP Studio module does not support: {method_name}")
             return
         try:
             method(*args)
         except Exception as exc:
-            QMessageBox.critical(self, "IPWin2 Error", str(exc))
+            QMessageBox.critical(self, "VES/IP Studio Error", str(exc))
         finally:
             self._update_ribbon()
 

@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
     QSizePolicy,
     QScrollArea,
     QSlider,
+    QSplitter,
     QSpinBox,
     QStackedWidget,
     QTabWidget,
@@ -35,34 +36,87 @@ from ui.widgets.palette_colorbar import PaletteColorBar
 
 
 STYLE = """
-QWidget#arrayResponseDashboard { background: #F5F7FA; color: #172033; font-size: 10px; }
-QGroupBox { border: 1px solid #CBD5E1; border-radius: 6px; margin-top: 7px; padding: 6px; font-size: 10px; font-weight: 600; background: #FFFFFF; }
-QGroupBox::title { subcontrol-origin: margin; left: 8px; padding: 0 4px; color: #24364F; }
-QLabel { font-size: 10px; }
-QLabel#valueLabel { color: #0E7490; font-size: 10px; font-weight: 700; }
-QPushButton { border: 1px solid #B6C3D1; border-radius: 5px; padding: 4px 7px; min-height: 20px; background: #FFFFFF; font-size: 10px; font-weight: 600; }
-QPushButton:hover { background: #EAF4FF; border-color: #5BA6D8; }
-QPushButton#accentButton { background: #0E7490; border-color: #0E7490; color: white; }
-QPushButton#blueButton { background: #2563EB; border-color: #1D4ED8; color: white; }
-QPushButton#greenButton { background: #16A34A; border-color: #15803D; color: white; }
-QPushButton#amberButton { background: #D97706; border-color: #B45309; color: white; }
-QPushButton#redButton { background: #DC2626; border-color: #B91C1C; color: white; }
-QPushButton#navButton { background: #EEF6FF; border-color: #93C5FD; color: #0F4C81; }
-QPushButton#arrayToolButton { border-radius: 6px; min-height: 24px; max-height: 30px; padding: 2px 3px; font-size: 8px; font-weight: 700; }
-QPushButton#arrayToolButton[role="design"] { background: #0F766E; border-color: #0D9488; color: #FFFFFF; }
-QPushButton#arrayToolButton[role="response"] { background: #2563EB; border-color: #1D4ED8; color: #FFFFFF; }
-QPushButton#arrayToolButton[role="print"] { background: #F59E0B; border-color: #D97706; color: #1F2937; }
-QPushButton#arrayToolButton[role="close"] { background: #DC2626; border-color: #B91C1C; color: #FFFFFF; }
-QPushButton#arrayToolButton:hover { border-color: #0EA5E9; }
-QTabWidget::pane { border: 1px solid #CBD5E1; border-radius: 7px; background: #FFFFFF; }
-QTabBar::tab { background: #EAF0F7; border: 1px solid #C6D3E2; padding: 4px 6px; font-size: 8px; font-weight: 600; min-height: 16px; }
-QTabBar::tab:selected { background: #0E7490; color: #FFFFFF; border-color: #0E7490; }
-QTabBar::tab:hover { background: #D8ECFA; }
-QDoubleSpinBox, QSpinBox, QComboBox, QLineEdit { min-height: 20px; padding: 1px 4px; font-size: 10px; }
-QRadioButton, QCheckBox { spacing: 5px; font-size: 10px; }
-QFrame#plotCard, QFrame#designCard { background: #FFFFFF; border: 1px solid #CBD5E1; border-radius: 8px; }
-QFrame#leftPanel { background: #FFFFFF; border: 1px solid #CBD5E1; border-radius: 8px; }
-QLabel#statusLabel { background: #FFFFFF; border: 1px solid #D6DEE8; border-radius: 5px; padding: 4px 8px; color: #334155; font-size: 10px; }
+QWidget#arrayResponseDashboard {
+    background:#eef4fb;
+    color:#172033;
+    font-family:Segoe UI, Arial, sans-serif;
+    font-size:9.5px;
+}
+QFrame#topHeader {
+    background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #102a43,stop:.55 #0e7490,stop:1 #164e63);
+    border:1px solid #0e7490;
+    border-radius:12px;
+}
+QLabel#headerTitle { color:#ffffff; font-size:12px; font-weight:900; letter-spacing:.4px; }
+QLabel#headerSubtle { color:#d9f4ff; font-size:8.5px; font-weight:650; }
+QFrame#metricTile {
+    background:rgba(255,255,255,0.95);
+    border:1px solid rgba(226,232,240,0.95);
+    border-radius:8px;
+}
+QLabel#metricCaption { color:#64748b; font-size:8px; font-weight:800; }
+QLabel#valueLabel { color:#0369a1; font-size:10px; font-weight:900; }
+QGroupBox {
+    border:1px solid #c3d0de;
+    border-radius:10px;
+    margin-top:8px;
+    padding:8px;
+    font-size:9.5px;
+    font-weight:800;
+    background:#ffffff;
+}
+QGroupBox::title { subcontrol-origin: margin; left:10px; padding:0 5px; color:#0f4c81; }
+QLabel { font-size:9.5px; }
+QPushButton {
+    border:1px solid #b6c3d1;
+    border-radius:8px;
+    padding:5px 9px;
+    min-height:24px;
+    background:#ffffff;
+    color:#182033;
+    font-size:9.5px;
+    font-weight:800;
+}
+QPushButton:hover { background:#e0f2fe; border-color:#38bdf8; }
+QPushButton#accentButton { background:#0e7490; border-color:#0e7490; color:white; }
+QPushButton#blueButton { background:#dbeafe; border-color:#60a5fa; color:#1d4ed8; }
+QPushButton#greenButton { background:#dcfce7; border-color:#86efac; color:#166534; }
+QPushButton#amberButton { background:#ffedd5; border-color:#fdba74; color:#9a3412; }
+QPushButton#redButton { background:#fee2e2; border-color:#fca5a5; color:#991b1b; }
+QPushButton#navButton { background:#eef6ff; border-color:#93c5fd; color:#0f4c81; min-width:34px; }
+QPushButton#arrayToolButton { border-radius:9px; min-height:30px; padding:4px 8px; font-size:9px; font-weight:900; }
+QPushButton#arrayToolButton[role="design"] { background:#0f766e; border-color:#0d9488; color:#ffffff; }
+QPushButton#arrayToolButton[role="response"] { background:#2563eb; border-color:#1d4ed8; color:#ffffff; }
+QPushButton#arrayToolButton[role="print"] { background:#f59e0b; border-color:#d97706; color:#1f2937; }
+QPushButton#arrayToolButton[role="close"] { background:#dc2626; border-color:#b91c1c; color:#ffffff; }
+QTabWidget::pane { border:1px solid #cbd5e1; border-radius:9px; background:#ffffff; }
+QTabBar::tab { background:#eaf0f7; border:1px solid #c6d3e2; padding:5px 8px; font-size:8.5px; font-weight:800; min-height:18px; }
+QTabBar::tab:selected { background:#0e7490; color:#ffffff; border-color:#0e7490; }
+QTabBar::tab:hover { background:#d8ecfa; }
+QDoubleSpinBox, QSpinBox, QComboBox, QLineEdit {
+    background:#ffffff;
+    border:1px solid #b8c6d8;
+    border-radius:7px;
+    min-height:23px;
+    padding:2px 5px;
+    font-size:9.5px;
+}
+QDoubleSpinBox:focus, QSpinBox:focus { border-color:#0ea5e9; background:#f8fcff; }
+QRadioButton, QCheckBox { spacing:5px; font-size:9px; color:#223044; }
+QFrame#plotCard, QFrame#designCard, QFrame#leftPanel {
+    background:#ffffff;
+    border:1px solid #cbd5e1;
+    border-radius:12px;
+}
+QLabel#statusLabel {
+    background:#ffffff;
+    border:1px solid #d6dee8;
+    border-radius:8px;
+    padding:6px 10px;
+    color:#334155;
+    font-size:9.5px;
+    font-weight:650;
+}
 """
 
 
@@ -84,7 +138,7 @@ class ArrayDesignCanvas(QWidget):
         self.cursor_x = 0.0
         self.cursor_y = 0.0
         self.cursor_visible = False
-        self.setMinimumSize(340, 300)
+        self.setMinimumSize(320, 250)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 
     def _plot_rect(self) -> QRectF:
@@ -143,15 +197,15 @@ class ArrayDesignCanvas(QWidget):
     def paintEvent(self, event) -> None:  # noqa: N802
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-        p.fillRect(self.rect(), QColor("#050505"))
+        p.fillRect(self.rect(), QColor("#0b1220"))
         r = self._plot_rect()
-        p.setPen(QPen(QColor("#E6E6E6"), 1.4))
+        p.setPen(QPen(QColor("#e2e8f0"), 1.4))
         p.drawRect(r)
         font = QFont(self.font())
         font.setPointSize(7)
         p.setFont(font)
         if self.show_grid:
-            p.setPen(QPen(QColor("#008D96"), 1))
+            p.setPen(QPen(QColor("#1e3a8a"), 0.7))
             gx = self.grid_x if self.grid_x > 0 else max(self.model.x_size / 5.0, 1.0)
             gy = self.grid_y if self.grid_y > 0 else max(self.model.y_size / 5.0, 1.0)
             x = self.nudge_x
@@ -164,10 +218,10 @@ class ArrayDesignCanvas(QWidget):
                 pt = self._to_screen(0, y)
                 p.drawLine(round(r.left()), pt.y(), round(r.right()), pt.y())
                 y += gy
-        p.setPen(QPen(QColor("#FF1B1B"), 1.2))
+        p.setPen(QPen(QColor("#38bdf8"), 1.2))
         p.drawLine(round(r.left()), round(r.bottom()), round(r.right()), round(r.bottom()))
         p.drawLine(round(r.left()), round(r.top()), round(r.left()), round(r.bottom()))
-        p.setPen(QPen(QColor("#FF2A2A"), 1))
+        p.setPen(QPen(QColor("#94a3b8"), 1))
         tick_count = 10
         for i in range(tick_count + 1):
             xval = i * self.model.x_size / tick_count
@@ -178,7 +232,7 @@ class ArrayDesignCanvas(QWidget):
             py = self._to_screen(0, yval).y()
             p.drawLine(round(r.left()) - 6, py, round(r.left()), py)
             p.drawText(round(r.left()) - 52, py + 4, f"{yval:.1f}")
-        p.setPen(QPen(QColor("#FF2A2A"), 1))
+        p.setPen(QPen(QColor("#94a3b8"), 1))
         p.drawLine(round(r.left() + r.width() * 0.35), round(r.top()), round(r.left() + r.width() * 0.35), round(r.bottom()))
         p.drawLine(round(r.left()), round(r.bottom() - r.height() * 0.64), round(r.right()), round(r.bottom() - r.height() * 0.64))
         p.setPen(QPen(QColor("#FF0000"), 1))
@@ -252,7 +306,7 @@ class ResponseCanvas(QWidget):
         self._hover_sample: dict | None = None
         self._last_curve = None
         self.setMouseTracking(True)
-        self.setMinimumSize(460, 310)
+        self.setMinimumSize(360, 260)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 
     def _plot_rect(self) -> QRectF:
@@ -361,19 +415,19 @@ class ResponseCanvas(QWidget):
                 last = (round(sx), round(sy))
         cx = r.left() + max(0.0, min(11.0, self.cursor_x)) / 11.0 * r.width()
         cy = r.bottom() - max(0.0, min(1.0, self.cursor_y)) * r.height()
-        p.setPen(QPen(QColor("#FF2020"), 1.2))
+        p.setPen(QPen(QColor("#ef4444"), 1.2))
         p.drawLine(round(cx), round(r.top()), round(cx), round(r.bottom()))
         p.drawLine(round(r.left()), round(cy), round(r.right()), round(cy))
-        p.setBrush(QBrush(QColor("#FF2020")))
+        p.setBrush(QBrush(QColor("#ef4444")))
         p.drawEllipse(QPoint(round(cx), round(cy)), 3, 3)
         if self._hover_sample is not None:
             sample_pt = self._to_screen(float(self._hover_sample["ratio"]), float(self._hover_sample["response"]))
             p.setBrush(QBrush(QColor("#FDBA74")))
             p.setPen(QPen(QColor("#EA580C"), 1.4))
             p.drawEllipse(sample_pt, 5, 5)
-        p.setPen(QPen(QColor("#0E31FF"), 1.1))
+        p.setPen(QPen(QColor("#2563eb"), 1.1))
         p.drawText(round(r.left()), round(r.top()) - 8, f"Cursor X : {self.cursor_x:.2f}   Cursor Y : {self.cursor_y:.2f}")
-        p.setPen(QPen(QColor("#242424"), 1))
+        p.setPen(QPen(QColor("#1f2937"), 1))
         p.drawText(round(r.left()), 22, f"File : {self.model.file_name}")
         p.drawText(round(r.left() + r.width() * 0.43), 22, f"Elements : {self.model.elements}")
         p.drawText(round(r.left() + r.width() * 0.78), 22, f"Azimuth : {self.azimuth:.1f} Deg")
@@ -383,7 +437,7 @@ class ResponseCanvas(QWidget):
             p.drawText(round(r.left() + r.width() * 0.43), 38, f"Vel(F={self.frequency:.0f}) : {frequency_to_velocity(self.cursor_x, self.frequency, max(curve.projected_length,1)):.2f} m/s")
         p.drawText(round(r.left() + r.width() * 0.78), 38, f"Length : {curve.projected_length:.2f}")
         p.drawText(round(r.center().x()) - 76, round(r.bottom()) + 28, "Array Length/Wavelength")
-        p.setPen(QPen(QColor("#FF1D1D"), 1))
+        p.setPen(QPen(QColor("#0e7490"), 1))
         p.drawText(round(r.right()) - 170, round(r.bottom()) + 48, "TGP Geophone Array Analysis")
 
     def set_palette(self, palette_name: str) -> None:
@@ -432,16 +486,16 @@ class ArrayMapPreview(QWidget):
     def paintEvent(self, event) -> None:  # noqa: N802
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-        p.fillRect(self.rect(), QColor("#050505"))
+        p.fillRect(self.rect(), QColor("#0b1220"))
         cx, cy = self.width() / 2, self.height() / 2
         rad = min(self.width(), self.height()) * 0.42
-        p.setPen(QPen(QColor("#001CFF"), 1))
+        p.setPen(QPen(QColor("#38bdf8"), 1))
         p.drawEllipse(QPoint(round(cx), round(cy)), round(rad), round(rad))
         p.drawEllipse(QPoint(round(cx), round(cy)), round(rad * 0.72), round(rad * 0.72))
         rect_size = rad * 1.05
         p.setPen(QPen(QColor("#777777"), 1))
         p.drawRect(QRectF(cx - rect_size/2, cy - rect_size/2, rect_size, rect_size))
-        p.setPen(QPen(QColor("#28FF55"), 2))
+        p.setPen(QPen(QColor("#22c55e"), 2))
         for pt in self.model.points:
             sx = cx - rect_size/2 + (pt.x / max(self.model.x_size, 1.0)) * rect_size
             sy = cy + rect_size/2 - (pt.y / max(self.model.y_size, 1.0)) * rect_size
@@ -471,25 +525,47 @@ class ArrayResponseDashboard(QWidget):
         self._apply_compact_widgets()
         self.setStyleSheet(STYLE)
 
+
+    def _metric_tile(self, caption: str, widget: QWidget) -> QFrame:
+        tile = QFrame(self)
+        tile.setObjectName("metricTile")
+        layout = QVBoxLayout(tile)
+        layout.setContentsMargins(8, 5, 8, 5)
+        layout.setSpacing(2)
+        label = QLabel(caption)
+        label.setObjectName("metricCaption")
+        layout.addWidget(label)
+        layout.addWidget(widget)
+        return tile
+
     def _build_ui(self) -> None:
         root = QVBoxLayout(self)
-        root.setContentsMargins(6, 6, 6, 6)
-        root.setSpacing(5)
-        self.header = QGroupBox("Array Information")
-        hg = QGridLayout(self.header); hg.setContentsMargins(8, 8, 8, 6); hg.setHorizontalSpacing(8); hg.setVerticalSpacing(4)
+        root.setContentsMargins(8, 8, 8, 8)
+        root.setSpacing(8)
+        self.header = QFrame()
+        self.header.setObjectName("topHeader")
+        hg = QGridLayout(self.header); hg.setContentsMargins(12, 8, 12, 8); hg.setHorizontalSpacing(10); hg.setVerticalSpacing(4)
+        title = QLabel("Geophone Array Response")
+        title.setObjectName("headerTitle")
+        subtitle = QLabel("Interactive design, azimuth response and field-array QC")
+        subtitle.setObjectName("headerSubtle")
         self.file_label = QLabel("Untitled.GAR"); self.file_label.setObjectName("valueLabel")
         self.elem_label = QLabel("0"); self.elem_label.setObjectName("valueLabel")
-        self.x_size = QDoubleSpinBox(); self.x_size.setRange(1, 10000); self.x_size.setValue(25); self.x_size.setDecimals(2); self.x_size.setMaximumWidth(84)
-        self.y_size = QDoubleSpinBox(); self.y_size.setRange(1, 10000); self.y_size.setValue(25); self.y_size.setDecimals(2); self.y_size.setMaximumWidth(84)
-        hg.addWidget(QLabel("File Name"), 0, 0); hg.addWidget(self.file_label, 0, 1, 1, 3)
-        hg.addWidget(QLabel("Elements"), 0, 4); hg.addWidget(self.elem_label, 0, 5)
-        hg.addWidget(QLabel("X Size"), 0, 6); hg.addWidget(self.x_size, 0, 7)
-        hg.addWidget(QLabel("Y Size"), 0, 8); hg.addWidget(self.y_size, 0, 9)
+        self.x_size = QDoubleSpinBox(); self.x_size.setRange(1, 10000); self.x_size.setValue(25); self.x_size.setDecimals(2)
+        self.y_size = QDoubleSpinBox(); self.y_size.setRange(1, 10000); self.y_size.setValue(25); self.y_size.setDecimals(2)
+        hg.addWidget(title, 0, 0, 1, 2)
+        hg.addWidget(subtitle, 1, 0, 1, 2)
+        hg.addWidget(self._metric_tile("File Name", self.file_label), 0, 2, 2, 2)
+        hg.addWidget(self._metric_tile("Elements", self.elem_label), 0, 4, 2, 1)
+        hg.addWidget(self._metric_tile("X Size", self.x_size), 0, 5, 2, 1)
+        hg.addWidget(self._metric_tile("Y Size", self.y_size), 0, 6, 2, 1)
+        hg.setColumnStretch(2, 1)
         root.addWidget(self.header)
 
-        body = QHBoxLayout(); body.setSpacing(7)
-        root.addLayout(body, 1)
-        self.left = QFrame(); self.left.setObjectName("leftPanel"); self.left.setMinimumWidth(210); self.left.setMaximumWidth(245)
+        body = QSplitter(Qt.Orientation.Horizontal, self)
+        body.setChildrenCollapsible(False)
+        root.addWidget(body, 1)
+        self.left = QFrame(); self.left.setObjectName("leftPanel"); self.left.setMinimumWidth(210); self.left.setMaximumWidth(320)
         left_l = QVBoxLayout(self.left); left_l.setContentsMargins(5, 5, 5, 5); left_l.setSpacing(5)
         self.preview = ArrayMapPreview(self.model)
         left_l.addWidget(self.preview)
@@ -569,7 +645,10 @@ class ArrayResponseDashboard(QWidget):
         self.design_card = QFrame(); self.design_card.setObjectName("designCard")
         self._build_design_card()
         self.stack.addWidget(self.response_card); self.stack.addWidget(self.design_card)
-        body.addWidget(self.stack, 1)
+        body.addWidget(self.stack)
+        body.setStretchFactor(0, 0)
+        body.setStretchFactor(1, 1)
+        body.setSizes([260, 980])
         self.status = QLabel("Ready. New array design created."); self.status.setObjectName("statusLabel")
         root.addWidget(self.status)
 
@@ -633,12 +712,12 @@ class ArrayResponseDashboard(QWidget):
         self.setFont(font)
         for cls in (QDoubleSpinBox, QSpinBox):
             for spin in self.findChildren(cls):
-                spin.setMaximumWidth(92)
-                spin.setMinimumWidth(68)
+                spin.setMaximumWidth(120)
+                spin.setMinimumWidth(72)
         for btn in self.findChildren(QPushButton):
             if btn.objectName() == "arrayToolButton":
-                btn.setMinimumHeight(24)
-                btn.setMaximumHeight(30)
+                btn.setMinimumHeight(28)
+                btn.setMaximumHeight(34)
             else:
                 btn.setMinimumHeight(22)
                 btn.setMaximumHeight(28)
