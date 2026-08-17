@@ -43,19 +43,25 @@ QWidget#arrayResponseDashboard {
     font-size:9.5px;
 }
 QFrame#topHeader {
-    background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #102a43,stop:.55 #0e7490,stop:1 #164e63);
-    border:1px solid #0e7490;
-    border-radius:12px;
+    background:#ffffff;
+    border:1px solid #cbd5e1;
+    border-left:5px solid #0e7490;
+    border-radius:9px;
 }
-QLabel#headerTitle { color:#ffffff; font-size:12px; font-weight:900; letter-spacing:.4px; }
-QLabel#headerSubtle { color:#d9f4ff; font-size:8.5px; font-weight:650; }
+QLabel#headerTitle { color:#0f172a; font-size:10.5px; font-weight:900; letter-spacing:.15px; }
+QLabel#headerSubtle { color:#0e7490; font-size:8.2px; font-weight:700; }
 QFrame#metricTile {
-    background:rgba(255,255,255,0.95);
-    border:1px solid rgba(226,232,240,0.95);
+    background:#f8fafc;
+    border:1px solid #d7e0ea;
+    border-radius:7px;
+}
+QLabel#metricCaption { color:#475569; font-size:7.7px; font-weight:850; }
+QLabel#valueLabel { color:#075985; font-size:9.3px; font-weight:900; }
+QFrame#sideRibbon {
+    background:#f8fafc;
+    border:1px solid #d6e0ea;
     border-radius:8px;
 }
-QLabel#metricCaption { color:#64748b; font-size:8px; font-weight:800; }
-QLabel#valueLabel { color:#0369a1; font-size:10px; font-weight:900; }
 QGroupBox {
     border:1px solid #c3d0de;
     border-radius:10px;
@@ -84,11 +90,12 @@ QPushButton#greenButton { background:#dcfce7; border-color:#86efac; color:#16653
 QPushButton#amberButton { background:#ffedd5; border-color:#fdba74; color:#9a3412; }
 QPushButton#redButton { background:#fee2e2; border-color:#fca5a5; color:#991b1b; }
 QPushButton#navButton { background:#eef6ff; border-color:#93c5fd; color:#0f4c81; min-width:34px; }
-QPushButton#arrayToolButton { border-radius:9px; min-height:30px; padding:4px 8px; font-size:9px; font-weight:900; }
-QPushButton#arrayToolButton[role="design"] { background:#0f766e; border-color:#0d9488; color:#ffffff; }
-QPushButton#arrayToolButton[role="response"] { background:#2563eb; border-color:#1d4ed8; color:#ffffff; }
-QPushButton#arrayToolButton[role="print"] { background:#f59e0b; border-color:#d97706; color:#1f2937; }
-QPushButton#arrayToolButton[role="close"] { background:#dc2626; border-color:#b91c1c; color:#ffffff; }
+QPushButton#arrayToolButton { border-radius:7px; min-height:24px; padding:3px 5px; font-size:8.3px; font-weight:900; }
+QPushButton#arrayToolButton[role="design"] { background:#e0f2fe; border-color:#38bdf8; color:#075985; }
+QPushButton#arrayToolButton[role="response"] { background:#dbeafe; border-color:#60a5fa; color:#1d4ed8; }
+QPushButton#arrayToolButton[role="print"] { background:#fef3c7; border-color:#f59e0b; color:#92400e; }
+QPushButton#arrayToolButton[role="close"] { background:#fee2e2; border-color:#fca5a5; color:#991b1b; }
+QPushButton#arrayToolButton:hover { background:#ffffff; border-color:#0ea5e9; color:#0f172a; }
 QTabWidget::pane { border:1px solid #cbd5e1; border-radius:9px; background:#ffffff; }
 QTabBar::tab { background:#eaf0f7; border:1px solid #c6d3e2; padding:5px 8px; font-size:8.5px; font-weight:800; min-height:18px; }
 QTabBar::tab:selected { background:#0e7490; color:#ffffff; border-color:#0e7490; }
@@ -108,6 +115,7 @@ QFrame#plotCard, QFrame#designCard, QFrame#leftPanel {
     border:1px solid #cbd5e1;
     border-radius:12px;
 }
+QSplitter::handle { background:#cbd5e1; }
 QLabel#statusLabel {
     background:#ffffff;
     border:1px solid #d6dee8;
@@ -544,30 +552,42 @@ class ArrayResponseDashboard(QWidget):
         root.setSpacing(8)
         self.header = QFrame()
         self.header.setObjectName("topHeader")
-        hg = QGridLayout(self.header); hg.setContentsMargins(12, 8, 12, 8); hg.setHorizontalSpacing(10); hg.setVerticalSpacing(4)
+        self.header.setMaximumHeight(64)
+        self.header.setMinimumHeight(52)
+        hg = QGridLayout(self.header)
+        hg.setContentsMargins(10, 5, 10, 5)
+        hg.setHorizontalSpacing(8)
+        hg.setVerticalSpacing(2)
         title = QLabel("Geophone Array Response")
         title.setObjectName("headerTitle")
-        subtitle = QLabel("Interactive design, azimuth response and field-array QC")
+        subtitle = QLabel("Design • response • field-array QC")
         subtitle.setObjectName("headerSubtle")
+        title_box = QWidget(self.header)
+        title_l = QVBoxLayout(title_box)
+        title_l.setContentsMargins(0, 0, 0, 0)
+        title_l.setSpacing(0)
+        title_l.addWidget(title)
+        title_l.addWidget(subtitle)
         self.file_label = QLabel("Untitled.GAR"); self.file_label.setObjectName("valueLabel")
         self.elem_label = QLabel("0"); self.elem_label.setObjectName("valueLabel")
         self.x_size = QDoubleSpinBox(); self.x_size.setRange(1, 10000); self.x_size.setValue(25); self.x_size.setDecimals(2)
         self.y_size = QDoubleSpinBox(); self.y_size.setRange(1, 10000); self.y_size.setValue(25); self.y_size.setDecimals(2)
-        hg.addWidget(title, 0, 0, 1, 2)
-        hg.addWidget(subtitle, 1, 0, 1, 2)
-        hg.addWidget(self._metric_tile("File Name", self.file_label), 0, 2, 2, 2)
-        hg.addWidget(self._metric_tile("Elements", self.elem_label), 0, 4, 2, 1)
-        hg.addWidget(self._metric_tile("X Size", self.x_size), 0, 5, 2, 1)
-        hg.addWidget(self._metric_tile("Y Size", self.y_size), 0, 6, 2, 1)
-        hg.setColumnStretch(2, 1)
+        hg.addWidget(title_box, 0, 0, 1, 1)
+        hg.addWidget(self._metric_tile("File", self.file_label), 0, 1, 1, 2)
+        hg.addWidget(self._metric_tile("Elements", self.elem_label), 0, 3, 1, 1)
+        hg.addWidget(self._metric_tile("X Size", self.x_size), 0, 4, 1, 1)
+        hg.addWidget(self._metric_tile("Y Size", self.y_size), 0, 5, 1, 1)
+        hg.setColumnStretch(1, 1)
         root.addWidget(self.header)
 
         body = QSplitter(Qt.Orientation.Horizontal, self)
         body.setChildrenCollapsible(False)
         root.addWidget(body, 1)
-        self.left = QFrame(); self.left.setObjectName("leftPanel"); self.left.setMinimumWidth(210); self.left.setMaximumWidth(320)
+        self.left = QFrame(); self.left.setObjectName("leftPanel"); self.left.setMinimumWidth(235); self.left.setMaximumWidth(380)
         left_l = QVBoxLayout(self.left); left_l.setContentsMargins(5, 5, 5, 5); left_l.setSpacing(5)
         self.preview = ArrayMapPreview(self.model)
+        self.preview.setMinimumHeight(120)
+        self.preview.setMaximumHeight(165)
         left_l.addWidget(self.preview)
 
         self.control_tabs = QTabWidget()
@@ -581,25 +601,27 @@ class ArrayResponseDashboard(QWidget):
         view_l.addWidget(QLabel("Response Palette"))
         self.palette_selector = PaletteSelectorButton(self._palette_name, view_tab)
         view_l.addWidget(self.palette_selector)
-        tool_grid = QGridLayout()
-        tool_grid.setContentsMargins(0, 3, 0, 0)
-        tool_grid.setHorizontalSpacing(5)
-        tool_grid.setVerticalSpacing(5)
+        ribbon = QFrame(view_tab)
+        ribbon.setObjectName("sideRibbon")
+        ribbon_l = QHBoxLayout(ribbon)
+        ribbon_l.setContentsMargins(5, 4, 5, 4)
+        ribbon_l.setSpacing(4)
         self.array_design_btn = QPushButton("Design"); self.array_design_btn.setObjectName("arrayToolButton"); self.array_design_btn.setProperty("role", "design")
-        self.response_btn = QPushButton("Resp"); self.response_btn.setObjectName("arrayToolButton"); self.response_btn.setProperty("role", "response")
+        self.response_btn = QPushButton("Response"); self.response_btn.setObjectName("arrayToolButton"); self.response_btn.setProperty("role", "response")
         self.print_btn = QPushButton("Print"); self.print_btn.setObjectName("arrayToolButton"); self.print_btn.setProperty("role", "print")
-        self.end_btn = QPushButton("End"); self.end_btn.setObjectName("arrayToolButton"); self.end_btn.setProperty("role", "close")
-        for btn, tip, row, col in (
-            (self.array_design_btn, "Open the editable array design canvas", 0, 0),
-            (self.response_btn, "Show the normalized array response plot", 0, 1),
-            (self.print_btn, "Prepare the current array response view for print/export", 1, 0),
-            (self.end_btn, "Close the Geophone Array Response workspace", 1, 1),
+        self.end_btn = QPushButton("Exit"); self.end_btn.setObjectName("arrayToolButton"); self.end_btn.setProperty("role", "close")
+        for btn, tip in (
+            (self.array_design_btn, "Open the editable array design canvas"),
+            (self.response_btn, "Show the normalized array response plot"),
+            (self.print_btn, "Prepare the current array response view for print/export"),
+            (self.end_btn, "Close the Geophone Array Response workspace"),
         ):
             btn.setToolTip(tip)
-            btn.setMinimumWidth(58)
-            btn.setMaximumWidth(86)
-            tool_grid.addWidget(btn, row, col)
-        view_l.addLayout(tool_grid)
+            btn.setMinimumWidth(0)
+            btn.setMaximumWidth(16777215)
+            btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+            ribbon_l.addWidget(btn)
+        view_l.addWidget(ribbon)
         view_l.addStretch(1)
         self.control_tabs.addTab(view_tab, "View")
 
@@ -648,7 +670,7 @@ class ArrayResponseDashboard(QWidget):
         body.addWidget(self.stack)
         body.setStretchFactor(0, 0)
         body.setStretchFactor(1, 1)
-        body.setSizes([260, 980])
+        body.setSizes([300, 980])
         self.status = QLabel("Ready. New array design created."); self.status.setObjectName("statusLabel")
         root.addWidget(self.status)
 
@@ -716,8 +738,8 @@ class ArrayResponseDashboard(QWidget):
                 spin.setMinimumWidth(72)
         for btn in self.findChildren(QPushButton):
             if btn.objectName() == "arrayToolButton":
-                btn.setMinimumHeight(28)
-                btn.setMaximumHeight(34)
+                btn.setMinimumHeight(24)
+                btn.setMaximumHeight(30)
             else:
                 btn.setMinimumHeight(22)
                 btn.setMaximumHeight(28)

@@ -30,6 +30,7 @@ from core.domain.data_quality_service import DataQualityService
 from ui.launch import StartupSplash, TutorialDialog
 from ui.dialogs.auth_dialog import AuthDialog
 from ui.dialogs.subscription_dialog import SubscriptionDialog
+from ui.spinbox_cursor_fix import install_spinbox_cursor_fix
 
 
 
@@ -485,6 +486,7 @@ def main() -> int:
     QApplication.setAttribute(Qt.AA_UseHighDpiPixmaps, True)
 
     app = QApplication(sys.argv)
+    install_spinbox_cursor_fix(app)
     app.setApplicationName("TGPAssure")
     app.setOrganizationName("TGP")
     app.setApplicationVersion("0.2.0")

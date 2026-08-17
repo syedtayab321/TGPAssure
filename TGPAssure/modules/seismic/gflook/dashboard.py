@@ -403,7 +403,7 @@ class GFPlot(QWidget):
         self.colorize_by_value = True
         self.line_width = 0.9
         self._palette_rect = QRectF()
-        self.setMinimumSize(170, 92)
+        self.setMinimumSize(210, 130)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.setToolTip("Click Palette to change waveform colors")
 
@@ -446,29 +446,33 @@ class GFPlot(QWidget):
     def paintEvent(self, event) -> None:  # noqa: N802
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing, True)
-        painter.fillRect(self.rect(), QColor(246, 249, 252))
+        painter.fillRect(self.rect(), QColor(245, 248, 252))
         outer = QRectF(1, 1, max(20, self.width() - 2), max(20, self.height() - 2))
-        painter.setPen(QPen(QColor(218, 226, 234), 1))
+        painter.setPen(QPen(QColor(214, 224, 235), 1))
         painter.setBrush(QColor(255, 255, 255))
-        painter.drawRoundedRect(outer, 7, 7)
-        self._palette_rect = QRectF(self.width() - 58, 6, 50, 15)
-        rect = QRectF(30, 22, max(20, self.width() - 42), max(20, self.height() - 36))
+        painter.drawRoundedRect(outer, 10, 10)
+        title_bar = QRectF(2, 2, max(20, self.width() - 4), 24)
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(QColor(248, 251, 253))
+        painter.drawRoundedRect(title_bar, 9, 9)
+        self._palette_rect = QRectF(self.width() - 70, 6, 60, 16)
+        rect = QRectF(34, 34, max(20, self.width() - 48), max(20, self.height() - 52))
         painter.fillRect(rect, QColor(255, 255, 255))
-        painter.setPen(QPen(QColor(203, 213, 225), 1))
-        painter.drawRect(rect)
-        painter.setFont(QFont("Segoe UI", 6, QFont.DemiBold))
-        painter.setPen(QColor(15, 23, 42))
-        painter.drawText(QRectF(8, 5, self.width() - 70, 15), Qt.AlignCenter, self.title)
+        painter.setPen(QPen(QColor(202, 213, 226), 1))
+        painter.drawRoundedRect(rect, 3, 3)
+        painter.setFont(QFont("Segoe UI", 7, QFont.DemiBold))
+        painter.setPen(QColor(15, 43, 66))
+        painter.drawText(QRectF(10, 5, self.width() - 88, 18), Qt.AlignVCenter | Qt.AlignLeft, self.title)
         self._draw_palette_badge(painter)
-        painter.setPen(QPen(QColor(226, 232, 240), 1, Qt.DotLine))
+        painter.setPen(QPen(QColor(225, 232, 240), 1, Qt.DotLine))
         for i in range(1, 5):
             x = rect.left() + rect.width() * i / 5
             y = rect.top() + rect.height() * i / 5
             painter.drawLine(QPointF(x, rect.top()), QPointF(x, rect.bottom()))
             painter.drawLine(QPointF(rect.left(), y), QPointF(rect.right(), y))
         if self.y is None or self.y.size == 0:
-            painter.setFont(QFont("Segoe UI", 7))
-            painter.setPen(QColor(120, 130, 140))
+            painter.setFont(QFont("Segoe UI", 8, QFont.DemiBold))
+            painter.setPen(QColor(125, 139, 154))
             painter.drawText(rect, Qt.AlignCenter, "No data")
             return
         y = self.y.astype(float)
@@ -524,10 +528,10 @@ class GFPlot(QWidget):
             draw_line(yy, QColor(14, 165, 233))
             self.colorize_by_value = old
         self._draw_color_scale(painter, rect, ymin, ymax)
-        painter.setFont(QFont("Segoe UI", 5))
-        painter.setPen(QColor(100, 116, 139))
-        painter.drawText(2, int(rect.center().y()), "Amp")
-        painter.drawText(QRectF(rect.left(), rect.bottom() + 0, rect.width(), 10), Qt.AlignCenter, "Time / Frequency")
+        painter.setFont(QFont("Segoe UI", 6))
+        painter.setPen(QColor(91, 106, 124))
+        painter.drawText(4, int(rect.center().y()), "Amp")
+        painter.drawText(QRectF(rect.left(), rect.bottom() + 3, rect.width(), 12), Qt.AlignCenter, "Time / Frequency")
 
     def _draw_palette_badge(self, painter: QPainter) -> None:
         painter.save()
@@ -627,50 +631,77 @@ class TGPGroundForceLookWidget(QWidget):
 
     def _build_ui(self) -> None:
         root = QVBoxLayout(self)
-        root.setContentsMargins(5, 5, 5, 4)
-        root.setSpacing(4)
+        root.setContentsMargins(8, 8, 8, 6)
+        root.setSpacing(7)
 
+        # Compact professional header. Keep the useful controls but remove the
+        # oversized banner/colorbar that consumed the workspace in the old view.
         visual_bar = QFrame()
         visual_bar.setObjectName("gfVisualBar")
         visual_layout = QHBoxLayout(visual_bar)
-        visual_layout.setContentsMargins(8, 5, 8, 5)
-        visual_layout.setSpacing(8)
-        heading = QLabel("GFLOOK QC VISUALIZATION")
+        visual_layout.setContentsMargins(12, 8, 12, 8)
+        visual_layout.setSpacing(10)
+
+        title_box = QFrame()
+        title_box.setObjectName("gfTitleBox")
+        title_l = QVBoxLayout(title_box)
+        title_l.setContentsMargins(0, 0, 0, 0)
+        title_l.setSpacing(1)
+        heading = QLabel("Ground Force QC")
         heading.setObjectName("gfVisualTitle")
-        visual_layout.addWidget(heading)
-        visual_layout.addStretch(1)
-        visual_layout.addWidget(QLabel("Global palette:"))
+        subtitle = QLabel("Sercel GF waveform review, QC diagnostics and export workspace")
+        subtitle.setObjectName("gfVisualSubtitle")
+        title_l.addWidget(heading)
+        title_l.addWidget(subtitle)
+        visual_layout.addWidget(title_box, 2)
+
+        self.header_records = QLabel("Records\n0")
+        self.header_records.setObjectName("gfMetricCard")
+        visual_layout.addWidget(self.header_records)
+        self.header_status = QLabel("Status\nReady")
+        self.header_status.setObjectName("gfMetricCard")
+        visual_layout.addWidget(self.header_status)
+
+        visual_layout.addWidget(QLabel("Palette"))
         self.palette_selector = PaletteSelectorButton("Seismic", visual_bar)
-        self.palette_selector.setMinimumWidth(150)
+        self.palette_selector.setMinimumWidth(138)
         self.palette_selector.currentTextChanged.connect(self._apply_global_palette)
         visual_layout.addWidget(self.palette_selector)
-        self.value_color_check = QCheckBox("Color traces by value")
+        self.value_color_check = QCheckBox("Value color")
         self.value_color_check.setChecked(True)
         self.value_color_check.toggled.connect(self._set_value_coloring)
         visual_layout.addWidget(self.value_color_check)
         root.addWidget(visual_bar)
+
         self.global_colorbar = PaletteColorBar(orientation=Qt.Horizontal, parent=self)
-        self.global_colorbar.setFixedHeight(34)
+        self.global_colorbar.setObjectName("gfGlobalColorbar")
+        self.global_colorbar.setFixedHeight(24)
         self.global_colorbar.set_state(-1.0, 1.0, "Seismic", label="Normalized waveform / QC value")
         root.addWidget(self.global_colorbar)
 
         splitter = QSplitter(Qt.Horizontal)
+        splitter.setObjectName("gfMainSplitter")
         splitter.setChildrenCollapsible(False)
 
         left = QFrame()
         left.setObjectName("gfLeftPanel")
-        left.setMinimumWidth(205)
-        left.setMaximumWidth(285)
+        left.setMinimumWidth(240)
+        left.setMaximumWidth(330)
         left_l = QVBoxLayout(left)
-        left_l.setContentsMargins(6, 6, 6, 6)
-        left_l.setSpacing(5)
+        left_l.setContentsMargins(10, 10, 10, 10)
+        left_l.setSpacing(8)
+
+        side_title = QLabel("Input Files")
+        side_title.setObjectName("gfSectionTitle")
+        left_l.addWidget(side_title)
 
         row = QHBoxLayout()
-        row.setSpacing(4)
+        row.setSpacing(6)
         for text, slot in (("Folder", self.open_folder), ("File", self.open_file), ("Reload", self.reload_folder)):
             btn = QPushButton(text)
             btn.setObjectName("compactButton")
-            btn.setFixedHeight(24)
+            btn.setMinimumHeight(30)
+            btn.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
             btn.clicked.connect(slot)
             row.addWidget(btn)
         left_l.addLayout(row)
@@ -685,58 +716,66 @@ class TGPGroundForceLookWidget(QWidget):
         self.file_list.currentRowChanged.connect(self._on_file_selected)
         left_l.addWidget(self.file_list, 1)
 
+        summary_title = QLabel("QC Summary")
+        summary_title.setObjectName("gfSectionTitle")
+        left_l.addWidget(summary_title)
         self.summary_table = QTableWidget(0, 3)
         self.summary_table.setObjectName("gfSummary")
         self.summary_table.setHorizontalHeaderLabels(["Status", "Vib", "SP"])
         self.summary_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         self.summary_table.verticalHeader().setVisible(False)
         self.summary_table.setAlternatingRowColors(True)
-        self.summary_table.setMaximumHeight(112)
+        self.summary_table.setMinimumHeight(135)
+        self.summary_table.setMaximumHeight(190)
         left_l.addWidget(self.summary_table)
         splitter.addWidget(left)
 
         right = QFrame()
         right.setObjectName("gfWorkArea")
         right_l = QVBoxLayout(right)
-        right_l.setContentsMargins(0, 0, 0, 0)
-        right_l.setSpacing(0)
+        right_l.setContentsMargins(8, 8, 8, 8)
+        right_l.setSpacing(7)
         self.tabs = QTabWidget()
+        self.tabs.setObjectName("gfTabs")
         self.tabs.setDocumentMode(True)
-        self.tabs.addTab(self._build_page1(), "Page 1")
-        self.tabs.addTab(self._build_page2(), "Page 2")
-        self.tabs.addTab(self._build_page3(), "Page 3")
+        self.tabs.addTab(self._build_page1(), "Waveforms")
+        self.tabs.addTab(self._build_page2(), "Start / End")
+        self.tabs.addTab(self._build_page3(), "Diagnostics")
         self.tabs.addTab(self._build_page4(), "GIS / QC")
         self.tabs.addTab(self._build_file_info(), "File Info")
         right_l.addWidget(self.tabs, 1)
         splitter.addWidget(right)
         splitter.setStretchFactor(0, 0)
         splitter.setStretchFactor(1, 1)
-        splitter.setSizes([230, 1220])
+        splitter.setSizes([280, 1180])
         root.addWidget(splitter, 1)
 
-        footer = QHBoxLayout()
-        footer.setContentsMargins(0, 0, 0, 0)
-        footer.setSpacing(4)
+        footer_bar = QFrame()
+        footer_bar.setObjectName("gfFooterBar")
+        footer = QHBoxLayout(footer_bar)
+        footer.setContentsMargins(8, 6, 8, 6)
+        footer.setSpacing(7)
         for text, slot in (("Run QC", self.run_qc), ("QC Listing", self.export_qc_listing), ("KMZ", self.export_kmz), ("Shape File", self.export_shapefile), ("SEG-Y", self.convert_to_segy), ("Export Image", self.export_image)):
             b = QPushButton(text)
             b.setObjectName("footerButton")
-            b.setFixedHeight(26)
+            b.setMinimumHeight(32)
+            b.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
             b.clicked.connect(slot)
             footer.addWidget(b)
-        root.addLayout(footer)
+        root.addWidget(footer_bar)
 
     def _build_page1(self) -> QWidget:
         page = QWidget()
         layout = QVBoxLayout(page)
-        layout.setContentsMargins(6, 4, 6, 6)
-        layout.setSpacing(4)
+        layout.setContentsMargins(10, 8, 10, 10)
+        layout.setSpacing(8)
         self.record_title = QLabel("")
         self.record_title.setObjectName("recordTitle")
-        self.record_title.setFixedHeight(22)
+        self.record_title.setMinimumHeight(28)
         layout.addWidget(self.record_title)
         grid = QGridLayout()
         grid.setContentsMargins(0, 0, 0, 0)
-        grid.setSpacing(4)
+        grid.setSpacing(8)
         layout.addLayout(grid, 1)
         self.plots_p1 = {name: GFPlot(name) for name in ("Reference", "GF", "Mass", "BP")}
         for i, plot in enumerate(self.plots_p1.values()):
@@ -744,7 +783,7 @@ class TGPGroundForceLookWidget(QWidget):
         return page
 
     def _build_page2(self) -> QWidget:
-        page = QWidget(); grid = QGridLayout(page); grid.setContentsMargins(6, 6, 6, 6); grid.setSpacing(4)
+        page = QWidget(); grid = QGridLayout(page); grid.setContentsMargins(10, 10, 10, 10); grid.setSpacing(8)
         self.plots_p2 = {
             "Ref Start": GFPlot("Ref Start"), "Ref End": GFPlot("Ref End"),
             "GF Start": GFPlot("GF Start"), "GF End": GFPlot("GF End"),
@@ -755,7 +794,7 @@ class TGPGroundForceLookWidget(QWidget):
         return page
 
     def _build_page3(self) -> QWidget:
-        page = QWidget(); grid = QGridLayout(page); grid.setContentsMargins(6, 6, 6, 6); grid.setSpacing(4)
+        page = QWidget(); grid = QGridLayout(page); grid.setContentsMargins(10, 10, 10, 10); grid.setSpacing(8)
         self.plots_p3 = {
             "Phase Error": GFPlot("Phase Error"), "FFT Ref": GFPlot("FFT Ref"),
             "FFT GF": GFPlot("FFT GF"), "GF Distortion": GFPlot("GF Distortion"),
@@ -766,14 +805,14 @@ class TGPGroundForceLookWidget(QWidget):
         return page
 
     def _build_page4(self) -> QWidget:
-        page = QWidget(); layout = QVBoxLayout(page); layout.setContentsMargins(6, 6, 6, 6); layout.setSpacing(5)
+        page = QWidget(); layout = QVBoxLayout(page); layout.setContentsMargins(10, 10, 10, 10); layout.setSpacing(8)
         self.map_canvas = GFMapCanvas(); layout.addWidget(self.map_canvas, 1)
-        self.qc_text = QPlainTextEdit(); self.qc_text.setReadOnly(True); self.qc_text.setMaximumHeight(130); layout.addWidget(self.qc_text)
+        self.qc_text = QPlainTextEdit(); self.qc_text.setObjectName("gfQcText"); self.qc_text.setReadOnly(True); self.qc_text.setMaximumHeight(150); layout.addWidget(self.qc_text)
         return page
 
     def _build_file_info(self) -> QWidget:
-        page = QWidget(); layout = QVBoxLayout(page)
-        self.info_table = QTableWidget(0, 2); self.info_table.setHorizontalHeaderLabels(["Field", "Value"]); self.info_table.setAlternatingRowColors(True)
+        page = QWidget(); layout = QVBoxLayout(page); layout.setContentsMargins(10, 10, 10, 10); layout.setSpacing(8)
+        self.info_table = QTableWidget(0, 2); self.info_table.setObjectName("gfInfoTable"); self.info_table.setHorizontalHeaderLabels(["Field", "Value"]); self.info_table.setAlternatingRowColors(True)
         self.info_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
         self.info_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
         layout.addWidget(self.info_table)
@@ -781,132 +820,229 @@ class TGPGroundForceLookWidget(QWidget):
 
     def _apply_style(self) -> None:
         self.setStyleSheet("""
-            TGPGroundForceLookWidget, QWidget {
+            TGPGroundForceLookWidget {
                 font-family: "Segoe UI", Arial, sans-serif;
-                font-size: 7pt;
+                font-size: 8pt;
                 color: #0F172A;
-                background: #EEF3F7;
+                background: #EEF3F8;
+            }
+            TGPGroundForceLookWidget QWidget {
+                font-family: "Segoe UI", Arial, sans-serif;
+                font-size: 8pt;
+                color: #0F172A;
             }
             QFrame#gfVisualBar {
-                background: #F8FBFD;
-                border: 1px solid #D7E1EA;
-                border-radius: 8px;
+                background: #FFFFFF;
+                border: 1px solid #D5E0EB;
+                border-radius: 12px;
+            }
+            QFrame#gfTitleBox {
+                background: transparent;
+                border: 0px;
             }
             QLabel#gfVisualTitle {
-                color: #0F4C5C;
-                font-size: 8pt;
+                color: #073B4C;
+                font-size: 12pt;
                 font-weight: 800;
-                letter-spacing: 0.5px;
+                letter-spacing: 0.2px;
+                background: transparent;
             }
-            QFrame#gfLeftPanel, QFrame#gfWorkArea {
+            QLabel#gfVisualSubtitle {
+                color: #64748B;
+                font-size: 7.5pt;
+                font-weight: 500;
+                background: transparent;
+            }
+            QLabel#gfMetricCard {
+                background: #F6FAFD;
+                border: 1px solid #D8E4EE;
+                border-radius: 9px;
+                color: #0F4C5C;
+                padding: 5px 12px;
+                min-width: 72px;
+                font-size: 7.6pt;
+                font-weight: 800;
+            }
+            QLabel {
+                background: transparent;
+            }
+            QFrame#gfLeftPanel, QFrame#gfWorkArea, QFrame#gfFooterBar {
                 background: #FFFFFF;
-                border: 1px solid #D7E1EA;
-                border-radius: 7px;
+                border: 1px solid #D5E0EB;
+                border-radius: 12px;
             }
             QFrame#gfLeftPanel {
-                background: #F8FBFD;
+                background: #F8FBFE;
+            }
+            QLabel#gfSectionTitle {
+                color: #14364A;
+                font-size: 8.5pt;
+                font-weight: 800;
+                padding: 2px 1px;
             }
             QLabel#gfStatus {
-                background: #EAF5FF;
-                color: #0F4C81;
-                border: 1px solid #CFE7FA;
-                border-radius: 7px;
-                padding: 4px 6px;
-                font-size: 7pt;
-                font-weight: 600;
+                background: #EDF7FF;
+                color: #0D5F78;
+                border: 1px solid #CFE6F6;
+                border-radius: 8px;
+                padding: 6px 8px;
+                font-size: 7.8pt;
+                font-weight: 650;
             }
             QLabel#recordTitle {
-                background: #FFFFFF;
-                border: 1px solid #DCE6EE;
-                border-left: 4px solid #0EA5E9;
-                border-radius: 6px;
-                color: #0F172A;
-                padding: 2px 7px;
-                font-size: 7pt;
-                font-weight: 700;
+                background: #F8FBFE;
+                border: 1px solid #D8E4EE;
+                border-left: 5px solid #0EA5E9;
+                border-radius: 9px;
+                color: #102A43;
+                padding: 5px 9px;
+                font-size: 8pt;
+                font-weight: 800;
             }
-            QTabWidget::pane {
-                border: 0px;
+            PaletteColorBar#gfGlobalColorbar {
+                background: transparent;
+            }
+            QTabWidget#gfTabs::pane {
+                border: 1px solid #D8E4EE;
+                border-radius: 10px;
                 background: #FFFFFF;
                 top: -1px;
             }
-            QTabBar::tab {
-                background: #E7EEF5;
-                color: #334155;
-                padding: 5px 10px;
-                min-width: 68px;
-                border: 1px solid #D6E1EA;
-                border-bottom: 1px solid #CBD5E1;
-                border-top-left-radius: 8px;
-                border-top-right-radius: 8px;
-                font-size: 7pt;
-                font-weight: 700;
-                margin-right: 2px;
+            QTabWidget#gfTabs QTabBar::tab {
+                background: #F3F7FB;
+                color: #31465A;
+                padding: 8px 18px;
+                min-width: 88px;
+                border: 1px solid #D8E4EE;
+                border-bottom: 0px;
+                border-top-left-radius: 10px;
+                border-top-right-radius: 10px;
+                font-size: 8pt;
+                font-weight: 800;
+                margin-right: 4px;
             }
-            QTabBar::tab:selected {
+            QTabWidget#gfTabs QTabBar::tab:selected {
                 background: #0F6B7F;
                 color: #FFFFFF;
                 border-color: #0F6B7F;
             }
-            QTabBar::tab:hover:!selected {
-                background: #DDF3FA;
-                color: #0F4C81;
+            QTabWidget#gfTabs QTabBar::tab:hover:!selected {
+                background: #E5F6FB;
+                color: #0F6B7F;
             }
             QPushButton {
                 background: #0F6B7F;
-                color: white;
-                border: 1px solid #0B5260;
-                border-radius: 7px;
-                padding: 4px 10px;
-                font-size: 7pt;
-                font-weight: 700;
+                color: #FFFFFF;
+                border: 1px solid #0B5666;
+                border-radius: 8px;
+                padding: 5px 10px;
+                font-size: 8pt;
+                font-weight: 800;
             }
-            QPushButton:hover { background: #128199; border-color: #0E7490; }
-            QPushButton:pressed { background: #0B4B59; }
-            QPushButton:disabled { background: #CBD5E1; color: #64748B; border-color: #CBD5E1; }
+            QPushButton:hover {
+                background: #12819A;
+                border-color: #0E7490;
+            }
+            QPushButton:pressed {
+                background: #0B4B59;
+            }
+            QPushButton:disabled {
+                background: #CBD5E1;
+                color: #64748B;
+                border-color: #CBD5E1;
+            }
             QPushButton#compactButton {
-                background: #0E7490;
-                min-width: 52px;
+                background: #FFFFFF;
+                color: #0F5F74;
+                border: 1px solid #BFD3E3;
+                padding: 5px 7px;
+            }
+            QPushButton#compactButton:hover {
+                background: #EAF8FC;
+                border-color: #0EA5E9;
+                color: #0B5260;
             }
             QPushButton#footerButton {
-                background: #0F172A;
-                border-color: #1E293B;
-                min-height: 22px;
-                font-size: 7.3pt;
+                background: #F8FBFE;
+                color: #0F3650;
+                border: 1px solid #CAD8E6;
+                border-radius: 9px;
+                font-size: 8pt;
+                min-height: 26px;
             }
-            QPushButton#footerButton:hover { background: #1E3A5F; }
+            QPushButton#footerButton:hover {
+                background: #0F6B7F;
+                color: #FFFFFF;
+                border-color: #0F6B7F;
+            }
             QListWidget, QTableWidget, QPlainTextEdit {
                 background: #FFFFFF;
-                border: 1px solid #D7E1EA;
-                border-radius: 7px;
+                border: 1px solid #D8E4EE;
+                border-radius: 9px;
                 gridline-color: #E8EEF4;
                 selection-background-color: #0EA5E9;
-                selection-color: white;
-                alternate-background-color: #F8FBFD;
-                font-size: 7pt;
+                selection-color: #FFFFFF;
+                alternate-background-color: #F8FBFE;
+                font-size: 8pt;
             }
             QListWidget::item {
-                padding: 3px 5px;
-                border-bottom: 1px solid #EEF2F6;
+                padding: 6px 7px;
+                border-bottom: 1px solid #EEF3F8;
+            }
+            QListWidget::item:hover {
+                background: #EFF8FC;
+                border-radius: 5px;
             }
             QListWidget::item:selected {
                 background: #0EA5E9;
-                color: white;
-                border-radius: 4px;
+                color: #FFFFFF;
+                border-radius: 5px;
             }
             QHeaderView::section {
-                background: #E8EEF5;
-                color: #243447;
+                background: #EEF4FA;
+                color: #1E3A50;
                 border: 0px;
-                border-right: 1px solid #D7E1EA;
-                border-bottom: 1px solid #D7E1EA;
-                padding: 3px;
-                font-size: 6.8pt;
-                font-weight: 700;
+                border-right: 1px solid #D8E4EE;
+                border-bottom: 1px solid #D8E4EE;
+                padding: 6px;
+                font-size: 7.5pt;
+                font-weight: 800;
             }
-            QSplitter::handle { background: #DCE6EE; width: 4px; }
-            QScrollBar:vertical, QScrollBar:horizontal { background: #EEF3F7; border: 0px; width: 9px; height: 9px; }
-            QScrollBar::handle:vertical, QScrollBar::handle:horizontal { background: #B7C5D3; border-radius: 4px; }
+            QCheckBox {
+                color: #243447;
+                font-size: 8pt;
+                font-weight: 650;
+                spacing: 6px;
+            }
+            QCheckBox::indicator {
+                width: 15px;
+                height: 15px;
+                border-radius: 4px;
+                border: 1px solid #BFD3E3;
+                background: #FFFFFF;
+            }
+            QCheckBox::indicator:checked {
+                background: #0EA5E9;
+                border-color: #0EA5E9;
+            }
+            QSplitter::handle {
+                background: #D8E4EE;
+                width: 6px;
+                border-radius: 3px;
+            }
+            QScrollBar:vertical, QScrollBar:horizontal {
+                background: #EEF3F8;
+                border: 0px;
+                width: 10px;
+                height: 10px;
+            }
+            QScrollBar::handle:vertical, QScrollBar::handle:horizontal {
+                background: #B8C7D6;
+                border-radius: 5px;
+            }
+            QScrollBar::handle:vertical:hover, QScrollBar::handle:horizontal:hover {
+                background: #90A4B8;
+            }
         """)
 
     def _all_waveform_plots(self) -> list[GFPlot]:
@@ -969,6 +1105,20 @@ class TGPGroundForceLookWidget(QWidget):
         else:
             self.open_folder()
 
+    def _update_header_metrics(self) -> None:
+        total = len(self.records)
+        if hasattr(self, "header_records"):
+            self.header_records.setText(f"Records\n{total}")
+        if hasattr(self, "header_status"):
+            if not total:
+                label = "Ready"
+            else:
+                bad = sum(1 for r in self.records if r.status == "Bad")
+                warn = sum(1 for r in self.records if r.status == "Warning")
+                good = sum(1 for r in self.records if r.status == "Good")
+                label = f"G {good} / W {warn} / B {bad}"
+            self.header_status.setText(f"Status\n{label}")
+
     def _populate_file_list(self) -> None:
         self.file_list.blockSignals(True); self.file_list.clear()
         for rec in self.records:
@@ -977,6 +1127,7 @@ class TGPGroundForceLookWidget(QWidget):
             self.file_list.addItem(item)
         self.file_list.blockSignals(False)
         self._update_summary_table()
+        self._update_header_metrics()
 
     def _update_summary_table(self) -> None:
         self.summary_table.setRowCount(len(self.records))
