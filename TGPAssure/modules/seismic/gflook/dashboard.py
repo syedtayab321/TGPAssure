@@ -14,9 +14,7 @@ import numpy as np
 from PySide6.QtCore import QPointF, QRectF, Qt, Signal
 from PySide6.QtGui import QAction, QColor, QFont, QLinearGradient, QPainter, QPainterPath, QPen, QPixmap
 from PySide6.QtWidgets import (
-    QComboBox,
-    QDialog,
-    QDialogButtonBox,
+    QCheckBox,
     QFileDialog,
     QFrame,
     QGridLayout,
@@ -36,6 +34,10 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+
+from core.visualization.palette_library import COLOR_PALETTES, palette_hex
+from ui.widgets.color_palette_dialog import ColorPaletteDialog, PaletteSelectorButton
+from ui.widgets.palette_colorbar import PaletteColorBar
 
 
 GF_EXTENSIONS = {".gf", ".gfc", ".txt", ".csv", ".dat", ".log"}
@@ -390,14 +392,6 @@ class GFAnalyzer:
 
 
 class GFPlot(QWidget):
-    PALETTES: dict[str, list[QColor]] = {
-        "Mono / Classic": [QColor(14, 24, 39), QColor(14, 24, 39)],
-        "Amplitude Blue-Gold": [QColor(30, 64, 175), QColor(14, 165, 233), QColor(34, 197, 94), QColor(250, 204, 21), QColor(220, 38, 38)],
-        "Seismic Blue-White-Red": [QColor(30, 64, 175), QColor(147, 197, 253), QColor(255, 255, 255), QColor(252, 165, 165), QColor(185, 28, 28)],
-        "Viridis Pro": [QColor(68, 1, 84), QColor(59, 82, 139), QColor(33, 145, 140), QColor(94, 201, 98), QColor(253, 231, 37)],
-        "Thermal QC": [QColor(15, 23, 42), QColor(88, 28, 135), QColor(219, 39, 119), QColor(249, 115, 22), QColor(254, 240, 138)],
-    }
-
     def __init__(self, title: str = "", parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.title = title
@@ -405,7 +399,7 @@ class GFPlot(QWidget):
         self.y: np.ndarray | None = None
         self.y2: np.ndarray | None = None
         self.mode = "line"
-        self.palette_name = "Amplitude Blue-Gold"
+        self.palette_name = "Seismic"
         self.colorize_by_value = True
         self.line_width = 0.9
         self._palette_rect = QRectF()
@@ -432,58 +426,22 @@ class GFPlot(QWidget):
         super().mousePressEvent(event)
 
     def open_palette_dialog(self) -> None:
-        dlg = QDialog(self)
-        dlg.setWindowTitle(f"Waveform Color Palette - {self.title}")
-        dlg.setMinimumWidth(340)
-        layout = QVBoxLayout(dlg)
-        layout.setContentsMargins(12, 12, 12, 10)
-        layout.setSpacing(8)
-        title = QLabel("Color waveform by amplitude/value")
-        title.setStyleSheet('font-family:"Segoe UI"; font-size:8pt; font-weight:700; color:#0F172A;')
-        layout.addWidget(title)
-        combo = QComboBox()
-        combo.addItems(list(self.PALETTES.keys()))
-        combo.setCurrentText(self.palette_name)
-        combo.setStyleSheet('font-family:"Segoe UI"; font-size:8pt; min-height:24px;')
-        layout.addWidget(combo)
-        mode = QComboBox()
-        mode.addItems(["Value-based color trace", "Single-color trace"])
-        mode.setCurrentIndex(0 if self.colorize_by_value else 1)
-        mode.setStyleSheet('font-family:"Segoe UI"; font-size:8pt; min-height:24px;')
-        layout.addWidget(mode)
-        preview = QLabel("Low amplitude/value  →  High amplitude/value")
-        preview.setAlignment(Qt.AlignCenter)
-        preview.setMinimumHeight(28)
-        preview.setStyleSheet('font-family:"Segoe UI"; font-size:7.5pt; font-weight:600; color:#334155; border:1px solid #D6E1EA; border-radius:6px; background:#F8FAFC;')
-        layout.addWidget(preview)
-        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
-        buttons.accepted.connect(dlg.accept); buttons.rejected.connect(dlg.reject)
-        layout.addWidget(buttons)
-        if dlg.exec() == QDialog.Accepted:
-            self.palette_name = combo.currentText()
-            self.colorize_by_value = mode.currentIndex() == 0
+        """Open the same application-wide palette browser used by TraceWaveform."""
+        dlg = ColorPaletteDialog(self.palette_name, self)
+        if dlg.exec() == ColorPaletteDialog.DialogCode.Accepted and dlg.selected_palette:
+            self.set_palette(dlg.selected_palette)
+
+    def set_palette(self, palette_name: str) -> None:
+        if palette_name in COLOR_PALETTES:
+            self.palette_name = palette_name
             self.update()
 
-    @classmethod
-    def _interp_color(cls, stops: list[QColor], value: float) -> QColor:
-        if not stops:
-            return QColor(14, 24, 39)
-        if len(stops) == 1:
-            return QColor(stops[0])
-        v = min(1.0, max(0.0, float(value)))
-        pos = v * (len(stops) - 1)
-        i = int(math.floor(pos))
-        j = min(len(stops) - 1, i + 1)
-        f = pos - i
-        a, b = stops[i], stops[j]
-        return QColor(
-            int(a.red() + (b.red() - a.red()) * f),
-            int(a.green() + (b.green() - a.green()) * f),
-            int(a.blue() + (b.blue() - a.blue()) * f),
-        )
+    def set_value_coloring(self, enabled: bool) -> None:
+        self.colorize_by_value = bool(enabled)
+        self.update()
 
     def _palette_color(self, norm_value: float) -> QColor:
-        return self._interp_color(self.PALETTES.get(self.palette_name, self.PALETTES["Mono / Classic"]), norm_value)
+        return QColor(palette_hex(self.palette_name, norm_value))
 
     def paintEvent(self, event) -> None:  # noqa: N802
         painter = QPainter(self)
@@ -585,7 +543,7 @@ class GFPlot(QWidget):
         if not self.colorize_by_value:
             return
         bar = QRectF(rect.right() - 52, rect.top() + 5, 46, 5)
-        stops = self.PALETTES.get(self.palette_name, self.PALETTES["Mono / Classic"])
+        stops = [QColor(color) for color in COLOR_PALETTES.get(self.palette_name, COLOR_PALETTES["Seismic"])]
         grad = QLinearGradient(bar.left(), bar.top(), bar.right(), bar.top())
         if len(stops) == 1:
             grad.setColorAt(0, stops[0]); grad.setColorAt(1, stops[0])
@@ -598,7 +556,7 @@ class GFPlot(QWidget):
         painter.drawRoundedRect(bar, 2, 2)
         painter.setFont(QFont("Segoe UI", 4))
         painter.setPen(QColor(100, 116, 139))
-        painter.drawText(QRectF(bar.left(), bar.bottom() + 1, bar.width(), 8), Qt.AlignCenter, "Value")
+        painter.drawText(QRectF(bar.left() - 1, bar.bottom() + 1, bar.width() + 2, 8), Qt.AlignCenter, f"{ymin:.2g}  →  {ymax:.2g}")
         painter.restore()
 
 
@@ -606,11 +564,17 @@ class GFMapCanvas(QWidget):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.records: list[GFRecord] = []
+        self.palette_name = "Seismic"
         self.setMinimumSize(360, 280)
 
     def set_records(self, records: Sequence[GFRecord]) -> None:
         self.records = list(records)
         self.update()
+
+    def set_palette(self, palette_name: str) -> None:
+        if palette_name in COLOR_PALETTES:
+            self.palette_name = palette_name
+            self.update()
 
     def paintEvent(self, event) -> None:  # noqa: N802
         painter = QPainter(self)
@@ -636,7 +600,14 @@ class GFMapCanvas(QWidget):
         for lon, lat, rec in coords:
             x = 18 + (lon - xmin) / (xmax - xmin) * (self.width() - 36)
             y = self.height() - 18 - (lat - ymin) / (ymax - ymin) * (self.height() - 36)
-            color = {"Good": QColor(35, 142, 68), "Warning": QColor(220, 165, 0), "Bad": QColor(210, 55, 55)}.get(rec.status, QColor(90, 120, 180))
+            # QC status is categorical, not a scalar field: keep semantic colours
+            # stable so a palette change can never invert PASS/WARN/FAIL meaning.
+            color = {
+                "Good": QColor(22, 163, 74),
+                "Warning": QColor(217, 119, 6),
+                "Bad": QColor(220, 38, 38),
+                "Unchecked": QColor(100, 116, 139),
+            }.get(rec.status, QColor(100, 116, 139))
             painter.setBrush(color); painter.setPen(QPen(QColor(35, 35, 35), 1))
             painter.drawEllipse(QPointF(x, y), 5, 5)
 
@@ -658,6 +629,30 @@ class TGPGroundForceLookWidget(QWidget):
         root = QVBoxLayout(self)
         root.setContentsMargins(5, 5, 5, 4)
         root.setSpacing(4)
+
+        visual_bar = QFrame()
+        visual_bar.setObjectName("gfVisualBar")
+        visual_layout = QHBoxLayout(visual_bar)
+        visual_layout.setContentsMargins(8, 5, 8, 5)
+        visual_layout.setSpacing(8)
+        heading = QLabel("GFLOOK QC VISUALIZATION")
+        heading.setObjectName("gfVisualTitle")
+        visual_layout.addWidget(heading)
+        visual_layout.addStretch(1)
+        visual_layout.addWidget(QLabel("Global palette:"))
+        self.palette_selector = PaletteSelectorButton("Seismic", visual_bar)
+        self.palette_selector.setMinimumWidth(150)
+        self.palette_selector.currentTextChanged.connect(self._apply_global_palette)
+        visual_layout.addWidget(self.palette_selector)
+        self.value_color_check = QCheckBox("Color traces by value")
+        self.value_color_check.setChecked(True)
+        self.value_color_check.toggled.connect(self._set_value_coloring)
+        visual_layout.addWidget(self.value_color_check)
+        root.addWidget(visual_bar)
+        self.global_colorbar = PaletteColorBar(orientation=Qt.Horizontal, parent=self)
+        self.global_colorbar.setFixedHeight(34)
+        self.global_colorbar.set_state(-1.0, 1.0, "Seismic", label="Normalized waveform / QC value")
+        root.addWidget(self.global_colorbar)
 
         splitter = QSplitter(Qt.Horizontal)
         splitter.setChildrenCollapsible(False)
@@ -792,6 +787,17 @@ class TGPGroundForceLookWidget(QWidget):
                 color: #0F172A;
                 background: #EEF3F7;
             }
+            QFrame#gfVisualBar {
+                background: #F8FBFD;
+                border: 1px solid #D7E1EA;
+                border-radius: 8px;
+            }
+            QLabel#gfVisualTitle {
+                color: #0F4C5C;
+                font-size: 8pt;
+                font-weight: 800;
+                letter-spacing: 0.5px;
+            }
             QFrame#gfLeftPanel, QFrame#gfWorkArea {
                 background: #FFFFFF;
                 border: 1px solid #D7E1EA;
@@ -902,6 +908,24 @@ class TGPGroundForceLookWidget(QWidget):
             QScrollBar:vertical, QScrollBar:horizontal { background: #EEF3F7; border: 0px; width: 9px; height: 9px; }
             QScrollBar::handle:vertical, QScrollBar::handle:horizontal { background: #B7C5D3; border-radius: 4px; }
         """)
+
+    def _all_waveform_plots(self) -> list[GFPlot]:
+        plots: list[GFPlot] = []
+        for group_name in ("plots_p1", "plots_p2", "plots_p3"):
+            plots.extend(getattr(self, group_name, {}).values())
+        return plots
+
+    def _apply_global_palette(self, palette_name: str) -> None:
+        for plot in self._all_waveform_plots():
+            plot.set_palette(palette_name)
+        if hasattr(self, "map_canvas"):
+            self.map_canvas.set_palette(palette_name)
+        if hasattr(self, "global_colorbar"):
+            self.global_colorbar.set_state(-1.0, 1.0, palette_name, label="Normalized waveform / QC value")
+
+    def _set_value_coloring(self, enabled: bool) -> None:
+        for plot in self._all_waveform_plots():
+            plot.set_value_coloring(enabled)
 
     def open_folder(self) -> None:
         folder = QFileDialog.getExistingDirectory(self, "Open Sercel VE464 GF Folder", str(self.folder or Path.home()))

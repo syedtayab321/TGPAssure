@@ -233,7 +233,7 @@ class FullPageLoader(QFrame):
     ) -> None:
         if title is not None:
             self.title_label.setText(str(title))
-        if message is not None:
+        if message is not None and not self._cancel_pending:
             self._base_message = str(message or "Working")
         if cancel_callback is not None:
             self._cancel_callback = cancel_callback
@@ -261,6 +261,9 @@ class FullPageLoader(QFrame):
         parent = self.parentWidget()
         if parent is not None:
             parent.setFocus(Qt.FocusReason.OtherFocusReason)
+
+    def is_cancel_pending(self) -> bool:
+        return bool(self._cancel_pending)
 
     def sync_geometry(self) -> None:
         parent = self.parentWidget()
@@ -309,7 +312,7 @@ class FullPageLoader(QFrame):
         self._cancel_pending = True
         self.cancel_button.setEnabled(False)
         self.cancel_button.setText("Cancelling…")
-        self._base_message = "Requesting cancellation"
+        self._base_message = "Cancellation requested — waiting for the active operation to stop safely"
         self._refresh_message()
         self._refresh_elapsed()
         callback = self._cancel_callback

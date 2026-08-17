@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import csv
 from pathlib import Path
-from typing import Iterable
+from typing import Callable, Iterable
 
 import numpy as np
 from PySide6.QtCore import Qt
@@ -10,6 +10,7 @@ from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
     QFormLayout,
+    QHBoxLayout,
     QLabel,
     QPlainTextEdit,
     QTabWidget,
@@ -19,10 +20,16 @@ from PySide6.QtWidgets import (
 
 try:
     from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
+    from matplotlib.colors import ListedColormap
     from matplotlib.figure import Figure
 except Exception:  # pragma: no cover - optional runtime fallback
     FigureCanvas = None
     Figure = None
+    ListedColormap = None
+
+from core.visualization.palette_library import DEFAULT_PALETTE, palette_rgb_array
+from ui.widgets.color_palette_dialog import PaletteSelectorButton
+from ui.widgets.palette_colorbar import PaletteColorBar
 
 
 class DataInspectorDialog(QDialog):
@@ -47,12 +54,21 @@ class DataInspectorDialog(QDialog):
 
         self._headers, self._rows, self._truncated = self._load(self.path)
         self._numeric = self._numeric_columns()
+        self._palette_name = DEFAULT_PALETTE
+        self._plot_refreshers: list[Callable[[], None]] = []
 
         root = QVBoxLayout(self)
         status = QLabel(self._status_text(), self)
         status.setWordWrap(True)
         status.setTextInteractionFlags(Qt.TextSelectableByMouse)
         root.addWidget(status)
+        palette_row = QHBoxLayout()
+        palette_row.addWidget(QLabel("Color Palette"))
+        self.palette_selector = PaletteSelectorButton(self._palette_name, self)
+        self.palette_selector.currentTextChanged.connect(self._set_palette)
+        palette_row.addWidget(self.palette_selector)
+        palette_row.addStretch(1)
+        root.addLayout(palette_row)
 
         self.tabs = QTabWidget(self)
         root.addWidget(self.tabs, 1)
@@ -64,6 +80,17 @@ class DataInspectorDialog(QDialog):
             if self.tabs.tabText(index).lower() == initial_tab.lower():
                 self.tabs.setCurrentIndex(index)
                 break
+
+    def _set_palette(self, palette_name: str) -> None:
+        self._palette_name = str(palette_name or DEFAULT_PALETTE)
+        for refresh in tuple(self._plot_refreshers):
+            refresh()
+
+    def _mpl_palette(self):
+        if ListedColormap is None:
+            return None
+        rgb = palette_rgb_array(self._palette_name, 256).astype(float) / 255.0
+        return ListedColormap(rgb, name=f"tgpassure_{self._palette_name.replace(' ', '_')}")
 
     def _status_text(self) -> str:
         size_mb = self.path.stat().st_size / (1024 * 1024)
@@ -188,6 +215,8 @@ class DataInspectorDialog(QDialog):
             figure = Figure(tight_layout=True)
             canvas = FigureCanvas(figure)
             layout.addWidget(canvas, 1)
+            colorbar = PaletteColorBar(page)
+            layout.addWidget(colorbar)
 
             def refresh() -> None:
                 figure.clear()
@@ -197,7 +226,11 @@ class DataInspectorDialog(QDialog):
                     values = raw[np.isfinite(raw)]
                     if values.size:
                         bins = min(80, max(10, int(np.sqrt(values.size))))
-                        axis.hist(values, bins=bins)
+                        _counts, _edges, patches = axis.hist(values, bins=bins)
+                        lut = palette_rgb_array(self._palette_name, max(len(patches), 2)).astype(float) / 255.0
+                        for patch, color in zip(patches, lut):
+                            patch.set_facecolor(color)
+                        colorbar.set_state(float(np.nanmin(values)), float(np.nanmax(values)), self._palette_name, label=combo.currentText())
                         axis.set_title(combo.currentText())
                         axis.set_xlabel("Value")
                         axis.set_ylabel("Frequency")
@@ -225,6 +258,7 @@ class DataInspectorDialog(QDialog):
                 )
 
         combo.currentTextChanged.connect(refresh)
+        self._plot_refreshers.append(refresh)
         refresh()
         self.tabs.addTab(page, "Histogram")
 
@@ -251,6 +285,8 @@ class DataInspectorDialog(QDialog):
         canvas = FigureCanvas(figure) if figure is not None and FigureCanvas is not None else None
         if canvas is not None:
             layout.addWidget(canvas, 1)
+            cross_colorbar = PaletteColorBar(page)
+            layout.addWidget(cross_colorbar)
         else:
             fallback = QPlainTextEdit(page)
             fallback.setReadOnly(True)
@@ -278,7 +314,9 @@ class DataInspectorDialog(QDialog):
                         plot_x, plot_y = x_values[indices], y_values[indices]
                     else:
                         plot_x, plot_y = x_values, y_values
-                    axis.scatter(plot_x, plot_y, s=8, alpha=0.55)
+                    scatter = axis.scatter(plot_x, plot_y, c=plot_y, cmap=self._mpl_palette(), s=8, alpha=0.65)
+                    if plot_y.size:
+                        cross_colorbar.set_state(float(np.nanmin(plot_y)), float(np.nanmax(plot_y)), self._palette_name, label=y_combo.currentText())
                 axis.set_xlabel(x_combo.currentText())
                 axis.set_ylabel(y_combo.currentText())
                 axis.set_title("Cross Plot")
@@ -291,5 +329,6 @@ class DataInspectorDialog(QDialog):
 
         x_combo.currentTextChanged.connect(refresh)
         y_combo.currentTextChanged.connect(refresh)
+        self._plot_refreshers.append(refresh)
         refresh()
         self.tabs.addTab(page, "Cross Plot")

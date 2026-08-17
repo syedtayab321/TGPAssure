@@ -45,6 +45,9 @@ from modules.gravity.gravity_controller import GravityQcController
 from modules.gravity.gravity_processing_engine import GravityProcessingEngine
 from modules.gravity.models import GravityDataset
 from modules.gravity.reader import GravityReader
+from core.visualization.palette_library import palette_hex, palette_rgb_array
+from ui.widgets.color_palette_dialog import PaletteSelectorButton
+from ui.widgets.palette_colorbar import PaletteColorBar
 
 try:
     import pyqtgraph as pg
@@ -220,6 +223,8 @@ class _Worker(QRunnable):
             return
         try:
             value = self.fn()
+            # Always notify completion. The UI decides whether to accept or discard
+            # the result after a cooperative cancellation request.
             self.signals.completed.emit(value)
         except Exception:
             self.signals.failed.emit(traceback.format_exc())
@@ -265,6 +270,7 @@ class GravityDashboard(QWidget):
         self._active_workers: list[_Worker] = []
         self._active_worker: _Worker | None = None
         self._active_task_title = ""
+        self._palette_name = "Spectral"
 
         self._build_ui()
         self._refresh_everything()
@@ -359,6 +365,11 @@ class GravityDashboard(QWidget):
         self.density_spin.setValue(DEFAULT_DENSITY_G_CM3)
         self.density_spin.setSuffix(" g/cc")
         lay.addWidget(self.density_spin)
+        lay.addWidget(QLabel("Palette:"))
+        self.palette_selector = PaletteSelectorButton(self._palette_name, frame)
+        self.palette_selector.setMinimumWidth(142)
+        self.palette_selector.currentTextChanged.connect(self._on_palette_changed)
+        lay.addWidget(self.palette_selector)
         lay.addStretch(1)
         return frame
 
@@ -402,8 +413,24 @@ class GravityDashboard(QWidget):
             self.profile_plot = QTextEdit("pyqtgraph is not installed. Install pyqtgraph for profile display.")
             self.profile_plot.setReadOnly(True)
 
-        self.tabs.addTab(self.map_plot, "Map")
-        self.tabs.addTab(self.profile_plot, "Profile")
+        map_page = QWidget()
+        map_layout = QVBoxLayout(map_page)
+        map_layout.setContentsMargins(0, 0, 0, 0)
+        map_layout.setSpacing(3)
+        map_layout.addWidget(self.map_plot, 1)
+        self.map_colorbar = PaletteColorBar(map_page, orientation=Qt.Horizontal)
+        self.map_colorbar.set_state(0.0, 1.0, self._palette_name, unit="mGal", label="Gravity / anomaly")
+        map_layout.addWidget(self.map_colorbar)
+        profile_page = QWidget()
+        profile_layout = QVBoxLayout(profile_page)
+        profile_layout.setContentsMargins(0, 0, 0, 0)
+        profile_layout.setSpacing(3)
+        profile_layout.addWidget(self.profile_plot, 1)
+        self.profile_colorbar = PaletteColorBar(profile_page, orientation=Qt.Horizontal)
+        self.profile_colorbar.set_state(0.0, 1.0, self._palette_name, unit="mGal", label="Gravity / anomaly")
+        profile_layout.addWidget(self.profile_colorbar)
+        self.tabs.addTab(map_page, "Map")
+        self.tabs.addTab(profile_page, "Profile")
         self.reduction_table = self._make_table(["Product", "Available", "Min", "Max", "Mean"])
         self.tabs.addTab(self.reduction_table, "Reduction")
         self.report_text = QTextEdit()
@@ -632,9 +659,7 @@ class GravityDashboard(QWidget):
         worker = self._active_worker
         if worker is not None and not worker.cancelled:
             worker.cancel()
-            self._status(f"{self._active_task_title or 'Gravity task'} cancelled")
-            self._set_busy(False)
-            self.activity_finished.emit()
+            self._status(f"Cancellation requested for {self._active_task_title or 'Gravity task'}; finishing the active numerical call safely…")
             return
         self._status("No running gravity task to cancel")
 
@@ -719,9 +744,7 @@ class GravityDashboard(QWidget):
             if worker.cancelled:
                 return
             worker.cancel()
-            self._status(f"{title} cancelled")
-            self._set_busy(False)
-            self.activity_finished.emit()
+            self._status(f"Cancellation requested for {title}; waiting for the active numerical call to return safely…")
 
         self.activity_started_cancellable.emit(title, message, cancel_current)
         self._set_busy(True)
@@ -738,27 +761,28 @@ class GravityDashboard(QWidget):
         def done(value):
             try:
                 if worker.cancelled:
-                    return
-                callback(value)
+                    self._status(f"{title} cancelled; partial result discarded")
+                else:
+                    callback(value)
             except Exception:
                 tb = traceback.format_exc()
                 self._status(f"{title} failed")
                 QMessageBox.critical(self, title, tb)
             finally:
-                if not worker.cancelled:
-                    self._set_busy(False)
-                    self.activity_finished.emit()
+                self._set_busy(False)
+                self.activity_finished.emit()
                 cleanup()
 
         def failed(tb: str):
             try:
                 if worker.cancelled:
-                    return
+                    self._status(f"{title} cancelled")
+                else:
+                    self._status(f"{title} failed")
+                    QMessageBox.critical(self, title, tb)
+            finally:
                 self._set_busy(False)
                 self.activity_finished.emit()
-                self._status(f"{title} failed")
-                QMessageBox.critical(self, title, tb)
-            finally:
                 cleanup()
 
         worker.signals.completed.connect(done)
@@ -932,10 +956,20 @@ class GravityDashboard(QWidget):
         if not np.any(valid):
             self.map_plot.setTitle("No valid coordinates for map")
             return
-        colors = self._colors(values[valid])
-        spots = [{"pos": (float(px), float(py)), "brush": color, "pen": pg.mkPen("#1F2933", width=0.3), "size": 7} for px, py, color in zip(x[valid], y[valid], colors)]
+        source_values = values[valid]
+        source_x = x[valid]
+        source_y = y[valid]
+        total = source_values.size
+        display_idx = self._display_indices(total, 100_000)
+        plot_values = source_values[display_idx]
+        colors = self._colors(plot_values)
+        spots = [{"pos": (float(px), float(py)), "brush": color, "pen": pg.mkPen("#1F2933", width=0.25), "size": 6} for px, py, color in zip(source_x[display_idx], source_y[display_idx], colors)]
         self.map_plot.addItem(pg.ScatterPlotItem(spots=spots))
-        self.map_plot.setTitle(f"{self._label(channel)} map | {np.count_nonzero(valid):,} stations")
+        finite = source_values[np.isfinite(source_values)]
+        lo, hi = np.nanpercentile(finite, [2, 98]) if finite.size else (0.0, 1.0)
+        self.map_colorbar.set_state(float(lo), float(hi), self._palette_name, unit="mGal", label=self._label(channel))
+        suffix = f" | displaying {plot_values.size:,}/{total:,}" if plot_values.size < total else f" | {total:,} stations"
+        self.map_plot.setTitle(f"{self._label(channel)} map{suffix}")
 
     def _refresh_profile(self) -> None:
         if not pg:
@@ -958,8 +992,21 @@ class GravityDashboard(QWidget):
             self.profile_plot.setTitle("No valid values for profile")
             return
         order = np.argsort(distance[mask])
-        self.profile_plot.plot(distance[mask][order], values[mask][order], pen=pg.mkPen("#1F78B4", width=1.5), symbol="o", symbolSize=4, symbolBrush="#E9C449", symbolPen=pg.mkPen("#1F2933", width=0.4))
-        self.profile_plot.setTitle(f"{self._label(channel)} profile | {line}")
+        px = distance[mask][order]
+        pv = values[mask][order]
+        total = pv.size
+        idx = self._display_indices(total, 30_000)
+        px, pv = px[idx], pv[idx]
+        line_color = palette_hex(self._palette_name, 0.62)
+        self.profile_plot.plot(px, pv, pen=pg.mkPen(line_color, width=1.25))
+        colors = self._colors(pv)
+        spots = [{"pos": (float(a), float(b)), "brush": c, "pen": pg.mkPen("#1F2933", width=0.25), "size": 4} for a, b, c in zip(px, pv, colors)]
+        self.profile_plot.addItem(pg.ScatterPlotItem(spots=spots))
+        finite = values[mask][np.isfinite(values[mask])]
+        lo, hi = np.nanpercentile(finite, [2, 98]) if finite.size else (0.0, 1.0)
+        self.profile_colorbar.set_state(float(lo), float(hi), self._palette_name, unit="mGal", label=self._label(channel))
+        suffix = f" | displaying {pv.size:,}/{total:,}" if pv.size < total else ""
+        self.profile_plot.setTitle(f"{self._label(channel)} profile | {line}{suffix}")
 
     def _refresh_report(self) -> None:
         ds = self.reduced or self.observations
@@ -1033,28 +1080,30 @@ class GravityDashboard(QWidget):
     def _label(channel: str) -> str:
         return str(channel).replace("_", " ").replace("mgal", "mGal").title()
 
+    def _on_palette_changed(self, palette_name: str) -> None:
+        self._palette_name = palette_name
+        self._refresh_views()
+
     @staticmethod
-    def _colors(values: np.ndarray) -> list[QColor]:
+    def _display_indices(size: int, maximum: int) -> np.ndarray:
+        """Evenly decimate UI rendering only; scientific arrays remain untouched."""
+        size = max(0, int(size))
+        if size <= maximum:
+            return np.arange(size, dtype=int)
+        return np.linspace(0, size - 1, maximum, dtype=int)
+
+    def _colors(self, values: np.ndarray) -> list[QColor]:
         vals = np.asarray(values, dtype=float)
         finite = vals[np.isfinite(vals)]
         if finite.size == 0:
-            return [QColor("#1F78B4") for _ in vals]
+            return [QColor(palette_hex(self._palette_name, 0.5)) for _ in vals]
         lo, hi = np.nanpercentile(finite, [2, 98])
-        span = max(hi - lo, 1e-15)
-        out: list[QColor] = []
-        for value in vals:
-            f = float(np.clip((value - lo) / span, 0.0, 1.0))
-            if f < 0.20:
-                out.append(QColor("#243B8F"))
-            elif f < 0.40:
-                out.append(QColor("#1F9BCF"))
-            elif f < 0.60:
-                out.append(QColor("#32B36C"))
-            elif f < 0.80:
-                out.append(QColor("#F3D64E"))
-            else:
-                out.append(QColor("#D74242"))
-        return out
+        span = max(float(hi - lo), 1e-15)
+        norm = np.clip((vals - lo) / span, 0.0, 1.0)
+        norm = np.nan_to_num(norm, nan=0.5, posinf=1.0, neginf=0.0)
+        lut = palette_rgb_array(self._palette_name, 256)
+        indices = np.clip(np.rint(norm * 255.0).astype(int), 0, 255)
+        return [QColor(int(r), int(g), int(b)) for r, g, b in lut[indices]]
 
     @staticmethod
     def _export_dataset_csv(ds: GravityDataset, path: str | Path) -> None:

@@ -27,7 +27,7 @@ QWidget#electricalDashboard {
     background:#F3F6FA;
     color:#17212B;
     font-family:"Segoe UI", Arial, sans-serif;
-    font-size:8pt;
+    font-size:6.8pt;
 }
 QFrame#prosysToolbar {
     background:#FFFFFF;
@@ -36,12 +36,12 @@ QFrame#prosysToolbar {
 }
 QLabel#prosysToolbarTitle {
     color:#143A5A;
-    font-size:10pt;
+    font-size:7.5pt;
     font-weight:800;
 }
 QLabel#prosysToolbarStatus {
     color:#53616F;
-    font-size:8pt;
+    font-size:6.8pt;
     font-weight:600;
     padding:3px 8px;
     background:#F3F8FD;
@@ -58,10 +58,10 @@ QPushButton#prosysToolButton {
     color:#2B3846;
     border:1px solid #C7D1DD;
     border-radius:6px;
-    padding:4px 10px;
+    padding:2px 6px;
     font-weight:700;
-    font-size:8pt;
-    min-height:24px;
+    font-size:6.8pt;
+    min-height:18px;
 }
 QPushButton#prosysToolButton:hover {
     background:#F0F6FC;
@@ -113,7 +113,6 @@ class ElectricalDashboard(QWidget):
         self.dataset = None
         self.qc_result = None
         self.source_path: Path | None = None
-        self.tabs = None  # MainWindow compatibility; Prosys panel owns its internal tabs.
         self._build_ui()
 
     # ------------------------------------------------------------------
@@ -126,15 +125,8 @@ class ElectricalDashboard(QWidget):
 
         root.addWidget(self._build_toolbar())
 
-        body = QVBoxLayout()
-        body.setContentsMargins(0, 0, 0, 0)
-        body.setSpacing(6)
         self.prosys_panel = ProsysQcPanel(self, self)
-        body.addWidget(self.prosys_panel, 1)
-
-        body_container = QWidget()
-        body_container.setLayout(body)
-        root.addWidget(body_container, 1)
+        root.addWidget(self.prosys_panel, 1)
 
     def _build_toolbar(self) -> QFrame:
         bar = QFrame()
@@ -143,7 +135,7 @@ class ElectricalDashboard(QWidget):
         layout.setContentsMargins(12, 9, 12, 9)
         layout.setSpacing(10)
 
-        title = QLabel("Electrical / IP Processing — Prosys II")
+        title = QLabel("Prosys II Processing")
         title.setObjectName("prosysToolbarTitle")
         layout.addWidget(title)
 
@@ -157,7 +149,7 @@ class ElectricalDashboard(QWidget):
         self.status_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         layout.addWidget(self.status_label, 1)
 
-        open_btn = QPushButton("Open Data")
+        open_btn = QPushButton("Open")
         open_btn.setObjectName("prosysToolButton")
         open_btn.setProperty("role", "open")
         open_btn.setCursor(Qt.PointingHandCursor)
@@ -171,7 +163,7 @@ class ElectricalDashboard(QWidget):
         process_btn.clicked.connect(self.calculate_fields)
         layout.addWidget(process_btn)
 
-        export_btn = QPushButton("Export TXT")
+        export_btn = QPushButton("Export")
         export_btn.setObjectName("prosysToolButton")
         export_btn.setProperty("role", "export")
         export_btn.setCursor(Qt.PointingHandCursor)
@@ -184,7 +176,8 @@ class ElectricalDashboard(QWidget):
     # MainWindow / ribbon command compatibility
     # ------------------------------------------------------------------
     def can_execute(self, action_id: str) -> bool:
-        if action_id in {"electrical_open", "electrical_open_data", "electrical_prosys"}:
+        public = {"electrical_open", "electrical_open_data", "electrical_prosys"}
+        if action_id in public:
             return True
         if action_id.startswith("electrical_"):
             return self.dataset is not None
@@ -263,7 +256,8 @@ class ElectricalDashboard(QWidget):
     def export_res3dinv(self) -> None:
         self.prosys_panel.export_res3dinv()
 
-    # Old commands are intentionally routed to Prosys equivalents or disabled messages
+
+    # Old commands are routed to the active Electrical submodule where possible.
     def run_full_qc(self) -> None:
         self.calculate_fields()
 

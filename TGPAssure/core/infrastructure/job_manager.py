@@ -90,12 +90,16 @@ class JobManager(QObject):
         self._scheduler.schedule(f"job-{job.get_job_uuid()}", _submit_wrapper, delay_seconds)
 
     def cancel(self, job_id: int) -> bool:
+        """Request cooperative cancellation without pretending the worker has stopped.
+
+        The cancellation signal is emitted only after the runnable returns and
+        acknowledges the token.  This keeps the global loader visible and avoids
+        users closing/replacing datasets while scientific code is still touching
+        them in a worker thread.
+        """
         if job_id in self._runners:
             runner = self._runners[job_id]
             runner.cancel_token.cancel()
-            self._running_jobs[job_id] = False
-            self.job_cancelled.emit(job_id)
-            self._update_job_status(job_id, JobStatus.CANCELLED)
             return True
         return False
 
@@ -193,8 +197,10 @@ class JobManager(QObject):
         job_id = job.get_job_id()
         if job_id is not None:
             self._running_jobs[job_id] = False
+            self._update_job_cancelled(job_id)
             job.set_progress_callback(None)
             self._runners.pop(job_id, None)
+            self.job_cancelled.emit(job_id)
 
     def _record_progress(self, job_id: int, progress: float) -> None:
         """Persist and publish progress reported directly by a Job instance."""
@@ -254,6 +260,17 @@ class JobManager(QObject):
             conn.execute(
                 "UPDATE jobs SET progress = ?, updated_at = datetime('now') WHERE id = ?",
                 (progress, job_id)
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+    def _update_job_cancelled(self, job_id: int) -> None:
+        conn = self.db_engine.get_write_connection()
+        try:
+            conn.execute(
+                "UPDATE jobs SET status = ?, finished_at = datetime('now'), updated_at = datetime('now') WHERE id = ?",
+                (JobStatus.CANCELLED.name, job_id),
             )
             conn.commit()
         finally:

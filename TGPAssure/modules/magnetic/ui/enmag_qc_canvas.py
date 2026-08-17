@@ -8,6 +8,7 @@ from PySide6.QtCore import QPointF, QRectF, Qt, Signal
 from PySide6.QtGui import QColor, QFont, QImage, QMouseEvent, QPainter, QPen, QWheelEvent
 from PySide6.QtWidgets import QPushButton, QWidget
 
+from core.visualization.palette_library import palette_hex, palette_rgba_array
 from modules.magnetic.enmag_qc.models import ColorRange, EnMagQcData, GridResult
 from modules.magnetic.enmag_qc.spatial import CoordinateIndex
 
@@ -17,55 +18,14 @@ except Exception:  # pragma: no cover - exercised only in stripped developer env
     Transformer = None
 
 
-_PALETTES: dict[str, tuple[tuple[float, tuple[int, int, int]], ...]] = {
-    "Spectral": (
-        (0.00, (20, 70, 210)),
-        (0.20, (0, 165, 245)),
-        (0.42, (28, 205, 155)),
-        (0.58, (85, 220, 105)),
-        (0.73, (245, 225, 75)),
-        (0.86, (255, 145, 40)),
-        (1.00, (225, 20, 55)),
-    ),
-    "Jet": (
-        (0.00, (0, 45, 220)),
-        (0.20, (0, 185, 255)),
-        (0.40, (40, 210, 120)),
-        (0.60, (245, 235, 70)),
-        (0.80, (255, 135, 25)),
-        (1.00, (230, 0, 55)),
-    ),
-    "Viridis": (
-        (0.00, (68, 1, 84)),
-        (0.25, (59, 82, 139)),
-        (0.50, (33, 145, 140)),
-        (0.75, (94, 201, 98)),
-        (1.00, (253, 231, 37)),
-    ),
-    "Gray": (
-        (0.00, (35, 35, 35)),
-        (1.00, (245, 245, 245)),
-    ),
-}
-
-
 def palette_rgba(values_01: np.ndarray, name: str = "Spectral") -> np.ndarray:
-    values = np.clip(np.asarray(values_01, dtype=float), 0.0, 1.0)
-    stops = _PALETTES.get(name, _PALETTES["Spectral"])
-    xp = np.asarray([s[0] for s in stops], dtype=float)
-    rgb = np.asarray([s[1] for s in stops], dtype=float)
-    flat = values.ravel()
-    out = np.empty((flat.size, 4), dtype=np.uint8)
-    out[:, 0] = np.interp(flat, xp, rgb[:, 0]).astype(np.uint8)
-    out[:, 1] = np.interp(flat, xp, rgb[:, 1]).astype(np.uint8)
-    out[:, 2] = np.interp(flat, xp, rgb[:, 2]).astype(np.uint8)
-    out[:, 3] = 255
-    return out.reshape(values.shape + (4,))
+    """Compatibility wrapper backed by the application-wide palette library."""
+    return palette_rgba_array(values_01, name)
 
 
 def solid_palette_color(fraction: float, name: str = "Spectral") -> QColor:
-    rgba = palette_rgba(np.asarray([fraction]), name).reshape(-1, 4)[0]
-    return QColor(int(rgba[0]), int(rgba[1]), int(rgba[2]), 255)
+    return QColor(palette_hex(name, fraction))
+
 
 
 class EnMagColorBar(QWidget):

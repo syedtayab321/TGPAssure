@@ -32,6 +32,8 @@ from PySide6.QtWidgets import (
 
 from modules.magnetic.models import MagneticSurveyType
 from modules.magnetic.reader import MagneticReader
+from core.visualization.palette_library import DEFAULT_PALETTE, palette_hex
+from ui.widgets.color_palette_dialog import PaletteSelectorButton
 
 
 _DIALOG_QSS = """
@@ -635,6 +637,13 @@ class MagneticImportDialog(QDialog):
         layout = QVBoxLayout(page)
         layout.setContentsMargins(6, 6, 6, 6)
         layout.setSpacing(6)
+        palette_row = QHBoxLayout()
+        palette_row.addWidget(QLabel("Color Palette"))
+        palette_selector = PaletteSelectorButton(DEFAULT_PALETTE, page)
+        palette_row.addWidget(palette_selector)
+        palette_row.addStretch(1)
+        layout.addLayout(palette_row)
+
         plot = pg.PlotWidget(background="w")
         plot.showGrid(x=True, y=True, alpha=0.18)
         plot.setLabel("bottom", "Preview row")
@@ -652,7 +661,7 @@ class MagneticImportDialog(QDialog):
                 candidate_columns.append((str(key), str(key)))
 
         plotted = 0
-        palette = ["#0A86C7", "#15945C", "#D97706", "#7857B6", "#C2414A"]
+        curves: list[object] = []
         x_axis = np.arange(len(preview_rows), dtype=float)
         for label, source_key in candidate_columns:
             values: list[float] = []
@@ -671,7 +680,8 @@ class MagneticImportDialog(QDialog):
             scale = float(np.nanpercentile(np.abs(finite_values - np.nanmedian(finite_values)), 95))
             if np.isfinite(scale) and scale > 0:
                 y = (y - float(np.nanmedian(finite_values))) / scale
-            plot.plot(x_axis[finite], y[finite], pen=pg.mkPen(palette[plotted % len(palette)], width=2), name=label)
+            color = palette_hex(DEFAULT_PALETTE, plotted / 4.0 if plotted else 0.0)
+            curves.append(plot.plot(x_axis[finite], y[finite], pen=pg.mkPen(color, width=2), name=label))
             plotted += 1
             if plotted >= 5:
                 break
@@ -679,6 +689,14 @@ class MagneticImportDialog(QDialog):
             plot.setTitle("No numeric preview columns available for graphing; import table is still usable")
         else:
             plot.addLegend(offset=(8, 8))
+
+        def apply_palette(name: str) -> None:
+            for index, curve in enumerate(curves):
+                fraction = index / max(len(curves) - 1, 1)
+                curve.setPen(pg.mkPen(palette_hex(name, fraction), width=2))
+
+        palette_selector.currentTextChanged.connect(apply_palette)
+        apply_palette(palette_selector.currentText())
         layout.addWidget(plot, 1)
 
         help_label = QLabel("Graphs are normalized preview curves only. They help identify spikes, dead columns and obvious mapping problems before import.")

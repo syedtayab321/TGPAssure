@@ -27,6 +27,8 @@ from modules.seismic.visualization.seismic_attributes import (
     compute_attribute,
 )
 from ui.theme.petrel_theme import FONT_FAMILY, FONT_SIZE_CAPTION, FONT_SIZE_SMALL
+from core.visualization.palette_library import DEFAULT_PALETTE, palette_rgb_array
+from ui.widgets.palette_colorbar import PaletteColorBar
 
 # Axis/tick text is deliberately smaller than the app's normal 9pt scale: a
 # seismic section can carry 200+ trace columns, so oversized tick labels are
@@ -68,6 +70,7 @@ class Seismic2DView(QWidget):
         self._noise_trace_indices = np.empty(0, dtype=np.int64)
         self._noise_scores = np.empty(0, dtype=np.float32)
         self._noise_overlay_visible = True
+        self._palette_name = DEFAULT_PALETTE
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -98,7 +101,10 @@ class Seismic2DView(QWidget):
         )
         self.plot.scene().sigMouseMoved.connect(self._on_mouse_moved)
         self.plot.scene().sigMouseClicked.connect(self._on_mouse_clicked)
-        layout.addWidget(self.plot_widget)
+        layout.addWidget(self.plot_widget, 1)
+        self.colorbar = PaletteColorBar(self)
+        self.colorbar.set_state(-1.0, 1.0, self._palette_name, unit="", label="Amplitude / attribute value")
+        layout.addWidget(self.colorbar)
 
     @property
     def section(self) -> SectionData | None:
@@ -149,6 +155,10 @@ class Seismic2DView(QWidget):
     def set_section(self, section: SectionData) -> None:
         self._section = section
         self._reprocess()
+
+    def set_palette(self, palette_name: str) -> None:
+        self._palette_name = str(palette_name or DEFAULT_PALETTE)
+        self._render()
 
     def set_display_mode(self, mode: str) -> None:
         if mode not in {"wiggle", "variable_density", "wiggle_density"}:
@@ -288,8 +298,10 @@ class Seismic2DView(QWidget):
     def _render(self) -> None:
         self._clear_data_items()
         if self._section is None or self._display_data.size == 0:
+            self.colorbar.setVisible(False)
             self._render_labels()
             return
+        self.colorbar.setVisible(self._display_mode in {"variable_density", "wiggle_density"})
         if self._display_mode in {"variable_density", "wiggle_density"}:
             self._render_density()
         if self._attribute_mode == "amplitude" and self._display_mode in {"wiggle", "wiggle_density"}:
@@ -331,7 +343,8 @@ class Seismic2DView(QWidget):
             self._display_data, self._attribute_mode, self._gain_settings.clip_percentile
         )
         image.setLevels((low, high))
-        image.setLookupTable(self._attribute_lookup_table(self._attribute_mode))
+        image.setLookupTable(palette_rgb_array(self._palette_name, 256))
+        self.colorbar.set_state(low, high, self._palette_name, unit="", label=ATTRIBUTE_NAMES.get(self._attribute_mode, self._attribute_mode.title()))
         start_time = float(section.time_ms[0]) if section.time_ms.size else 0.0
         dt = (
             float(np.median(np.diff(section.time_ms)))
@@ -606,42 +619,3 @@ class Seismic2DView(QWidget):
     def resizeEvent(self, event: QResizeEvent) -> None:
         super().resizeEvent(event)
         self._render_labels()
-
-    @classmethod
-    def _attribute_lookup_table(cls, attribute: str) -> np.ndarray:
-        key = str(attribute).lower()
-        if key in {"amplitude", "instantaneous_frequency"}:
-            return cls._seismic_lookup_table()
-        if key == "instantaneous_phase":
-            # Cyclic hue table: -180 and +180 meet at the same colour.
-            hue = np.linspace(0.0, 1.0, 256, endpoint=False)
-            import colorsys
-            rgb = np.asarray([colorsys.hsv_to_rgb(float(h), 0.88, 1.0) for h in hue])
-            table = np.empty((256, 4), dtype=np.ubyte)
-            table[:, :3] = np.rint(rgb * 255.0).astype(np.ubyte)
-            table[:, 3] = 255
-            return table
-        # Perceptually ordered dark-to-light table for positive attributes.
-        x = np.linspace(0.0, 1.0, 256)
-        table = np.empty((256, 4), dtype=np.ubyte)
-        table[:, 0] = np.rint(255.0 * np.clip(1.8 * x - 0.55, 0.0, 1.0)).astype(np.ubyte)
-        table[:, 1] = np.rint(255.0 * np.clip(1.55 * x - 0.12, 0.0, 1.0)).astype(np.ubyte)
-        table[:, 2] = np.rint(255.0 * np.clip(0.85 + 0.25 * x - 1.15 * (1.0 - x), 0.0, 1.0)).astype(np.ubyte)
-        table[:, 3] = 255
-        return table
-
-    @staticmethod
-    def _seismic_lookup_table() -> np.ndarray:
-        positions = np.linspace(-1.0, 1.0, 256)
-        colors = np.empty((256, 4), dtype=np.ubyte)
-        negative = positions < 0
-        positive = ~negative
-        magnitude = np.abs(positions)
-        colors[negative, 0] = (255.0 * (1.0 - magnitude[negative])).astype(np.ubyte)
-        colors[negative, 1] = (255.0 * (1.0 - magnitude[negative])).astype(np.ubyte)
-        colors[negative, 2] = 255
-        colors[positive, 0] = 255
-        colors[positive, 1] = (255.0 * (1.0 - magnitude[positive])).astype(np.ubyte)
-        colors[positive, 2] = (255.0 * (1.0 - magnitude[positive])).astype(np.ubyte)
-        colors[:, 3] = 255
-        return colors

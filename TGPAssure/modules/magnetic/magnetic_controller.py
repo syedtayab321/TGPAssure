@@ -5,7 +5,9 @@ from typing import Any, Iterable
 from PySide6.QtCore import QObject, Signal
 
 from core.data_access.db_engine import DatabaseEngine
+from core.domain.automated_qc_pipeline import AutomatedQCPipelineRegistry, QCPipelineDesign
 from core.infrastructure.job_manager import JobManager
+from modules.magnetic.automated_qc import MagneticAutomatedQCAdapter
 from modules.magnetic.context import MagneticQcContext
 from modules.magnetic.magnetic_engine import MagneticQcJob, MagneticQcPipeline
 from modules.magnetic.magnetic_profiles import get_profile
@@ -26,6 +28,8 @@ class MagneticQcController(QObject):
         self.job_manager = job_manager
         self.repository = MagneticRepository(db_engine)
         self.pipeline = MagneticQcPipeline(self.repository)
+        self.qc_registry = AutomatedQCPipelineRegistry()
+        self.qc_registry.register(MagneticAutomatedQCAdapter(self.pipeline))
         self._active_job_id: int | None = None
         self._latest_context: MagneticQcContext | None = None
         job_manager.job_completed.connect(self._on_job_completed)
@@ -46,6 +50,7 @@ class MagneticQcController(QObject):
         threshold_overrides: dict[str, Any] | None = None,
         selected_stage_keys: Iterable[str] | None = None,
         processing_products: dict[str, Any] | None = None,
+        stop_on_failure: bool = False,
     ) -> int:
         if self._active_job_id is not None:
             raise RuntimeError("A magnetic QC job is already running")
@@ -65,11 +70,37 @@ class MagneticQcController(QObject):
             selected_stage_keys,
             progress_callback=lambda current, total, message: self.progress_changed.emit(current, total, message),
             stage_callback=self.stage_completed.emit,
+            stop_on_failure=stop_on_failure,
         )
         job_id = self.job_manager.submit(job)
         self._active_job_id = job_id
         self.run_started.emit(job_id)
         return job_id
+
+
+    def run_pipeline_design(
+        self,
+        design: QCPipelineDesign,
+        rover: MagneticDataset,
+        *,
+        base: MagneticDataset | None = None,
+        boundary: MagneticBoundary | None = None,
+        processing_products: dict[str, Any] | None = None,
+    ) -> int:
+        """Validate and execute a reusable designer pipeline with the existing QC job engine."""
+        errors = self.qc_registry.validate(design)
+        if errors:
+            raise ValueError("Invalid Magnetic QC design: " + "; ".join(errors))
+        return self.run_qc(
+            rover,
+            base=base,
+            boundary=boundary,
+            profile_name=design.profile_name,
+            threshold_overrides=design.threshold_overrides,
+            selected_stage_keys=design.stage_keys,
+            processing_products=processing_products,
+            stop_on_failure=design.stop_on_failure,
+        )
 
     def run_sync(self, context: MagneticQcContext, selected_stage_keys: Iterable[str] | None = None) -> dict[str, Any]:
         return self.pipeline.run(context, selected_stage_keys=selected_stage_keys).as_dict()

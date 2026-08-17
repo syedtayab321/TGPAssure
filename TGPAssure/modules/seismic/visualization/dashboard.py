@@ -5,6 +5,7 @@ import tempfile
 import traceback
 from dataclasses import replace
 from pathlib import Path
+from threading import Event
 from typing import Any, Callable
 
 import numpy as np
@@ -87,16 +88,23 @@ from modules.seismic.visualization.view_2d import Seismic2DView
 from modules.seismic.visualization.view_3d import Seismic3DView
 from modules.seismic.visualization.geometry_map import SeismicGeometryMap
 from ui.theme.petrel_theme import FONT_SIZE_CAPTION, FONT_SIZE_LARGE, FONT_SIZE_NORMAL, FONT_SIZE_SMALL
+from core.visualization.palette_library import DEFAULT_PALETTE
+from ui.widgets.color_palette_dialog import PaletteSelectorButton
 
 
 ProgressReporter = Callable[[int, str], None]
 TaskFunction = Callable[[ProgressReporter], Any]
 
 
+class TaskCancelled(RuntimeError):
+    """Internal cooperative-cancellation marker for visualization workers."""
+
+
 class WorkerSignals(QObject):
     result = Signal(object)
     error = Signal(str)
     progress = Signal(int, str)
+    cancelled = Signal()
     finished = Signal()
 
 
@@ -105,12 +113,32 @@ class FunctionRunnable(QRunnable):
         super().__init__()
         self.function = function
         self.signals = WorkerSignals()
+        self._cancel_event = Event()
+
+    def cancel(self) -> None:
+        self._cancel_event.set()
+
+    @property
+    def cancellation_requested(self) -> bool:
+        return self._cancel_event.is_set()
+
+    def _report(self, value: int, detail: str) -> None:
+        if self._cancel_event.is_set():
+            raise TaskCancelled("Visualization task cancelled")
+        self.signals.progress.emit(value, detail)
 
     @Slot()
     def run(self) -> None:
         try:
-            result = self.function(self.signals.progress.emit)
-            self.signals.result.emit(result)
+            if self._cancel_event.is_set():
+                raise TaskCancelled("Visualization task cancelled before start")
+            result = self.function(self._report)
+            if self._cancel_event.is_set():
+                self.signals.cancelled.emit()
+            else:
+                self.signals.result.emit(result)
+        except TaskCancelled:
+            self.signals.cancelled.emit()
         except Exception:
             self.signals.error.emit(traceback.format_exc())
         finally:
@@ -183,6 +211,7 @@ class LoadingOverlay(QFrame):
 class SeismicVisualizationDashboard(QWidget):
     status_message = Signal(str)
     activity_started = Signal(str, str)
+    activity_started_cancellable = Signal(str, str, object)
     activity_progress = Signal(int, str)
     activity_finished = Signal()
 
@@ -217,6 +246,7 @@ class SeismicVisualizationDashboard(QWidget):
         self._pending_open_path: Path | None = None
         self._geometry_cache: dict[str, np.ndarray] | None = None
         self._pick_color = "#00E5FF"
+        self._palette_name = DEFAULT_PALETTE
         self._closing = False
         self._volume_reload_timer = QTimer(self)
         self._volume_reload_timer.setSingleShot(True)
@@ -260,6 +290,11 @@ class SeismicVisualizationDashboard(QWidget):
         self.metadata_label.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Preferred)
         header_layout.addWidget(self.open_button)
         header_layout.addWidget(self.file_label, 1)
+        header_layout.addWidget(QLabel("Palette"))
+        self.palette_selector = PaletteSelectorButton(self._palette_name, header)
+        self.palette_selector.setMinimumWidth(145)
+        self.palette_selector.currentTextChanged.connect(self._on_palette_changed)
+        header_layout.addWidget(self.palette_selector)
         header_layout.addWidget(self.metadata_label)
         root.addWidget(header)
 
@@ -321,6 +356,7 @@ class SeismicVisualizationDashboard(QWidget):
         view_layout = QVBoxLayout(view_card)
         view_layout.setContentsMargins(4, 4, 4, 4)
         self.view_2d = Seismic2DView()
+        self.view_2d.set_palette(self._palette_name)
         view_layout.addWidget(self.view_2d)
 
         splitter.addWidget(controls_card)
@@ -537,6 +573,7 @@ class SeismicVisualizationDashboard(QWidget):
         view_layout = QVBoxLayout(view_card)
         view_layout.setContentsMargins(4, 4, 4, 4)
         self.view_3d = Seismic3DView()
+        self.view_3d.set_palette(self._palette_name)
         view_layout.addWidget(self.view_3d)
 
         splitter.addWidget(controls_card)
@@ -779,6 +816,7 @@ class SeismicVisualizationDashboard(QWidget):
         map_layout = QVBoxLayout(map_card)
         map_layout.setContentsMargins(4, 4, 4, 4)
         self.geometry_map = SeismicGeometryMap(map_card)
+        self.geometry_map.set_palette(self._palette_name)
         map_layout.addWidget(self.geometry_map, 1)
 
         splitter.addWidget(sidebar)
@@ -879,6 +917,7 @@ class SeismicVisualizationDashboard(QWidget):
         qc_layout = QVBoxLayout(qc_card)
         qc_layout.setContentsMargins(4, 4, 4, 4)
         self.qc_panel = SeismicQcPanel()
+        self.qc_panel.set_palette(self._palette_name)
         qc_layout.addWidget(self.qc_panel)
         layout.addWidget(qc_card, 1)
         return tab
@@ -951,6 +990,15 @@ class SeismicVisualizationDashboard(QWidget):
         layout.addWidget(group)
         layout.addStretch(1)
         return page
+
+    def _on_palette_changed(self, palette_name: str) -> None:
+        self._palette_name = str(palette_name or DEFAULT_PALETTE)
+        for widget_name in ("view_2d", "view_3d", "geometry_map", "qc_panel"):
+            widget = getattr(self, widget_name, None)
+            setter = getattr(widget, "set_palette", None)
+            if callable(setter):
+                setter(self._palette_name)
+        self.status_message.emit(f"Visualization palette: {self._palette_name}")
 
     def _scroll_page(self, widget: QWidget) -> QScrollArea:
         scroll = QScrollArea()
@@ -2291,6 +2339,7 @@ class SeismicVisualizationDashboard(QWidget):
             lambda message: self._show_worker_error(activity, message)
         )
         worker.signals.progress.connect(self._update_worker_progress)
+        worker.signals.cancelled.connect(lambda: self._show_status("Cancellation acknowledged — partial results were discarded"))
         worker.signals.finished.connect(lambda: self._worker_finished(worker))
         self._busy_count += 1
         self.open_button.setEnabled(False)
@@ -2299,8 +2348,19 @@ class SeismicVisualizationDashboard(QWidget):
         self.status_label.setText(activity)
         if self._busy_count == 1:
             self.activity_started.emit(activity, detail)
+            self.activity_started_cancellable.emit(activity, detail, self.cancel_active_tasks)
             QApplication.setOverrideCursor(Qt.WaitCursor)
         QTimer.singleShot(0, lambda: self._start_worker(worker))
+
+    def cancel_active_tasks(self) -> None:
+        requested = False
+        for worker in tuple(self._active_workers):
+            if not worker.cancellation_requested:
+                worker.cancel()
+                requested = True
+        if requested:
+            self.loading_overlay.update_activity(0, "Cancellation requested — waiting for the active operation to stop safely")
+            self._show_status("Cancellation requested — active seismic operation will stop at the next safe checkpoint")
 
     def _start_worker(self, worker: FunctionRunnable) -> None:
         if self._closing:

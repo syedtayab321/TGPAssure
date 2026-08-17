@@ -57,6 +57,21 @@ from modules.seismic.smt import (
     SmtResultReader,
     default_project_directory,
 )
+from core.visualization.palette_library import DEFAULT_PALETTE, palette_hex
+from ui.widgets.color_palette_dialog import PaletteSelectorButton
+from ui.widgets.palette_colorbar import PaletteColorBar
+
+
+def _palette_series_color(palette_name: str, index: int, count: int) -> str:
+    if count <= 1:
+        return palette_hex(palette_name, 0.58)
+    return palette_hex(palette_name, index / max(count - 1, 1))
+
+
+def _palette_value_color(palette_name: str, value: float, minimum: float, maximum: float) -> str:
+    span = maximum - minimum
+    fraction = 0.5 if abs(span) <= 1e-12 else (float(value) - minimum) / span
+    return palette_hex(palette_name, max(0.0, min(1.0, fraction)))
 
 
 # The palette intentionally follows the Windows-classic SMTAN2 screenshots in the
@@ -1049,6 +1064,7 @@ class ResultsDialog(QDialog):
         self.database = database
         self.config = database.load_configuration()
         self.rows: list[dict[str, Any]] = []
+        self._palette_name = DEFAULT_PALETTE
         self.setWindowTitle("SMT Results")
         self.setObjectName("smtResultsDialog")
         _fit_dialog_to_screen(self, 1180, 720)
@@ -1077,6 +1093,12 @@ class ResultsDialog(QDialog):
         png.setObjectName("primaryClassic")
         top_buttons.addWidget(print_button, 0, 0); top_buttons.addWidget(close, 0, 1); top_buttons.addWidget(png, 1, 0)
         left.addLayout(top_buttons)
+        palette_group = QGroupBox("Color Palette")
+        palette_layout = QVBoxLayout(palette_group)
+        self.palette_selector = PaletteSelectorButton(self._palette_name, palette_group)
+        self.palette_selector.currentTextChanged.connect(self._set_palette)
+        palette_layout.addWidget(self.palette_selector)
+        left.addWidget(palette_group)
 
         period = QGroupBox("From")
         p_grid = QGridLayout(period)
@@ -1173,7 +1195,13 @@ class ResultsDialog(QDialog):
         self.statistics_text = QPlainTextEdit(); self.statistics_text.setReadOnly(True)
         mono = QFont("Courier New"); mono.setStyleHint(QFont.StyleHint.Monospace); self.statistics_text.setFont(mono)
         self.output_stack.addWidget(self.statistics_text)
-        body.addWidget(self.output_stack, 1)
+        output_layout = QVBoxLayout()
+        output_layout.setContentsMargins(0, 0, 0, 0)
+        output_layout.addWidget(self.output_stack, 1)
+        self.plot_colorbar = PaletteColorBar(self)
+        self.plot_colorbar.set_state(0.0, 1.0, self._palette_name, label="QC value")
+        output_layout.addWidget(self.plot_colorbar)
+        body.addLayout(output_layout, 1)
         root.addLayout(body, 1)
         self.plot_type_group.buttonToggled.connect(lambda *_: self._update_measure_controls())
         self.period_group.buttonToggled.connect(lambda *_: self._update_date_controls())
@@ -1189,6 +1217,10 @@ class ResultsDialog(QDialog):
         self._update_date_controls()
         self.refresh()
         QTimer.singleShot(0, self._position_on_screen)
+
+    def _set_palette(self, palette_name: str) -> None:
+        self._palette_name = str(palette_name or DEFAULT_PALETTE)
+        self.refresh()
 
     def _position_on_screen(self) -> None:
         _fit_dialog_to_screen(self, 1180, 720)
@@ -1267,14 +1299,17 @@ class ResultsDialog(QDialog):
         self.rows = self._selected_rows()
         plot_type = self._checked_value(self.plot_type_group, "histogram")
         if plot_type == "numerics":
+            self.plot_colorbar.setVisible(False)
             self.output_stack.setCurrentWidget(self.numeric_table)
             self._fill_numerics()
             return
         if plot_type == "statistics":
+            self.plot_colorbar.setVisible(False)
             self.output_stack.setCurrentWidget(self.statistics_text)
             start, end = self._date_range()
             self.statistics_text.setPlainText(_statistics_text(self.database, self.database.statistics(start=start, end=end)))
             return
+        self.plot_colorbar.setVisible(True)
         self.output_stack.setCurrentWidget(self.plot)
         self.plot.clear()
         if plot_type == "histogram":
@@ -1293,7 +1328,14 @@ class ResultsDialog(QDialog):
         self.plot.setLabel("bottom", MEASUREMENT_LABELS[field_name])
         if values.size:
             counts, edges = np.histogram(values, bins=self.config.histogram_bins)
-            self.plot.addItem(pg.BarGraphItem(x=(edges[:-1] + edges[1:]) / 2, height=counts, width=np.diff(edges) * 0.93, brush="#4FA3E3", pen="#1F5D8A"))
+            centers = (edges[:-1] + edges[1:]) / 2
+            vmin, vmax = float(np.nanmin(values)), float(np.nanmax(values))
+            for center, count, width in zip(centers, counts, np.diff(edges)):
+                color = _palette_value_color(self._palette_name, float(center), vmin, vmax)
+                self.plot.addItem(pg.BarGraphItem(x=[float(center)], height=[float(count)], width=float(width) * 0.93, brush=color, pen=pg.mkPen(color)))
+            self.plot_colorbar.set_state(vmin, vmax, self._palette_name, label=MEASUREMENT_LABELS[field_name])
+        else:
+            self.plot_colorbar.set_state(0.0, 1.0, self._palette_name, label=MEASUREMENT_LABELS[field_name])
         limit = self.config.limits[field_name]
         for value, label in ((limit.minimum, "Min"), (limit.nominal, "Nom"), (limit.maximum, "Max")):
             if value is not None:
@@ -1310,7 +1352,7 @@ class ResultsDialog(QDialog):
                 self.plot.plotItem.legend = None
         except Exception:
             pass
-        palette = [self.config.limits[field].color for field in MEASUREMENT_FIELDS]
+        enabled_fields = [field for field in MEASUREMENT_FIELDS if self.measure_checks[field].isChecked()]
         for idx, field_name in enumerate(MEASUREMENT_FIELDS):
             if not self.measure_checks[field_name].isChecked():
                 continue
@@ -1319,11 +1361,13 @@ class ResultsDialog(QDialog):
                 continue
             x = np.asarray([p[0] for p in points], dtype=float)
             y = np.asarray([float(p[1]) for p in points], dtype=float)
-            self.plot.plot(x, y, pen=None, symbol="o", symbolSize=3, symbolBrush=palette[idx], name=MEASUREMENT_LABELS[field_name])
+            color = _palette_series_color(self._palette_name, enabled_fields.index(field_name), max(len(enabled_fields), 1))
+            self.plot.plot(x, y, pen=None, symbol="o", symbolSize=3, symbolBrush=color, name=MEASUREMENT_LABELS[field_name])
         if self.rows:
             self.plot.addLegend(offset=(8, 8))
         self.plot.setTitle(f"Scatter Plot - {len(self.rows):,} Records")
         self.plot.setLabel("bottom", "Test sequence")
+        self.plot_colorbar.set_state(0.0, float(max(len(enabled_fields) - 1, 1)), self._palette_name, label="Selected measurement series")
 
     def _crossplot(self) -> None:
         self.plot.setBackground("w")
@@ -1333,7 +1377,15 @@ class ResultsDialog(QDialog):
         if members:
             x = np.asarray([float(row[x_field]) for row in members], dtype=float)
             y = np.asarray([float(row[y_field]) for row in members], dtype=float)
-            self.plot.plot(x, y, pen=None, symbol="o", symbolSize=4, symbolBrush="#70E890", symbolPen="#3FBF68")
+            ymin, ymax = float(np.nanmin(y)), float(np.nanmax(y))
+            spots = [
+                {"pos": (float(px), float(py)), "brush": _palette_value_color(self._palette_name, float(py), ymin, ymax), "pen": None, "size": 4}
+                for px, py in zip(x, y)
+            ]
+            self.plot.addItem(pg.ScatterPlotItem(spots=spots))
+            self.plot_colorbar.set_state(ymin, ymax, self._palette_name, label=MEASUREMENT_LABELS[y_field])
+        else:
+            self.plot_colorbar.set_state(0.0, 1.0, self._palette_name, label=MEASUREMENT_LABELS[y_field])
         self.plot.setTitle("CrossPlot")
         self.plot.setLabel("bottom", MEASUREMENT_LABELS[x_field])
         self.plot.setLabel("left", MEASUREMENT_LABELS[y_field])
@@ -1375,6 +1427,7 @@ class StatisticsDialog(QDialog):
     def __init__(self, database: SmtProjectDatabase, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.database = database
+        self._palette_name = DEFAULT_PALETTE
         self.setWindowTitle("Statistics")
         self.resize(900, 590)
         _set_classic(self)
@@ -1384,6 +1437,9 @@ class StatisticsDialog(QDialog):
         left = QVBoxLayout()
         go = QPushButton("Go"); go.setIcon(_icon(self, QStyle.StandardPixmap.SP_DialogApplyButton)); go.clicked.connect(self.refresh)
         left.addWidget(go)
+        self.palette_selector = PaletteSelectorButton(self._palette_name, self)
+        self.palette_selector.currentTextChanged.connect(self._set_palette)
+        left.addWidget(QLabel("Color Palette")); left.addWidget(self.palette_selector)
         range_box = QGroupBox("Range")
         range_layout = QVBoxLayout(range_box)
         self.all_records = QRadioButton("All"); self.all_records.setChecked(True)
@@ -1407,8 +1463,15 @@ class StatisticsDialog(QDialog):
         self.plot = pg.PlotWidget(background="#BFEFF2")
         self.plot.showGrid(x=False, y=True, alpha=0.2)
         self.stack.addWidget(self.text); self.stack.addWidget(self.plot)
-        body.addWidget(self.stack, 1)
+        stats_right = QVBoxLayout(); stats_right.addWidget(self.stack, 1)
+        self.plot_colorbar = PaletteColorBar(self); self.plot_colorbar.set_state(0.0, 1.0, self._palette_name, label="Failure count")
+        stats_right.addWidget(self.plot_colorbar)
+        body.addLayout(stats_right, 1)
         root.addLayout(body, 1)
+        self.refresh()
+
+    def _set_palette(self, palette_name: str) -> None:
+        self._palette_name = str(palette_name or DEFAULT_PALETTE)
         self.refresh()
 
     def refresh(self) -> None:
@@ -1421,7 +1484,11 @@ class StatisticsDialog(QDialog):
         if items:
             values = np.asarray([int(count) for _, count in items], dtype=float)
             labels = [MEASUREMENT_LABELS.get(name, name.replace("_", " ").title()) for name, _ in items]
-            self.plot.addItem(pg.BarGraphItem(x=np.arange(len(values)), height=values, width=0.72, brush="#00E83A", pen="#008000"))
+            vmin, vmax = float(np.nanmin(values)), float(np.nanmax(values))
+            for index, value in enumerate(values):
+                color = _palette_value_color(self._palette_name, float(value), vmin, vmax)
+                self.plot.addItem(pg.BarGraphItem(x=[float(index)], height=[float(value)], width=0.72, brush=color, pen=pg.mkPen(color)))
+            self.plot_colorbar.set_state(vmin, vmax, self._palette_name, label="Failure count")
             self.plot.getAxis("bottom").setTicks([[(float(i), label[:12]) for i, label in enumerate(labels)]])
         self.plot.setTitle("Breakdown of Failures")
         self.plot.setLabel("left", "Failure Count")
@@ -1609,6 +1676,7 @@ class SingleStringDialog(QDialog):
         self.database = database
         self.config = database.load_configuration()
         self.rows: list[dict[str, Any]] = []
+        self._palette_name = DEFAULT_PALETTE
         self.setWindowTitle("Single String Display")
         self.resize(1000, 600)
         _set_classic(self)
@@ -1623,6 +1691,10 @@ class SingleStringDialog(QDialog):
         close = QPushButton("Close"); close.clicked.connect(self.accept)
         for button in (go, png, print_button, analysis, close):
             button.setMinimumSize(112, 36); left.addWidget(button)
+        left.addWidget(QLabel("Color Palette"))
+        self.palette_selector = PaletteSelectorButton(self._palette_name, self)
+        self.palette_selector.currentTextChanged.connect(self._set_palette)
+        left.addWidget(self.palette_selector)
         left.addStretch(1)
         body.addLayout(left)
         right = QVBoxLayout()
@@ -1649,6 +1721,10 @@ class SingleStringDialog(QDialog):
         root.addLayout(body, 1)
         self.refresh()
 
+    def _set_palette(self, palette_name: str) -> None:
+        self._palette_name = str(palette_name or DEFAULT_PALETTE)
+        self.refresh()
+
     def refresh(self) -> None:
         field_name = str(self.measurement.currentData())
         start = None if self.all_dates.isChecked() else _qdate_to_date(self.start.date())
@@ -1658,14 +1734,14 @@ class SingleStringDialog(QDialog):
             if identity:
                 self.rows.extend(self.database.single_string_history([identity], start=start, end=end))
         self.plot.clear()
-        palette = ["#0066CC", "#FF0000", "#00A000", "#B000B0", "#FF8800", "#00A0A0", "#404040"]
         testers = sorted({str(row["tester"] or "Unknown") for row in self.rows})
         for index, tester in enumerate(testers):
             members = [row for row in self.rows if str(row["tester"] or "Unknown") == tester and row[field_name] is not None]
             x = np.arange(len(members), dtype=float)
             y = np.asarray([float(row[field_name]) for row in members], dtype=float)
             if len(y):
-                self.plot.plot(x, y, pen=pg.mkPen(palette[index % len(palette)], width=1), symbol="o", symbolSize=4, symbolBrush=palette[index % len(palette)], name=tester)
+                color = _palette_series_color(self._palette_name, index, max(len(testers), 1))
+                self.plot.plot(x, y, pen=pg.mkPen(color, width=1), symbol="o", symbolSize=4, symbolBrush=color, name=tester)
         if testers:
             self.plot.addLegend()
         limit = self.config.limits[field_name]
@@ -1694,6 +1770,7 @@ class TimeAnalysisDialog(QDialog):
     def __init__(self, database: SmtProjectDatabase, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.database = database
+        self._palette_name = DEFAULT_PALETTE
         self.setWindowTitle("Time Analysis")
         self.resize(1000, 620)
         _set_classic(self)
@@ -1708,12 +1785,19 @@ class TimeAnalysisDialog(QDialog):
         close = QPushButton("Close"); close.clicked.connect(self.accept)
         for button in (go, png, print_button, list_button, close):
             button.setMinimumSize(112, 36); left.addWidget(button)
+        left.addWidget(QLabel("Color Palette"))
+        self.palette_selector = PaletteSelectorButton(self._palette_name, self)
+        self.palette_selector.currentTextChanged.connect(self._set_palette)
+        left.addWidget(self.palette_selector)
         left.addStretch(1)
         body.addLayout(left)
         right = QVBoxLayout()
         self.plot = pg.PlotWidget(background="#BFEFF2")
         self.plot.showGrid(x=True, y=True, alpha=0.2)
         right.addWidget(self.plot, 2)
+        self.plot_colorbar = PaletteColorBar(self)
+        self.plot_colorbar.set_state(0.0, 1.0, self._palette_name, label="Daily QC value")
+        right.addWidget(self.plot_colorbar)
         controls = QHBoxLayout()
         self.measurement = QComboBox(); self.measurement.addItem("Number of tests per day", "tests")
         for field_name in MEASUREMENT_FIELDS:
@@ -1732,6 +1816,10 @@ class TimeAnalysisDialog(QDialog):
         root.addLayout(body, 1)
         self.refresh()
 
+    def _set_palette(self, palette_name: str) -> None:
+        self._palette_name = str(palette_name or DEFAULT_PALETTE)
+        self.refresh()
+
     def refresh(self) -> None:
         start = None if self.all_dates.isChecked() else _qdate_to_date(self.start.date())
         end = None if self.all_dates.isChecked() else _qdate_to_date(self.end.date())
@@ -1741,13 +1829,26 @@ class TimeAnalysisDialog(QDialog):
         x = np.arange(len(rows), dtype=float)
         if field_name == "tests":
             y = np.asarray([row["tests"] for row in rows], dtype=float)
-            self.plot.addItem(pg.BarGraphItem(x=x, height=y, width=0.72, brush="#00E83A", pen="#008000"))
+            if y.size:
+                ymin, ymax = float(np.nanmin(y)), float(np.nanmax(y))
+                for px, value in zip(x, y):
+                    color = _palette_value_color(self._palette_name, float(value), ymin, ymax)
+                    self.plot.addItem(pg.BarGraphItem(x=[float(px)], height=[float(value)], width=0.72, brush=color, pen=pg.mkPen(color)))
+                self.plot_colorbar.set_state(ymin, ymax, self._palette_name, label="Tests per day")
             self.plot.setTitle("Tests by Day -> All Records")
             self.plot.setLabel("left", "Tests")
         else:
             y = np.asarray([np.nan if row[field_name] is None else float(row[field_name]) for row in rows], dtype=float)
             valid = np.isfinite(y)
-            self.plot.plot(x[valid], y[valid], pen=pg.mkPen("#0000CC", width=1), symbol="o", symbolSize=4, symbolBrush="#0000CC")
+            if np.any(valid):
+                ymin, ymax = float(np.nanmin(y[valid])), float(np.nanmax(y[valid]))
+                self.plot.plot(x[valid], y[valid], pen=pg.mkPen(palette_hex(self._palette_name, 0.55), width=1))
+                spots = [
+                    {"pos": (float(px), float(py)), "brush": _palette_value_color(self._palette_name, float(py), ymin, ymax), "pen": None, "size": 4}
+                    for px, py in zip(x[valid], y[valid])
+                ]
+                self.plot.addItem(pg.ScatterPlotItem(spots=spots))
+                self.plot_colorbar.set_state(ymin, ymax, self._palette_name, label=MEASUREMENT_LABELS[field_name])
             self.plot.setTitle(f"Daily Mean {MEASUREMENT_LABELS[field_name]}")
             self.plot.setLabel("left", MEASUREMENT_LABELS[field_name])
         if rows:

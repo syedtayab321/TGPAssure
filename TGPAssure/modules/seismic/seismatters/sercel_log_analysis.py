@@ -12,7 +12,7 @@ from typing import Iterable
 
 import numpy as np
 from PySide6.QtCore import QPointF, QRectF, Qt
-from PySide6.QtGui import QColor, QFont, QLinearGradient, QPainter, QPainterPath, QPen
+from PySide6.QtGui import QColor, QFont, QLinearGradient, QPainter, QPen
 from PySide6.QtWidgets import (
     QFileDialog,
     QFormLayout,
@@ -37,6 +37,9 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from core.visualization.palette_library import palette_hex
+from ui.widgets.color_palette_dialog import PaletteSelectorButton
+
 
 @dataclass
 class LogFileSummary:
@@ -58,6 +61,11 @@ class _BaseClassicPlot(QWidget):
         super().__init__(parent)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.setMinimumSize(460, 260)
+        self.palette_name = "Seismic"
+
+    def set_palette(self, palette_name: str) -> None:
+        self.palette_name = palette_name
+        self.update()
 
     @staticmethod
     def _font(size: int = 7, bold: bool = False) -> QFont:
@@ -182,23 +190,21 @@ class _LinePlotWidget(_BaseClassicPlot):
             y_hi = plot.bottom() - (self.good_high - vmin) / (vmax - vmin) * plot.height()
             y_lo = plot.bottom() - (self.good_low - vmin) / (vmax - vmin) * plot.height()
             painter.fillRect(QRectF(plot.left(), min(y_hi, y_lo), plot.width(), abs(y_lo - y_hi)), QColor(74, 255, 122, 145))
-        painter.setPen(QPen(QColor(0, 62, 214), 1.1))
         step = max(1, self.values.size // max(1, int(plot.width() * 1.15)))
-        path = QPainterPath()
-        started = False
+        previous = None
+        span = max(vmax - vmin, 1e-12)
         for i in range(0, self.values.size, step):
             value = self.values[i]
             if not np.isfinite(value):
-                started = False
+                previous = None
                 continue
             x = plot.left() + i / max(1, self.values.size - 1) * plot.width()
-            y = plot.bottom() - (value - vmin) / (vmax - vmin) * plot.height()
-            if not started:
-                path.moveTo(x, y)
-                started = True
-            else:
-                path.lineTo(x, y)
-        painter.drawPath(path)
+            y = plot.bottom() - (value - vmin) / span * plot.height()
+            if previous is not None:
+                norm = min(1.0, max(0.0, (float(value) - vmin) / span))
+                painter.setPen(QPen(QColor(palette_hex(self.palette_name, norm)), 1.2))
+                painter.drawLine(previous, QPointF(x, y))
+            previous = QPointF(x, y)
         painter.setFont(self._font(7))
         painter.setPen(QColor(190, 0, 0))
         painter.drawText(4, int(plot.top() + 5), f"{vmax:.2f}")
@@ -244,8 +250,8 @@ class _HistogramGrid(_BaseClassicPlot):
             max_count = int(max(hist) or 1)
             bar_w = rect.width() / len(hist)
             painter.setPen(Qt.NoPen)
-            painter.setBrush(QColor(0, 225, 28))
             for i, count in enumerate(hist):
+                painter.setBrush(QColor(palette_hex(self.palette_name, i / max(1, len(hist) - 1))))
                 height = count / max_count * max(1.0, rect.height() - 18)
                 painter.drawRect(QRectF(rect.left() + i * bar_w, rect.bottom() - height, max(1.0, bar_w - 1), height))
             mean = float(np.mean(values))
@@ -338,6 +344,7 @@ class SercelLogAnalysisWidget(QWidget):
         self.numeric_values: list[float] = []
         self.failure_count = 0
         self.category_counts: Counter[str] = Counter()
+        self._palette_name = "Seismic"
         self._build_ui()
         self._apply_style()
 
@@ -364,6 +371,11 @@ class SercelLogAnalysisWidget(QWidget):
         self.path_label.setObjectName("pathLabel")
         self.path_label.setFrameShape(QFrame.StyledPanel)
         toolbar.addWidget(self.path_label, 1)
+        toolbar.addWidget(QLabel("Palette:"))
+        self.palette_selector = PaletteSelectorButton(self._palette_name, self)
+        self.palette_selector.setMinimumWidth(145)
+        self.palette_selector.currentTextChanged.connect(self._apply_palette)
+        toolbar.addWidget(self.palette_selector)
         self.tabs = QTabWidget()
         self.tabs.setDocumentMode(True)
         root.addWidget(self.tabs, 1)
@@ -374,6 +386,12 @@ class SercelLogAnalysisWidget(QWidget):
         self._build_production_tab()
         self._build_files_tab()
         self._build_logs_tab()
+        self._apply_palette(self._palette_name)
+
+    def _apply_palette(self, palette_name: str) -> None:
+        self._palette_name = palette_name
+        for widget in self.findChildren(_BaseClassicPlot):
+            widget.set_palette(palette_name)
 
     def _build_overview_tab(self) -> None:
         page = QWidget()

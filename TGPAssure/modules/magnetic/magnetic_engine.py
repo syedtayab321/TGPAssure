@@ -58,6 +58,7 @@ class MagneticQcPipeline:
         selected_stage_keys: Iterable[str] | None = None,
         progress_callback: Callable[[int, int, str], None] | None = None,
         cancellation_check: Callable[[], bool] | None = None,
+        stop_on_failure: bool = False,
     ) -> MagneticRunResult:
         selected = set(selected_stage_keys) if selected_stage_keys else None
         definitions = [entry for entry in MAGNETIC_QC_STAGES if selected is None or entry[0] in selected]
@@ -67,6 +68,7 @@ class MagneticQcPipeline:
         context.cancellation_check = cancellation_check
         started = datetime.now(timezone.utc)
         outcomes = []
+        stopped_on_failure = False
         for index, (key, display_name, stage_class) in enumerate(definitions, start=1):
             if context.cancelled():
                 break
@@ -75,6 +77,20 @@ class MagneticQcPipeline:
             outcomes.append(outcome)
             context.stage_outcomes[key] = outcome
             context.report_progress(index, len(definitions), f"Completed {display_name}")
+            if stop_on_failure and outcome.status == QCStatus.FAIL and key != "summary":
+                stopped_on_failure = True
+                break
+        # A stop-on-failure run still produces the standard consolidated summary
+        # for auditability, but does not execute any remaining scientific stages.
+        summary_requested = any(key == "summary" for key, _name, _stage in definitions)
+        summary_completed = any(outcome.stage_key == "summary" for outcome in outcomes)
+        if stopped_on_failure and summary_requested and not summary_completed and not context.cancelled():
+            key, display_name, stage_class = next(entry for entry in MAGNETIC_QC_STAGES if entry[0] == "summary")
+            context.report_progress(len(outcomes), max(len(outcomes) + 1, 1), f"Running {display_name}")
+            outcome = stage_class().run(context)
+            outcomes.append(outcome)
+            context.stage_outcomes[key] = outcome
+            context.report_progress(len(outcomes), len(outcomes), f"Completed {display_name}")
         completed = datetime.now(timezone.utc)
         if context.cancelled():
             status = QCStatus.SKIPPED
@@ -116,6 +132,7 @@ class MagneticQcJob(Job):
         selected_stage_keys: Iterable[str] | None = None,
         progress_callback: Callable[[int, int, str], None] | None = None,
         stage_callback: Callable[[str], None] | None = None,
+        stop_on_failure: bool = False,
     ) -> None:
         super().__init__(JobSpec(job_type="magnetic_qc", module="magnetic"))
         self.context = context
@@ -123,6 +140,7 @@ class MagneticQcJob(Job):
         self.selected_stage_keys = tuple(selected_stage_keys) if selected_stage_keys else None
         self.progress_callback = progress_callback
         self.stage_callback = stage_callback
+        self.stop_on_failure = bool(stop_on_failure)
 
     def run(self, _application_context, cancel_token: CancellationToken):
         def progress(current: int, total: int, message: str) -> None:
@@ -136,5 +154,6 @@ class MagneticQcJob(Job):
             selected_stage_keys=self.selected_stage_keys,
             progress_callback=progress,
             cancellation_check=cancel_token.is_cancelled,
+            stop_on_failure=self.stop_on_failure,
         )
         return result.as_dict()

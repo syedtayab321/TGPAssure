@@ -12,7 +12,7 @@ try:
     from matplotlib import cm
     from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
     from matplotlib.backends.backend_qtagg import NavigationToolbar2QT as NavigationToolbar
-    from matplotlib.colors import Normalize
+    from matplotlib.colors import ListedColormap, Normalize
     from matplotlib.figure import Figure
     from matplotlib.tri import Triangulation
     from mpl_toolkits.mplot3d import Axes3D  # noqa: F401 - activates matplotlib 3D projection
@@ -23,10 +23,11 @@ except Exception:  # Matplotlib is optional; pyqtgraph fallback remains availabl
     Figure = None
     Triangulation = None
     Normalize = None
+    ListedColormap = None
     cm = None
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QFont
+from PySide6.QtGui import QColor, QFont
 from PySide6.QtWidgets import (
     QComboBox,
     QFrame,
@@ -45,6 +46,13 @@ from core.domain.spatial_visualization import (
     normalize_robust,
     value_relief,
 )
+from core.visualization.palette_library import (
+    DEFAULT_PALETTE,
+    palette_rgba_array,
+    palette_rgb_array,
+)
+from ui.widgets.color_palette_dialog import PaletteSelectorButton
+from ui.widgets.palette_colorbar import PaletteColorBar
 
 # PyOpenGL logs the absence of its optional Cython accelerator at INFO level.
 logging.getLogger("OpenGL.acceleratesupport").setLevel(logging.WARNING)
@@ -113,6 +121,7 @@ class ScientificSpatialView(QWidget):
         self._view_preset = "oblique"
         self._zoom_factor = 1.0
         self._mpl_scroll_connection = None
+        self._palette_name = DEFAULT_PALETTE
         self._build_ui(title)
 
     def _build_ui(self, title: str) -> None:
@@ -142,6 +151,14 @@ class ScientificSpatialView(QWidget):
         self.mode_combo.setFixedWidth(154)
         self.mode_combo.currentIndexChanged.connect(self._render)
         row.addWidget(self.mode_combo)
+
+        palette_label = QLabel("Palette:")
+        palette_label.setStyleSheet("font-size:8px;color:#516A7B;background:transparent;")
+        row.addWidget(palette_label)
+        self.palette_selector = PaletteSelectorButton(self._palette_name, toolbar)
+        self.palette_selector.setMinimumWidth(128)
+        self.palette_selector.currentTextChanged.connect(self.set_palette)
+        row.addWidget(self.palette_selector)
 
         self.fit_button = QPushButton("Fit")
         self.fit_button.setObjectName("spatialPrimaryButton")
@@ -225,6 +242,9 @@ class ScientificSpatialView(QWidget):
             self._fallback_stack_index = self.stack.addWidget(self.plot_3d_fallback)
             self._three_d_stack_index = self._fallback_stack_index
         root.addWidget(self.stack, 1)
+        self.value_colorbar = PaletteColorBar(self)
+        self.value_colorbar.set_state(0.0, 1.0, self._palette_name, label="Scientific value")
+        root.addWidget(self.value_colorbar)
 
         self.status = QLabel("No dataset loaded")
         self.status.setObjectName("spatialStatus")
@@ -242,6 +262,12 @@ class ScientificSpatialView(QWidget):
             plot.getAxis("bottom").setStyle(tickFont=font)
         except Exception:
             pass
+
+    def set_palette(self, palette_name: str) -> None:
+        self._palette_name = str(palette_name or DEFAULT_PALETTE)
+        if hasattr(self, "palette_selector") and self.palette_selector.currentText() != self._palette_name:
+            self.palette_selector.setCurrentText(self._palette_name)
+        self._render()
 
     def set_mode(self, mode: str) -> None:
         target = str(mode or "2d").lower()
@@ -289,6 +315,15 @@ class ScientificSpatialView(QWidget):
         if payload is None or payload.values.size == 0:
             self.clear("No finite spatial observations are available for 2D/3D display.")
             return
+        finite_values = payload.values[np.isfinite(payload.values)]
+        if finite_values.size:
+            self.value_colorbar.set_state(
+                float(np.nanmin(finite_values)),
+                float(np.nanmax(finite_values)),
+                self._palette_name,
+                unit=payload.value_units,
+                label=payload.value_label,
+            )
         mode = str(self.mode_combo.currentData() or "2d")
         self._last_mode = mode
         if mode == "2d":
@@ -384,8 +419,8 @@ class ScientificSpatialView(QWidget):
 
         normalized = normalize_robust(values)
         try:
-            cmap = pg.colormap.get("viridis")
-            colors = cmap.map(normalized, mode="qcolor")
+            rgba = palette_rgba_array(normalized, self._palette_name)
+            colors = [QColor(int(r), int(g), int(b), int(a)) for r, g, b, a in rgba]
             point_size = 7 if values.size <= 3000 else (5 if values.size <= 20000 else 3)
             spots = [
                 {"pos": (float(px), float(py)), "brush": color, "pen": pg.mkPen("#FFFFFF", width=0.25), "size": point_size}
@@ -518,6 +553,12 @@ class ScientificSpatialView(QWidget):
         finite = np.isfinite(x) & np.isfinite(y) & np.isfinite(z) & np.isfinite(values)
         return x[finite], y[finite], z[finite], values[finite]
 
+    def _matplotlib_palette(self):
+        if ListedColormap is None:
+            return self._mpl_colormap("viridis")
+        rgb = palette_rgb_array(self._palette_name, 256).astype(float) / 255.0
+        return ListedColormap(rgb, name=f"tgpassure_{self._palette_name.replace(' ', '_')}")
+
     def _render_3d_matplotlib(self, payload: _SpatialPayload, *, relief: bool) -> None:
         x, y, z_physical, values = self._decimated_arrays(payload, 52000)
         self.figure_3d.clear()
@@ -582,7 +623,7 @@ class ScientificSpatialView(QWidget):
                 vmin -= 0.5
                 vmax += 0.5
             norm = Normalize(vmin=vmin, vmax=vmax)
-            cmap_obj = self._mpl_colormap("viridis")
+            cmap_obj = self._matplotlib_palette()
 
         # Draw a curtain/surface first so the 3D structure is visible, then draw
         # measurement dots over it so individual readings are still inspectable.
@@ -607,13 +648,13 @@ class ScientificSpatialView(QWidget):
                 pass
         elif (not profile_mode) and payload.allow_surface and values.size >= 20:
             try:
-                ax.plot_trisurf(x0, y_plot, z0, cmap="viridis", alpha=0.18, linewidth=0.08, antialiased=True)
+                ax.plot_trisurf(x0, y_plot, z0, cmap=cmap_obj, alpha=0.18, linewidth=0.08, antialiased=True)
             except Exception:
                 pass
 
         point_size = 42 if values.size <= 750 else (28 if values.size <= 3000 else (15 if values.size <= 12000 else 7))
         scatter = ax.scatter(
-            x0, y_plot, z0, c=values, cmap="viridis", s=point_size,
+            x0, y_plot, z0, c=values, cmap=cmap_obj, s=point_size,
             depthshade=False, edgecolors="#FFFFFF", linewidths=0.16, alpha=0.98, marker="o",
         )
 
@@ -706,8 +747,8 @@ class ScientificSpatialView(QWidget):
         xp, yp = self._project_isometric(x0, y0, z0)
         normalized = normalize_robust(values)
         try:
-            cmap = pg.colormap.get("viridis")
-            colors = cmap.map(normalized, mode="qcolor")
+            rgba = palette_rgba_array(normalized, self._palette_name)
+            colors = [QColor(int(r), int(g), int(b), int(a)) for r, g, b, a in rgba]
             point_size = 7 if values.size <= 3000 else (5 if values.size <= 20000 else 3)
             spots = [
                 {"pos": (float(px), float(py)), "brush": color, "pen": pg.mkPen("#FFFFFF", width=0.25), "size": point_size}
@@ -751,10 +792,7 @@ class ScientificSpatialView(QWidget):
             z_note = "physical/recorded elevation where available"
         normalized = normalize_robust(values)
         try:
-            cmap = pg.colormap.get("viridis")
-            colors = np.asarray(cmap.map(normalized, mode="float"), dtype=float)
-            if colors.shape[1] == 3:
-                colors = np.c_[colors, np.ones(colors.shape[0])]
+            colors = palette_rgba_array(normalized, self._palette_name).astype(float) / 255.0
         except Exception:
             colors = np.c_[normalized, 1.0 - normalized, np.full_like(normalized, 0.5), np.ones_like(normalized)]
         positions = np.column_stack((x0, y0, z0))
@@ -765,10 +803,7 @@ class ScientificSpatialView(QWidget):
             if surface is not None:
                 norm_grid = normalize_robust(surface.values)
                 try:
-                    cmap = pg.colormap.get("viridis")
-                    surf_colors = np.asarray(cmap.map(norm_grid, mode="float"), dtype=float)
-                    if surf_colors.shape[-1] == 3:
-                        surf_colors = np.concatenate((surf_colors, np.ones((*surf_colors.shape[:-1], 1))), axis=-1)
+                    surf_colors = palette_rgba_array(norm_grid, self._palette_name).astype(float) / 255.0
                     surf_colors[..., 3] = np.where(surface.inside_hull, 0.68, 0.0)
                     mesh = gl.GLSurfacePlotItem(x=surface.x, y=surface.y, z=surface.z, colors=surf_colors, shader="shaded", smooth=False, computeNormals=True)
                     self.view_3d.addItem(mesh)

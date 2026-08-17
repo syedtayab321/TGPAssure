@@ -29,6 +29,9 @@ from PySide6.QtWidgets import (
 
 from modules.geophone_array.models import GeophoneArrayModel, load_gar_file, save_gar_file
 from modules.geophone_array.response import calculate_response, frequency_to_velocity, wavenumber_to_frequency
+from core.visualization.palette_library import palette_hex
+from ui.widgets.color_palette_dialog import PaletteSelectorButton
+from ui.widgets.palette_colorbar import PaletteColorBar
 
 
 STYLE = """
@@ -45,8 +48,14 @@ QPushButton#greenButton { background: #16A34A; border-color: #15803D; color: whi
 QPushButton#amberButton { background: #D97706; border-color: #B45309; color: white; }
 QPushButton#redButton { background: #DC2626; border-color: #B91C1C; color: white; }
 QPushButton#navButton { background: #EEF6FF; border-color: #93C5FD; color: #0F4C81; }
+QPushButton#arrayToolButton { border-radius: 6px; min-height: 24px; max-height: 30px; padding: 2px 3px; font-size: 8px; font-weight: 700; }
+QPushButton#arrayToolButton[role="design"] { background: #0F766E; border-color: #0D9488; color: #FFFFFF; }
+QPushButton#arrayToolButton[role="response"] { background: #2563EB; border-color: #1D4ED8; color: #FFFFFF; }
+QPushButton#arrayToolButton[role="print"] { background: #F59E0B; border-color: #D97706; color: #1F2937; }
+QPushButton#arrayToolButton[role="close"] { background: #DC2626; border-color: #B91C1C; color: #FFFFFF; }
+QPushButton#arrayToolButton:hover { border-color: #0EA5E9; }
 QTabWidget::pane { border: 1px solid #CBD5E1; border-radius: 7px; background: #FFFFFF; }
-QTabBar::tab { background: #EAF0F7; border: 1px solid #C6D3E2; padding: 5px 8px; font-size: 9px; font-weight: 600; min-height: 18px; }
+QTabBar::tab { background: #EAF0F7; border: 1px solid #C6D3E2; padding: 4px 6px; font-size: 8px; font-weight: 600; min-height: 16px; }
 QTabBar::tab:selected { background: #0E7490; color: #FFFFFF; border-color: #0E7490; }
 QTabBar::tab:hover { background: #D8ECFA; }
 QDoubleSpinBox, QSpinBox, QComboBox, QLineEdit { min-height: 20px; padding: 1px 4px; font-size: 10px; }
@@ -60,6 +69,7 @@ QLabel#statusLabel { background: #FFFFFF; border: 1px solid #D6DEE8; border-radi
 class ArrayDesignCanvas(QWidget):
     changed = Signal()
     cursorChanged = Signal(float, float)
+    pointDetailsRequested = Signal(object)
 
     def __init__(self, model: GeophoneArrayModel, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -100,6 +110,35 @@ class ArrayDesignCanvas(QWidget):
             x = max(0.0, min(self.model.x_size, x))
             y = max(0.0, min(self.model.y_size, y))
         return x, y
+
+    def _nearest_design_point(self, pos: QPoint, tolerance_px: float = 10.0) -> dict | None:
+        if not self.model.points:
+            return None
+        best_index = -1
+        best_distance = float("inf")
+        best_screen = None
+        for index, point in enumerate(self.model.points, start=1):
+            screen = self._to_screen(point.x, point.y)
+            distance = math.hypot(screen.x() - pos.x(), screen.y() - pos.y())
+            if distance < best_distance:
+                best_index = index
+                best_distance = distance
+                best_screen = screen
+        if best_index > 0 and best_distance <= tolerance_px:
+            point = self.model.points[best_index - 1]
+            return {
+                "kind": "Array Element",
+                "element": best_index,
+                "x": float(point.x),
+                "y": float(point.y),
+                "screen_x": best_screen.x() if best_screen is not None else pos.x(),
+                "screen_y": best_screen.y() if best_screen is not None else pos.y(),
+                "distance_px": best_distance,
+                "elements": int(self.model.elements),
+                "x_size": float(self.model.x_size),
+                "y_size": float(self.model.y_size),
+            }
+        return None
 
     def paintEvent(self, event) -> None:  # noqa: N802
         p = QPainter(self)
@@ -161,7 +200,15 @@ class ArrayDesignCanvas(QWidget):
             p.drawLine(pt.x(), pt.y() - 6, pt.x(), pt.y() + 6)
 
     def mouseMoveEvent(self, event: QMouseEvent) -> None:  # noqa: N802
-        x, y = self._from_screen(event.position().toPoint())
+        pos = event.position().toPoint()
+        nearest = self._nearest_design_point(pos)
+        if nearest is not None:
+            x = float(nearest["x"])
+            y = float(nearest["y"])
+            self.setToolTip(f"Element {nearest['element']}\nX: {x:.3f}\nY: {y:.3f}")
+        else:
+            x, y = self._from_screen(pos)
+            self.setToolTip(f"X: {x:.3f}\nY: {y:.3f}")
         self.cursor_x = x
         self.cursor_y = y
         self.cursor_visible = True
@@ -170,20 +217,27 @@ class ArrayDesignCanvas(QWidget):
 
     def leaveEvent(self, event) -> None:  # noqa: N802
         self.cursor_visible = False
+        self.setToolTip("")
         self.update()
 
     def mousePressEvent(self, event: QMouseEvent) -> None:  # noqa: N802
-        x, y = self._from_screen(event.position().toPoint())
+        pos = event.position().toPoint()
+        x, y = self._from_screen(pos)
+        nearest = self._nearest_design_point(pos, tolerance_px=12.0)
         if event.button() == Qt.MouseButton.RightButton:
             if self.model.remove_nearest(x, y, tolerance=max(self.grid_x, self.grid_y, 1.0) * 0.45):
                 self.changed.emit(); self.update()
         elif event.button() == Qt.MouseButton.LeftButton:
-            self.model.add_point(x, y)
-            self.changed.emit(); self.update()
+            if nearest is not None:
+                self.pointDetailsRequested.emit(nearest)
+            else:
+                self.model.add_point(x, y)
+                self.changed.emit(); self.update()
 
 
 class ResponseCanvas(QWidget):
     cursorChanged = Signal(float, float)
+    pointDetailsRequested = Signal(object)
 
     def __init__(self, model: GeophoneArrayModel, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -194,12 +248,77 @@ class ResponseCanvas(QWidget):
         self.cursor_mode = "wavenumber"
         self.velocity = 355.0
         self.frequency = 60.0
+        self.palette_name = "Seismic"
+        self._hover_sample: dict | None = None
+        self._last_curve = None
         self.setMouseTracking(True)
         self.setMinimumSize(460, 310)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 
     def _plot_rect(self) -> QRectF:
         return QRectF(56, 44, max(160, self.width() - 86), max(150, self.height() - 86))
+
+    def _response_curve(self):
+        self._last_curve = calculate_response(self.model, self.azimuth, max_ratio=11.0, samples=700)
+        return self._last_curve
+
+    def _to_screen(self, x_value: float, y_value: float) -> QPoint:
+        r = self._plot_rect()
+        sx = r.left() + max(0.0, min(11.0, float(x_value))) / 11.0 * r.width()
+        sy = r.bottom() - max(0.0, min(1.0, float(y_value))) * r.height()
+        return QPoint(round(sx), round(sy))
+
+    def _from_screen(self, pos: QPoint) -> tuple[float, float]:
+        r = self._plot_rect()
+        x_value = (pos.x() - r.left()) / max(r.width(), 1.0) * 11.0
+        y_value = (r.bottom() - pos.y()) / max(r.height(), 1.0)
+        return max(0.0, min(11.0, x_value)), max(0.0, min(1.0, y_value))
+
+    def _nearest_response_sample(self, pos: QPoint, tolerance_px: float = 14.0) -> dict | None:
+        curve = self._response_curve()
+        if not curve.x_values:
+            return None
+        best_index = -1
+        best_distance = float("inf")
+        for index, (x_value, y_value) in enumerate(zip(curve.x_values, curve.y_values), start=1):
+            screen = self._to_screen(x_value, y_value)
+            distance = math.hypot(screen.x() - pos.x(), screen.y() - pos.y())
+            if distance < best_distance:
+                best_index = index
+                best_distance = distance
+        if best_index < 1 or best_distance > tolerance_px:
+            return None
+        x_value = float(curve.x_values[best_index - 1])
+        y_value = float(curve.y_values[best_index - 1])
+        projected_length = float(curve.projected_length)
+        return {
+            "kind": "Array Response Sample",
+            "sample": best_index,
+            "samples": len(curve.x_values),
+            "ratio": x_value,
+            "response": y_value,
+            "azimuth": float(self.azimuth),
+            "projected_length": projected_length,
+            "frequency": wavenumber_to_frequency(x_value, float(self.velocity), max(projected_length, 1.0)),
+            "velocity": frequency_to_velocity(x_value, float(self.frequency), max(projected_length, 1.0)),
+            "reference_velocity": float(self.velocity),
+            "reference_frequency": float(self.frequency),
+            "elements": int(self.model.elements),
+            "distance_px": best_distance,
+        }
+
+    def _tooltip_text(self, details: dict) -> str:
+        if details.get("kind") == "Array Response Sample":
+            return (
+                f"Sample: {details['sample']} / {details['samples']}\n"
+                f"Ratio: {details['ratio']:.4f}\n"
+                f"Response: {details['response']:.4f}\n"
+                f"Azimuth: {details['azimuth']:.1f}°\n"
+                f"Length: {details['projected_length']:.3f}\n"
+                f"Freq @ {details['reference_velocity']:.0f} m/s: {details['frequency']:.3f} Hz\n"
+                f"Vel @ {details['reference_frequency']:.1f} Hz: {details['velocity']:.3f} m/s"
+            )
+        return ""
 
     def paintEvent(self, event) -> None:  # noqa: N802
         p = QPainter(self)
@@ -225,14 +344,19 @@ class ResponseCanvas(QWidget):
             yval = i / 10.0
             sy = r.bottom() - yval * r.height()
             p.drawText(round(r.left()) - 30, round(sy) + 3, f"{yval:.1f}")
-        curve = calculate_response(self.model, self.azimuth, max_ratio=11.0, samples=700)
+        curve = self._response_curve()
         if curve.x_values:
-            p.setPen(QPen(QColor("#1D39FF"), 1.3))
             last = None
+            values = curve.y_values
+            lo = min(values) if values else 0.0
+            hi = max(values) if values else 1.0
+            span = max(hi - lo, 1e-12)
             for xval, yval in zip(curve.x_values, curve.y_values):
                 sx = r.left() + xval / 11.0 * r.width()
                 sy = r.bottom() - yval * r.height()
                 if last is not None:
+                    t = max(0.0, min(1.0, (yval - lo) / span))
+                    p.setPen(QPen(QColor(palette_hex(self.palette_name, t)), 1.45))
                     p.drawLine(last[0], last[1], round(sx), round(sy))
                 last = (round(sx), round(sy))
         cx = r.left() + max(0.0, min(11.0, self.cursor_x)) / 11.0 * r.width()
@@ -242,6 +366,11 @@ class ResponseCanvas(QWidget):
         p.drawLine(round(r.left()), round(cy), round(r.right()), round(cy))
         p.setBrush(QBrush(QColor("#FF2020")))
         p.drawEllipse(QPoint(round(cx), round(cy)), 3, 3)
+        if self._hover_sample is not None:
+            sample_pt = self._to_screen(float(self._hover_sample["ratio"]), float(self._hover_sample["response"]))
+            p.setBrush(QBrush(QColor("#FDBA74")))
+            p.setPen(QPen(QColor("#EA580C"), 1.4))
+            p.drawEllipse(sample_pt, 5, 5)
         p.setPen(QPen(QColor("#0E31FF"), 1.1))
         p.drawText(round(r.left()), round(r.top()) - 8, f"Cursor X : {self.cursor_x:.2f}   Cursor Y : {self.cursor_y:.2f}")
         p.setPen(QPen(QColor("#242424"), 1))
@@ -257,18 +386,40 @@ class ResponseCanvas(QWidget):
         p.setPen(QPen(QColor("#FF1D1D"), 1))
         p.drawText(round(r.right()) - 170, round(r.bottom()) + 48, "TGP Geophone Array Analysis")
 
-    def _update_cursor_from_pos(self, pos: QPoint) -> None:
-        r = self._plot_rect()
-        self.cursor_x = max(0.0, min(11.0, (pos.x() - r.left()) / max(r.width(), 1.0) * 11.0))
-        self.cursor_y = max(0.0, min(1.0, (r.bottom() - pos.y()) / max(r.height(), 1.0)))
-        self.cursorChanged.emit(self.cursor_x, self.cursor_y)
+    def set_palette(self, palette_name: str) -> None:
+        self.palette_name = str(palette_name or "Seismic")
         self.update()
 
+    def _update_cursor_from_pos(self, pos: QPoint, snap_to_curve: bool = True) -> dict | None:
+        details = self._nearest_response_sample(pos) if snap_to_curve else None
+        if details is not None:
+            self.cursor_x = float(details["ratio"])
+            self.cursor_y = float(details["response"])
+            self._hover_sample = details
+            self.setToolTip(self._tooltip_text(details))
+        else:
+            self.cursor_x, self.cursor_y = self._from_screen(pos)
+            self._hover_sample = None
+            self.setToolTip(f"Ratio: {self.cursor_x:.4f}\nResponse: {self.cursor_y:.4f}")
+        self.cursorChanged.emit(self.cursor_x, self.cursor_y)
+        self.update()
+        return details
+
     def mouseMoveEvent(self, event: QMouseEvent) -> None:  # noqa: N802
-        self._update_cursor_from_pos(event.position().toPoint())
+        self._update_cursor_from_pos(event.position().toPoint(), snap_to_curve=True)
+
+    def leaveEvent(self, event) -> None:  # noqa: N802
+        self._hover_sample = None
+        self.setToolTip("")
+        self.update()
 
     def mousePressEvent(self, event: QMouseEvent) -> None:  # noqa: N802
-        self._update_cursor_from_pos(event.position().toPoint())
+        details = self._update_cursor_from_pos(event.position().toPoint(), snap_to_curve=True)
+        if event.button() == Qt.MouseButton.LeftButton:
+            if details is None:
+                details = self._nearest_response_sample(event.position().toPoint(), tolerance_px=22.0)
+            if details is not None:
+                self.pointDetailsRequested.emit(details)
 
 
 class ArrayMapPreview(QWidget):
@@ -313,6 +464,7 @@ class ArrayResponseDashboard(QWidget):
         self.setProperty("module_id", "array_response")
         self.model = GeophoneArrayModel()
         self.current_path: Path | None = None
+        self._palette_name = "Seismic"
         self._build_ui()
         self._wire()
         self._reset_to_blank_dashboard()
@@ -337,7 +489,7 @@ class ArrayResponseDashboard(QWidget):
 
         body = QHBoxLayout(); body.setSpacing(7)
         root.addLayout(body, 1)
-        self.left = QFrame(); self.left.setObjectName("leftPanel"); self.left.setMinimumWidth(230); self.left.setMaximumWidth(275)
+        self.left = QFrame(); self.left.setObjectName("leftPanel"); self.left.setMinimumWidth(210); self.left.setMaximumWidth(245)
         left_l = QVBoxLayout(self.left); left_l.setContentsMargins(5, 5, 5, 5); left_l.setSpacing(5)
         self.preview = ArrayMapPreview(self.model)
         left_l.addWidget(self.preview)
@@ -350,12 +502,28 @@ class ArrayResponseDashboard(QWidget):
         self.azimuth_label = QLabel("0"); self.azimuth_label.setAlignment(Qt.AlignmentFlag.AlignCenter); self.azimuth_label.setObjectName("valueLabel")
         self.azimuth_slider = QSlider(Qt.Orientation.Horizontal); self.azimuth_slider.setRange(0, 180); self.azimuth_slider.setValue(0)
         view_l.addWidget(QLabel("Azimuth")); view_l.addWidget(self.azimuth_label); view_l.addWidget(self.azimuth_slider)
-        self.array_design_btn = QPushButton("Array Design"); self.array_design_btn.setObjectName("accentButton")
-        self.response_btn = QPushButton("Array Response"); self.response_btn.setObjectName("blueButton")
-        self.print_btn = QPushButton("Print"); self.print_btn.setObjectName("amberButton")
-        self.end_btn = QPushButton("End"); self.end_btn.setObjectName("redButton")
-        for btn in (self.array_design_btn, self.response_btn, self.print_btn, self.end_btn):
-            view_l.addWidget(btn)
+        view_l.addWidget(QLabel("Response Palette"))
+        self.palette_selector = PaletteSelectorButton(self._palette_name, view_tab)
+        view_l.addWidget(self.palette_selector)
+        tool_grid = QGridLayout()
+        tool_grid.setContentsMargins(0, 3, 0, 0)
+        tool_grid.setHorizontalSpacing(5)
+        tool_grid.setVerticalSpacing(5)
+        self.array_design_btn = QPushButton("Design"); self.array_design_btn.setObjectName("arrayToolButton"); self.array_design_btn.setProperty("role", "design")
+        self.response_btn = QPushButton("Resp"); self.response_btn.setObjectName("arrayToolButton"); self.response_btn.setProperty("role", "response")
+        self.print_btn = QPushButton("Print"); self.print_btn.setObjectName("arrayToolButton"); self.print_btn.setProperty("role", "print")
+        self.end_btn = QPushButton("End"); self.end_btn.setObjectName("arrayToolButton"); self.end_btn.setProperty("role", "close")
+        for btn, tip, row, col in (
+            (self.array_design_btn, "Open the editable array design canvas", 0, 0),
+            (self.response_btn, "Show the normalized array response plot", 0, 1),
+            (self.print_btn, "Prepare the current array response view for print/export", 1, 0),
+            (self.end_btn, "Close the Geophone Array Response workspace", 1, 1),
+        ):
+            btn.setToolTip(tip)
+            btn.setMinimumWidth(58)
+            btn.setMaximumWidth(86)
+            tool_grid.addWidget(btn, row, col)
+        view_l.addLayout(tool_grid)
         view_l.addStretch(1)
         self.control_tabs.addTab(view_tab, "View")
 
@@ -388,7 +556,11 @@ class ArrayResponseDashboard(QWidget):
         self.response_card = QFrame(); self.response_card.setObjectName("plotCard")
         rc_l = QVBoxLayout(self.response_card)
         self.response_canvas = ResponseCanvas(self.model)
+        self.response_canvas.set_palette(self._palette_name)
         rc_l.addWidget(self.response_canvas, 1)
+        self.response_colorbar = PaletteColorBar(self.response_card)
+        self.response_colorbar.set_state(0.0, 1.0, self._palette_name, unit="", label="Normalized array response")
+        rc_l.addWidget(self.response_colorbar)
         response_footer = QHBoxLayout()
         response_footer.addStretch(1); response_footer.addWidget(QLabel("CTRL P To Print")); response_footer.addStretch(1)
         self.prev_btn = QPushButton("◀"); self.next_btn = QPushButton("▶"); self.prev_btn.setObjectName("navButton"); self.next_btn.setObjectName("navButton"); self.prev_btn.setMaximumWidth(42); self.next_btn.setMaximumWidth(42)
@@ -457,15 +629,19 @@ class ArrayResponseDashboard(QWidget):
 
     def _apply_compact_widgets(self) -> None:
         font = QFont(self.font())
-        font.setPointSize(8)
+        font.setPointSize(7)
         self.setFont(font)
         for cls in (QDoubleSpinBox, QSpinBox):
             for spin in self.findChildren(cls):
                 spin.setMaximumWidth(92)
                 spin.setMinimumWidth(68)
         for btn in self.findChildren(QPushButton):
-            btn.setMinimumHeight(22)
-            btn.setMaximumHeight(28)
+            if btn.objectName() == "arrayToolButton":
+                btn.setMinimumHeight(24)
+                btn.setMaximumHeight(30)
+            else:
+                btn.setMinimumHeight(22)
+                btn.setMaximumHeight(28)
         self.response_card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.design_card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 
@@ -478,14 +654,47 @@ class ArrayResponseDashboard(QWidget):
         self.x_size.valueChanged.connect(lambda _v: self._sync_sizes_from_header())
         self.y_size.valueChanged.connect(lambda _v: self._sync_sizes_from_header())
         self.azimuth_slider.valueChanged.connect(self.set_azimuth)
+        self.palette_selector.currentTextChanged.connect(self._on_palette_changed)
         self.design_canvas.changed.connect(self.refresh_all)
         self.design_canvas.cursorChanged.connect(lambda x, y: (self.cursor_x.setText(f"{x:.2f}"), self.cursor_y.setText(f"{y:.2f}")))
+        self.design_canvas.pointDetailsRequested.connect(self._show_point_details)
         self.response_canvas.cursorChanged.connect(lambda x, y: self.status.setText(f"Cursor X: {x:.2f}  Cursor Y: {y:.2f}"))
+        self.response_canvas.pointDetailsRequested.connect(self._show_point_details)
         for rb in (self.rb_wavenumber, self.rb_freq_velocity, self.rb_velocity_freq): rb.toggled.connect(self.update_cursor_mode)
         self.velocity_spin.valueChanged.connect(lambda _v: self.response_canvas.update())
         self.freq_spin.valueChanged.connect(lambda _v: self.response_canvas.update())
         self.prev_btn.clicked.connect(lambda: self.set_azimuth(max(0, self.azimuth_slider.value() - 5)))
         self.next_btn.clicked.connect(lambda: self.set_azimuth(min(180, self.azimuth_slider.value() + 5)))
+
+    def _show_point_details(self, details: object) -> None:
+        if not isinstance(details, dict):
+            return
+        kind = str(details.get("kind", "Point"))
+        if kind == "Array Element":
+            text = (
+                f"Element: {details.get('element')} / {details.get('elements')}\n"
+                f"X: {float(details.get('x', 0.0)):.4f}\n"
+                f"Y: {float(details.get('y', 0.0)):.4f}\n"
+                f"X Size: {float(details.get('x_size', self.model.x_size)):.4f}\n"
+                f"Y Size: {float(details.get('y_size', self.model.y_size)):.4f}\n"
+                f"File: {self.model.file_name}"
+            )
+        elif kind == "Array Response Sample":
+            text = (
+                f"Sample: {details.get('sample')} / {details.get('samples')}\n"
+                f"Array Length / Wavelength: {float(details.get('ratio', 0.0)):.5f}\n"
+                f"Normalized Response: {float(details.get('response', 0.0)):.5f}\n"
+                f"Azimuth: {float(details.get('azimuth', 0.0)):.2f}°\n"
+                f"Projected Length: {float(details.get('projected_length', 0.0)):.5f}\n"
+                f"Elements: {details.get('elements')}\n"
+                f"Frequency @ {float(details.get('reference_velocity', 0.0)):.0f} m/s: {float(details.get('frequency', 0.0)):.5f} Hz\n"
+                f"Velocity @ {float(details.get('reference_frequency', 0.0)):.1f} Hz: {float(details.get('velocity', 0.0)):.5f} m/s\n"
+                f"Palette: {self._palette_name}\n"
+                f"File: {self.model.file_name}"
+            )
+        else:
+            text = "\n".join(f"{key}: {value}" for key, value in sorted(details.items()))
+        QMessageBox.information(self, f"{kind} Details", text)
 
     def _sync_sizes_from_header(self) -> None:
         self.model.x_size = float(self.x_size.value()); self.model.y_size = float(self.y_size.value())
@@ -561,6 +770,12 @@ class ArrayResponseDashboard(QWidget):
         az = float(value); self.azimuth_label.setText(f"{az:.0f}")
         self.preview.azimuth = az; self.response_canvas.azimuth = az
         self.preview.update(); self.response_canvas.update(); self.status.setText(f"Azimuth set to {az:.1f}°.")
+
+    def _on_palette_changed(self, palette_name: str) -> None:
+        self._palette_name = str(palette_name or "Seismic")
+        self.response_canvas.set_palette(self._palette_name)
+        self.response_colorbar.set_state(0.0, 1.0, self._palette_name, unit="", label="Normalized array response")
+        self.status.setText(f"Response palette: {self._palette_name}")
 
     def update_cursor_mode(self) -> None:
         if self.rb_freq_velocity.isChecked(): self.response_canvas.cursor_mode = "freq_velocity"

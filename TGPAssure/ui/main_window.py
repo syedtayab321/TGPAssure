@@ -35,7 +35,7 @@ from ui.ribbon.seismic_ribbon import SeismicRibbonProvider
 from ui.ribbon.seismic_visualization_ribbon import SeismicVisualizationRibbonProvider
 from ui.ribbon.magnetic_ribbon import MagneticRibbonProvider
 from ui.ribbon.gravity_ribbon import GravityRibbonProvider
-from ui.ribbon.electrical_ribbon import ElectricalRibbonProvider
+from ui.ribbon.electrical_ribbon import ElectricalRibbonProvider, IPWin2RibbonProvider
 from ui.ribbon.converter_ribbon import ConverterRibbonProvider
 from ui.ribbon.vibroseis_ribbon import VibroseisRibbonProvider
 from ui.ribbon.seismatters_ribbon import SercelInstrumentTestAnalysisRibbonProvider, SercelLogAnalysisRibbonProvider, TGPGroundForceLookRibbonProvider
@@ -299,6 +299,7 @@ class MainWindow(QMainWindow):
             ],
             "electrical": [
                 ("electrical_prosys", "Prosys II"),
+                ("electrical_ipwin2", "IPWin2"),
             ],
             "gravity": [
                 ("gravity_oasis", "Oasis Mapping"),
@@ -311,6 +312,7 @@ class MainWindow(QMainWindow):
         self._magnetic_dashboard = None
         self._gravity_dashboard = None
         self._electrical_dashboard = None
+        self._ipwin2_dashboard = None
         self._converter_page = None
         self._vibroseis_dashboard = None
         self._geodetic_dashboard = None
@@ -345,6 +347,7 @@ class MainWindow(QMainWindow):
             "gravity": ("Gravity", "Gravity", "Gravity"),
             "electrical": ("Electrical", "Electrical", "Electrical"),
             "electrical_prosys": ("Prosys II", "Prosys II", "Prosys"),
+            "electrical_ipwin2": ("IPWin2", "IPWin2", "IPWin2"),
             "geodetic": ("Geodetic", "Geodetic", "Geodetic"),
             "view": ("Layout", "Layout", "Layout"),
             "tools": ("Tools", "Tools", "Tools"),
@@ -382,6 +385,7 @@ class MainWindow(QMainWindow):
         self._register_ribbon_provider(ConverterRibbonProvider())
         self._register_ribbon_provider(SeismicVisualizationRibbonProvider())
         self._register_ribbon_provider(ElectricalRibbonProvider())
+        self._register_ribbon_provider(IPWin2RibbonProvider())
         self._register_ribbon_provider(MagneticRibbonProvider())
         for provider in workflow_providers():
             self._register_ribbon_provider(provider)
@@ -1308,6 +1312,10 @@ class MainWindow(QMainWindow):
                         tabs.setCurrentIndex(index_map[context])
                 return
 
+            if context == "electrical_ipwin2":
+                self._open_ipwin2_dashboard()
+                return
+
             if context.startswith("electrical"):
                 dashboard = self._open_electrical_dashboard()
                 if dashboard is not None and hasattr(dashboard, "show_prosys_workspace"):
@@ -1594,7 +1602,7 @@ class MainWindow(QMainWindow):
             "visualization_open",
             "magnetic_open", "magnetic_open_rover", "magnetic_open_base", "magnetic_open_boundary",
             "gravity_open", "gravity_open_observations", "gravity_open_base", "gravity_oasis",
-            "electrical_open", "electrical_open_data", "electrical_prosys",
+            "electrical_open", "electrical_open_data", "electrical_prosys", "electrical_ipwin2", "electrical_ipi_new", "electrical_ipi_open",
             "geodetic_open", "geodetic_examiner",
             "segd_scanner_open", "segd_scanner_folder", "receiver_open", "receiver_limits",
             "smt_project",
@@ -1686,6 +1694,13 @@ class MainWindow(QMainWindow):
             dashboard = self._gravity_dashboard
             if dashboard is None:
                 return action_id in {"gravity_open", "gravity_open_observations", "gravity_open_base", "gravity_oasis"}
+            resolver = getattr(dashboard, "can_execute", None)
+            return bool(resolver(action_id)) if callable(resolver) else True
+
+        if action_id == "electrical_ipwin2" or action_id.startswith("electrical_ipi_"):
+            dashboard = self._ipwin2_dashboard
+            if dashboard is None:
+                return action_id in {"electrical_ipwin2", "electrical_ipi_new", "electrical_ipi_open"}
             resolver = getattr(dashboard, "can_execute", None)
             return bool(resolver(action_id)) if callable(resolver) else True
 
@@ -2223,6 +2238,92 @@ class MainWindow(QMainWindow):
             self._apply_to_electrical("show_qc_results")
         elif action_id == "electrical_prosys":
             self._apply_to_electrical("show_prosys_workspace")
+        elif action_id in {"electrical_ipi2win", "electrical_ipwin2"}:
+            self._open_ipwin2_dashboard()
+        elif action_id == "electrical_ipi_new":
+            self._apply_to_ipwin2("ipi_new_profile")
+        elif action_id == "electrical_ipi_open":
+            self._apply_to_ipwin2("ipi_open_file")
+        elif action_id == "electrical_ipi_save":
+            self._apply_to_ipwin2("ipi_save_file")
+        elif action_id == "electrical_ipi_print":
+            self._apply_to_ipwin2("ipi_print_view")
+        elif action_id == "electrical_ipi_edit_curve":
+            self._apply_to_ipwin2("ipi_edit_curve")
+        elif action_id == "electrical_ipi_new_model":
+            self._apply_to_ipwin2("ipi_new_model")
+        elif action_id == "electrical_ipi_inversion":
+            self._apply_to_ipwin2("ipi_inversion")
+        elif action_id == "electrical_ipi_profile_inversion":
+            self._apply_to_ipwin2("ipi_profile_inversion")
+        elif action_id == "electrical_ipi_inversion_options":
+            self._apply_to_ipwin2("ipi_inversion_options")
+        elif action_id == "electrical_ipi_information":
+            self._apply_to_ipwin2("ipi_profile_information")
+        elif action_id == "electrical_ipi_copy_results":
+            self._apply_to_ipwin2("ipi_copy_all_results")
+        elif action_id == "electrical_ipi_dar_zarrouk":
+            self._apply_to_ipwin2("ipi_dar_zarrouk")
+        elif action_id == "electrical_ipi_next":
+            self._apply_to_ipwin2("ipi_next_point")
+        elif action_id == "electrical_ipi_previous":
+            self._apply_to_ipwin2("ipi_previous_point")
+        elif action_id == "electrical_ipi_first":
+            self._apply_to_ipwin2("ipi_first_point")
+        elif action_id == "electrical_ipi_last":
+            self._apply_to_ipwin2("ipi_last_point")
+        elif action_id == "electrical_ipi_split":
+            self._apply_to_ipwin2("ipi_split_layer")
+        elif action_id == "electrical_ipi_join":
+            self._apply_to_ipwin2("ipi_join_layers")
+        elif action_id == "electrical_ipi_fix_h":
+            self._apply_to_ipwin2("ipi_fix_all_h")
+        elif action_id == "electrical_ipi_options":
+            self._apply_to_ipwin2("ipi_options")
+        elif action_id == "electrical_ipi_section_options":
+            self._apply_to_ipwin2("ipi_section_options")
+        elif action_id == "electrical_ipi_axes_limits":
+            self._apply_to_ipwin2("ipi_axes_limits")
+        elif action_id == "electrical_ipi_palette":
+            self._apply_to_ipwin2("ipi_palette_options")
+        elif action_id == "electrical_ipi_log_scale":
+            self._apply_to_ipwin2("ipi_toggle_log_scale")
+        elif action_id == "electrical_ipi_fit_profile":
+            self._apply_to_ipwin2("ipi_fit_profile")
+        elif action_id == "electrical_ipi_model_minimum":
+            self._apply_to_ipwin2("ipi_model_minimum")
+        elif action_id == "electrical_ipi_model_maximum":
+            self._apply_to_ipwin2("ipi_model_maximum")
+        elif action_id == "electrical_ipi_pseudosection":
+            self._apply_to_ipwin2("ipi_pseudosection")
+        elif action_id == "electrical_ipi_resistivity":
+            self._apply_to_ipwin2("ipi_resistivity_section")
+        elif action_id == "electrical_ipi_both_sections":
+            self._apply_to_ipwin2("ipi_both_sections")
+        elif action_id == "electrical_ipi_zoom_in":
+            self._apply_to_ipwin2("ipi_zoom_in")
+        elif action_id == "electrical_ipi_zoom_out":
+            self._apply_to_ipwin2("ipi_zoom_out")
+        elif action_id == "electrical_ipi_move_left":
+            self._apply_to_ipwin2("ipi_move_selected_layer_left")
+        elif action_id == "electrical_ipi_move_right":
+            self._apply_to_ipwin2("ipi_move_selected_layer_right")
+        elif action_id == "electrical_ipi_mirror":
+            self._apply_to_ipwin2("ipi_horizontal_mirror")
+        elif action_id == "electrical_ipi_invert_palette":
+            self._apply_to_ipwin2("ipi_invert_palette")
+        elif action_id == "electrical_ipi_auto_scale":
+            self._apply_to_ipwin2("ipi_auto_scale")
+        elif action_id == "electrical_ipi_classic_layout":
+            self._apply_to_ipwin2("ipi_classic_layout")
+        elif action_id == "electrical_ipi_data_window":
+            self._apply_to_ipwin2("ipi_data_window")
+        elif action_id == "electrical_ipi_curve_window":
+            self._apply_to_ipwin2("ipi_curve_window")
+        elif action_id == "electrical_ipi_section_window":
+            self._apply_to_ipwin2("ipi_section_window")
+        elif action_id == "electrical_ipi_results_window":
+            self._apply_to_ipwin2("ipi_results_window")
         elif action_id == "electrical_prosys_filter":
             self._apply_to_electrical("apply_range_filter")
         elif action_id == "electrical_prosys_reject":
@@ -3210,6 +3311,11 @@ class MainWindow(QMainWindow):
                 dashboard = MagneticDashboard(controller, self)
                 dashboard.destroyed.connect(self._clear_magnetic_dashboard_reference)
                 dashboard.dataset_changed.connect(lambda *_: self._update_ribbon())
+                dashboard.activity_started_cancellable.connect(
+                    lambda title, message, cancel: self.begin_busy_task(
+                        "magnetic:dashboard", title, message, cancel_callback=cancel
+                    )
+                )
                 dashboard.activity_started.connect(
                     lambda title, message: self.begin_busy_task(
                         "magnetic:dashboard", title, message
@@ -3341,7 +3447,7 @@ class MainWindow(QMainWindow):
             self.begin_busy_task(
                 task_id,
                 "Opening Prosys II",
-                "Initializing Prosys II electrical/IP workspace",
+                "Initializing Prosys II workspace",
             )
             try:
                 from core.data_access.db_engine import DatabaseEngine
@@ -3392,13 +3498,85 @@ class MainWindow(QMainWindow):
         self._electrical_dashboard = None
         self._update_ribbon()
 
+    def _open_ipwin2_dashboard(self):
+        dashboard = self._ipwin2_dashboard
+        if dashboard is None:
+            task_id = "electrical:ipwin2"
+            self.begin_busy_task(
+                task_id,
+                "Opening IPWin2",
+                "Initializing IPWin2 / VES-IP 1D workspace",
+            )
+            try:
+                from modules.electrical.ipWin2.dashboard import IpWin2Dashboard
+
+                self.update_busy_task(task_id, 45, "Creating IPWin2 workspace")
+                dashboard = IpWin2Dashboard(self)
+                dashboard.destroyed.connect(self._clear_ipwin2_dashboard_reference)
+                dashboard.activity_started.connect(
+                    lambda title, message: self.begin_busy_task(
+                        "electrical:ipwin2:activity", title, message
+                    )
+                )
+                dashboard.activity_progress.connect(
+                    lambda value, message: self.update_busy_task(
+                        "electrical:ipwin2:activity", value, message
+                    )
+                )
+                dashboard.activity_finished.connect(
+                    lambda: (self.end_busy_task("electrical:ipwin2:activity"), self._update_ribbon())
+                )
+                dashboard.destroyed.connect(
+                    lambda *_: self.end_busy_task("electrical:ipwin2:activity")
+                )
+                self._ipwin2_dashboard = dashboard
+                self.update_busy_task(task_id, 100, "IPWin2 workspace is ready")
+            except Exception as exc:
+                self.end_busy_task(task_id)
+                QMessageBox.critical(self, "IPWin2", f"Unable to open the IPWin2 module:\n{exc}")
+                return None
+            self.end_busy_task(task_id)
+        index = self.tab_widget.indexOf(dashboard)
+        if index < 0:
+            index = self._add_document_tab(
+                dashboard,
+                "IPWin2",
+                icon=get_icon("electrical", size=15),
+                closable=True,
+            )
+        self.tab_widget.setCurrentIndex(index)
+        self._set_active_module("electrical_ipwin2")
+        dashboard.show()
+        dashboard.raise_()
+        dashboard.setFocus(Qt.OtherFocusReason)
+        return dashboard
+
+    def _clear_ipwin2_dashboard_reference(self, *_args) -> None:
+        self._ipwin2_dashboard = None
+        self._update_ribbon()
+
+    def _apply_to_ipwin2(self, method_name: str, *args) -> None:
+        dashboard = self._open_ipwin2_dashboard()
+        if dashboard is None:
+            return
+        method = getattr(dashboard, method_name, None)
+        if method is None:
+            QMessageBox.warning(self, "IPWin2", f"The IPWin2 module does not support: {method_name}")
+            return
+        try:
+            method(*args)
+        except Exception as exc:
+            QMessageBox.critical(self, "IPWin2 Error", str(exc))
+        finally:
+            self._update_ribbon()
+
     def _apply_to_electrical(self, method_name: str, *args) -> None:
         dashboard = self._open_electrical_dashboard()
         if dashboard is None:
             return
         method = getattr(dashboard, method_name, None)
         if method is None:
-            QMessageBox.warning(self, "Prosys II", f"The Electrical QC module does not support: {method_name}")
+            QMessageBox.warning(self, "Prosys II", f"The Prosys II module does not support: {method_name}")
             return
         try:
             method(*args)
@@ -4098,6 +4276,11 @@ class MainWindow(QMainWindow):
             viewer.activity_started.connect(
                 lambda title, message, task_id=activity_id: self.begin_busy_task(
                     task_id, title, message
+                )
+            )
+            viewer.activity_started_cancellable.connect(
+                lambda title, message, cancel, task_id=activity_id: self.begin_busy_task(
+                    task_id, title, message, cancel_callback=cancel
                 )
             )
             viewer.activity_progress.connect(

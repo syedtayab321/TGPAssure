@@ -7,7 +7,6 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QSizePolicy, QVBoxLayout, QWidget
 
-from matplotlib import colormaps
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.backends.backend_qtagg import NavigationToolbar2QT as NavigationToolbar
 from matplotlib.figure import Figure
@@ -15,6 +14,7 @@ from matplotlib.figure import Figure
 from modules.seismic.visualization.models import InterpretationObject, VolumeData, WellPath
 from modules.seismic.visualization.processing import robust_scale
 from ui.theme.petrel_theme import FONT_SIZE_NORMAL, FONT_SIZE_SMALL
+from core.visualization.palette_library import DEFAULT_PALETTE, palette_rgb_array
 
 
 class Seismic3DView(QWidget):
@@ -43,6 +43,7 @@ class Seismic3DView(QWidget):
         self._view_elevation = 24.0
         self._view_azimuth = -55.0
         self._last_render: tuple[str, int | None, int | None, int | None] = ("volume", None, None, None)
+        self._palette_name = DEFAULT_PALETTE
 
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
@@ -115,6 +116,11 @@ class Seismic3DView(QWidget):
         if opacity is not None:
             self._opacity = float(np.clip(opacity, 0.08, 1.0))
         self.show_volume()
+
+    def set_palette(self, palette_name: str) -> None:
+        self._palette_name = str(palette_name or DEFAULT_PALETTE)
+        if self._volume is not None:
+            self._rerender_last()
 
     def set_opacity(self, opacity: float) -> None:
         self._opacity = float(np.clip(opacity, 0.08, 1.0))
@@ -311,7 +317,11 @@ class Seismic3DView(QWidget):
         if not np.isfinite(scale) or scale <= 0:
             scale = 1.0
         normalized = np.clip(np.nan_to_num(reduced / scale, nan=0.0), -1.0, 1.0)
-        colors = colormaps["seismic"]((normalized + 1.0) * 0.5)
+        lut = palette_rgb_array(self._palette_name, 256).astype(np.float64) / 255.0
+        lut_index = np.clip(np.rint((normalized + 1.0) * 127.5).astype(np.int64), 0, 255)
+        colors = np.empty(normalized.shape + (4,), dtype=np.float64)
+        colors[..., :3] = lut[lut_index]
+        colors[..., 3] = 1.0
         magnitude = np.abs(normalized)
         alpha = np.where(
             magnitude >= self._transparency_threshold,

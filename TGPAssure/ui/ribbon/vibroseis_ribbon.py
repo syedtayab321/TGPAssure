@@ -121,11 +121,6 @@ class VibroseisRibbonProvider(RibbonProvider):
                 RibbonAction("None", "vibroseis_vaps_none", icon="edit-clear", presentation="small"),
                 RibbonAction("Reset", "vibroseis_vaps_reset", icon="view-refresh", presentation="small"),
             ]),
-            RibbonGroup("Palette", [
-                RibbonAction("Classic", "vibroseis_vaps_palette_classic", icon="color-picker", presentation="small", checkable=True, checked=True),
-                RibbonAction("Thermal", "vibroseis_vaps_palette_thermal", icon="color-management", presentation="small", checkable=True),
-                RibbonAction("Traffic", "vibroseis_vaps_palette_traffic", icon="dialog-warning", presentation="small", checkable=True),
-            ]),
             RibbonGroup("QC", [
                 RibbonAction("Stats", "vibroseis_vaps_stats", icon="view-statistics", presentation="small"),
                 RibbonAction("QC", "vibroseis_vaps_qc", icon="view-statistics", accent=True),

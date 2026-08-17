@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Optional
+import math
 
 import numpy as np
 from PySide6.QtCore import QPointF, QRectF, Qt, Signal
@@ -23,6 +24,7 @@ from PySide6.QtWidgets import (
     QScrollArea,
     QTableWidget,
     QTableWidgetItem,
+    QToolTip,
     QVBoxLayout,
     QWidget,
 )
@@ -191,15 +193,58 @@ class _VapsClassicPlot(QWidget):
         return float(record.source_line or fallback)
 
     def _colour_for_vib(self, vib: str, value: float, ymin: float, ymax: float) -> QColor:
-        if self.palette_name == "Thermal":
-            t = 0.0 if ymax <= ymin else max(0.0, min(1.0, (value - ymin) / (ymax - ymin)))
-            return QColor(int(40 + 215 * t), int(45 + 90 * (1.0 - abs(t - 0.5) * 2.0)), int(220 * (1.0 - t)))
-        if self.palette_name == "Traffic":
-            t = 0.0 if ymax <= ymin else max(0.0, min(1.0, (value - ymin) / (ymax - ymin)))
-            if t > 0.75: return QColor("#D7191C")
-            if t > 0.50: return QColor("#FDAE61")
-            return QColor("#1A9641")
         return QColor(_TAG_COLOURS[(int(vib) - 1) % len(_TAG_COLOURS)] if vib.isdigit() and int(vib) > 0 else "#000000")
+
+    def _nearest_point(self, pos: QPointF, radius_px: float = 16.0) -> tuple[VapsRecord, float] | None:
+        if not self._points:
+            return None
+        best: tuple[float, VapsRecord] | None = None
+        for x, y, rec, _colour in self._points:
+            d2 = (x - pos.x()) ** 2 + (y - pos.y()) ** 2
+            if best is None or d2 < best[0]:
+                best = (d2, rec)
+        if best is None or best[0] > radius_px * radius_px:
+            return None
+        return best[1], math.sqrt(best[0])
+
+    @staticmethod
+    def _display_value(value: object) -> str:
+        """Return a compact, safe display value for optional VAPS fields."""
+        if value is None or value == "":
+            return "?"
+        return str(value)
+
+    def _record_lines(self, rec: VapsRecord) -> list[str]:
+        value = self._value(rec)
+        status, findings = VapsQcEngine().evaluate_record(rec)
+
+        # VapsRecord is slot-based and different VAPS/H26 exports do not all
+        # provide a station field.  Never access optional vendor fields directly:
+        # a hover/click handler must stay exception-safe so the cursor and point
+        # details dialog cannot freeze when the mouse reaches a point.
+        station = getattr(rec, "station", None) or getattr(rec, "source_station", None) or getattr(rec, "station_no", None)
+
+        return [
+            f"Vibrator: {self._display_value(getattr(rec, 'vib', None))}",
+            f"VP: {self._display_value(getattr(rec, 'vp', None))}",
+            f"Source line: {self._display_value(getattr(rec, 'source_line', None))}",
+            f"Station: {self._display_value(station)}",
+            f"Time: {self._display_value(getattr(rec, 'time', None))}",
+            f"Display value: {'' if value is None else f'{value:.6g}'} {self.label}",
+            f"Drive level: {self._display_value(getattr(rec, 'drive_level_pct', None))}",
+            f"Peak distortion: {self._display_value(getattr(rec, 'peak_distortion_pct', None))}",
+            f"Average stiffness: {self._display_value(getattr(rec, 'avg_stiffness', None))}",
+            f"Average phase: {self._display_value(getattr(rec, 'avg_phase_deg', None))}",
+            f"Average force: {self._display_value(getattr(rec, 'avg_force', None))}",
+            f"Peak phase: {self._display_value(getattr(rec, 'peak_phase_deg', None))}",
+            f"Peak force: {self._display_value(getattr(rec, 'peak_force', None))}",
+            f"HDOP: {self._display_value(getattr(rec, 'hdop', None))}",
+            f"QC status: {status}",
+            f"Findings: {', '.join(findings) if findings else 'None'}",
+        ]
+
+    def _record_hover_text(self, rec: VapsRecord) -> str:
+        return "\n".join(self._record_lines(rec)[:9])
 
     def paintEvent(self, _event) -> None:
         painter = QPainter(self)
@@ -294,17 +339,32 @@ class _VapsClassicPlot(QWidget):
     def mouseMoveEvent(self, event: QMouseEvent) -> None:
         p = event.position()
         self._cursor = p if self._plot_rect().contains(p) else None
-        if self._points and self._cursor is not None:
-            d2 = [(x - p.x()) ** 2 + (y - p.y()) ** 2 for x, y, _r, _c in self._points]
-            idx = int(np.argmin(d2))
-            if d2[idx] <= 18 * 18:
-                rec = self._points[idx][2]
-                value = self._value(rec)
-                self.hover_text.emit(
-                    f"Vib {rec.vib or '?'} | VP {rec.vp or '?'} | {self.label}: {'' if value is None else f'{value:.6g}'} | line {rec.source_line}"
-                )
+        nearest = self._nearest_point(p, radius_px=18.0) if self._cursor is not None else None
+        if nearest is not None:
+            rec, _dist = nearest
+            text = self._record_hover_text(rec)
+            self.hover_text.emit(" | ".join(self._record_lines(rec)[:6]))
+            QToolTip.showText(event.globalPosition().toPoint(), text, self)
+        else:
+            QToolTip.hideText()
         self.update()
         super().mouseMoveEvent(event)
+
+    def mousePressEvent(self, event: QMouseEvent) -> None:
+        if event.button() == Qt.MouseButton.LeftButton:
+            nearest = self._nearest_point(event.position(), radius_px=18.0)
+            if nearest is not None:
+                rec, _dist = nearest
+                QMessageBox.information(self, "VAPS Point Details", "\n".join(self._record_lines(rec)))
+                event.accept()
+                return
+        super().mousePressEvent(event)
+
+    def leaveEvent(self, event) -> None:
+        self._cursor = None
+        QToolTip.hideText()
+        self.update()
+        super().leaveEvent(event)
 
 
 class ClassicVapsAnalyser(QWidget):
@@ -365,7 +425,7 @@ class ClassicVapsAnalyser(QWidget):
 
         top_status = QHBoxLayout()
         top_status.setSpacing(8)
-        self.active_attr_label = QLabel("Display: Drive Level  |  Mode: Raw  |  Palette: Classic")
+        self.active_attr_label = QLabel("Display: Drive Level  |  Mode: Raw  |  Scatter")
         self.active_attr_label.setObjectName("activeAttrLabel")
         self.day_chip = QLabel("Day 1")
         self.day_chip.setObjectName("dayChip")
@@ -552,7 +612,7 @@ class ClassicVapsAnalyser(QWidget):
         palette = self.palette_combo.currentText() if hasattr(self, "palette_combo") else "Classic"
         connected = self.lines_check.isChecked() if hasattr(self, "lines_check") else False
         if hasattr(self, "active_attr_label"):
-            self.active_attr_label.setText(f"Display: {label}  |  Mode: {mode}  |  Palette: {palette}  |  {'Connected points' if connected else 'Scatter'}")
+            self.active_attr_label.setText(f"Display: {label}  |  Mode: {mode}  |  {'Connected points' if connected else 'Scatter'}")
         self.plot.set_display(attr, label, self.selected_vibs(), self.filtered_radio.isChecked(), palette, connected)
         self.plot.set_records(self.records)
 

@@ -9,6 +9,7 @@ from PySide6.QtWidgets import QAbstractItemView, QHeaderView, QTabWidget, QTable
 
 from modules.seismic.visualization.models import QcTraceFlag, SectionData
 from modules.seismic.visualization.processing import calculate_noise_metrics, calculate_spectrum
+from core.visualization.palette_library import DEFAULT_PALETTE, palette_hex
 
 
 class SeismicQcPanel(QWidget):
@@ -19,6 +20,7 @@ class SeismicQcPanel(QWidget):
         self._section: SectionData | None = None
         self._flags: list[QcTraceFlag] = []
         self._geometry: dict[str, np.ndarray] = {}
+        self._palette_name = DEFAULT_PALETTE
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -59,6 +61,12 @@ class SeismicQcPanel(QWidget):
         self.flags_table.cellDoubleClicked.connect(self._on_flag_double_clicked)
         self.tabs.addTab(self.flags_table, "Flagged Traces")
 
+    def set_palette(self, palette_name: str) -> None:
+        self._palette_name = str(palette_name or DEFAULT_PALETTE)
+        self._update_spectrum()
+        self._update_noise()
+        self._update_geometry()
+
     def set_section(self, section: SectionData) -> None:
         self._section = section
         self._update_spectrum()
@@ -84,13 +92,13 @@ class SeismicQcPanel(QWidget):
         self.spectrum_plot.plot(
             result.frequency_hz,
             result.mean_amplitude,
-            pen=pg.mkPen("#00B7D9", width=1.6),
+            pen=pg.mkPen(palette_hex(self._palette_name, 0.22), width=1.6),
             name="Mean",
         )
         self.spectrum_plot.plot(
             result.frequency_hz,
             result.median_amplitude,
-            pen=pg.mkPen("#FFD54F", width=1.2),
+            pen=pg.mkPen(palette_hex(self._palette_name, 0.78), width=1.2),
             name="Median",
         )
 
@@ -110,19 +118,19 @@ class SeismicQcPanel(QWidget):
         self.noise_plot.plot(
             result.trace_indices,
             normalized_rms,
-            pen=pg.mkPen("#00B7D9", width=1.4),
+            pen=pg.mkPen(palette_hex(self._palette_name, 0.18), width=1.4),
             name="RMS / median",
         )
         self.noise_plot.plot(
             result.trace_indices,
             result.high_frequency_ratio,
-            pen=pg.mkPen("#FF9E64", width=1.3),
+            pen=pg.mkPen(palette_hex(self._palette_name, 0.52), width=1.3),
             name="High-frequency ratio",
         )
         self.noise_plot.plot(
             result.trace_indices,
             result.incoherence,
-            pen=pg.mkPen("#D875FF", width=1.3),
+            pen=pg.mkPen(palette_hex(self._palette_name, 0.86), width=1.3),
             name="Incoherence",
         )
 
@@ -144,7 +152,7 @@ class SeismicQcPanel(QWidget):
                 pen=None,
                 symbol="t",
                 symbolSize=4,
-                symbolBrush="#FF9E64",
+                symbolBrush=palette_hex(self._palette_name, 0.18),
                 symbolPen=None,
                 name="Source",
             )
@@ -155,7 +163,7 @@ class SeismicQcPanel(QWidget):
                 pen=None,
                 symbol="o",
                 symbolSize=3,
-                symbolBrush="#00B7D9",
+                symbolBrush=palette_hex(self._palette_name, 0.50),
                 symbolPen=None,
                 name="Receiver",
             )
@@ -166,7 +174,7 @@ class SeismicQcPanel(QWidget):
                 pen=None,
                 symbol="s",
                 symbolSize=3,
-                symbolBrush="#8BD450",
+                symbolBrush=palette_hex(self._palette_name, 0.82),
                 symbolPen=None,
                 name="Midpoint/CDP",
             )

@@ -36,6 +36,12 @@ from modules.vibroseis.ui.classic_vaps_analyser import ClassicVapsAnalyser, DISP
 from modules.vibroseis.ui.vibroseis_results_dialog import VapsQcResultsDialog
 
 
+_SWEEP_PEN = "#0E7490"
+_SPECTRUM_PEN = "#2563EB"
+_KLAUDER_PEN = "#D97706"
+_MANUAL_PEN = "#0E7490"
+
+
 _VIB_QSS = """
 QWidget#vibroseisDashboard {
     background:#F3F3F3;
@@ -442,13 +448,13 @@ class VibroseisDashboard(QWidget):
             result = self.engine.design_sweep(params)
             self._last_sweep = result
             self.sweep_plot.clear()
-            self.sweep_plot.plot(result.time_s, result.samples, pen=pg.mkPen("#005A82", width=1.0))
+            self.sweep_plot.plot(result.time_s, result.samples, pen=pg.mkPen(_SWEEP_PEN, width=1.0))
             self.sweep_plot.setTitle("Pilot Sweep", color="#202020", size="8pt")
             self.spectrum_plot.clear()
-            self.spectrum_plot.plot(result.frequency_hz, result.amplitude_spectrum, pen=pg.mkPen("#1A7F37", width=1.0))
+            self.spectrum_plot.plot(result.frequency_hz, result.amplitude_spectrum, pen=pg.mkPen(_SPECTRUM_PEN, width=1.0))
             self.spectrum_plot.setTitle("Normalized Sweep Spectrum", color="#202020", size="8pt")
             self.klauder_plot.clear()
-            self.klauder_plot.plot(result.autocorrelation_lag_s, result.klauder_wavelet, pen=pg.mkPen("#9A5B00", width=1.0))
+            self.klauder_plot.plot(result.autocorrelation_lag_s, result.klauder_wavelet, pen=pg.mkPen(_KLAUDER_PEN, width=1.0))
             self.klauder_plot.setTitle("Klauder Wavelet", color="#202020", size="8pt")
             self.status_badge.setText("Sweep generated")
         except Exception as exc:
@@ -616,7 +622,7 @@ class VibroseisDashboard(QWidget):
                 x.append(idx + 1)
                 y.append(value)
         if x:
-            self.manual_vib_plot.plot(np.asarray(x), np.asarray(y), pen=pg.mkPen("#005A82", width=1.0), symbol="o", symbolSize=3)
+            self.manual_vib_plot.plot(np.asarray(x), np.asarray(y), pen=pg.mkPen(_MANUAL_PEN, width=1.0), symbol="o", symbolSize=3)
         self.manual_vib_plot.setTitle(f"Manual QC Preview — {label}", color="#202020", size="8pt")
         self.manual_vib_plot.setLabel("left", label)
 
@@ -626,7 +632,7 @@ class VibroseisDashboard(QWidget):
         self.manual_vib_plot.clear()
         values = np.asarray(self._telemetry_data[:, col], dtype=float)
         max_points = min(values.size, 5000)
-        self.manual_vib_plot.plot(np.arange(max_points), values[:max_points], pen=pg.mkPen("#1A7F37", width=1.0))
+        self.manual_vib_plot.plot(np.arange(max_points), values[:max_points], pen=pg.mkPen(_SPECTRUM_PEN, width=1.0))
         self.manual_vib_plot.setTitle(f"Manual QC Preview — {name}", color="#202020", size="8pt")
         self.manual_vib_plot.setLabel("left", name)
 

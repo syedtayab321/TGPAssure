@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QDoubleSpinBox,
+    QDialog,
     QFileDialog,
     QFrame,
     QGridLayout,
@@ -31,6 +32,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from core.domain.automated_qc_pipeline import QCPipelineDesign
+from ui.widgets.color_palette_dialog import PaletteSelectorButton
 from modules.magnetic.constants import (
     DESPIKED_TOTAL_FIELD,
     DIURNAL_CORRECTED_FIELD,
@@ -44,6 +47,9 @@ from modules.magnetic.reader import MagneticReader
 from modules.magnetic.readers.boundary_reader import MagneticBoundaryReader
 from modules.magnetic.ui.enmag_qc_canvas import EnMagCanvasContainer, EnMagColorBar, EnMagPreviewCanvas
 from modules.magnetic.ui.enmag_spatial_filter_dialog import EnMagSpatialFilterDialog
+from modules.magnetic.ui.qc_designer_dialog import MagneticQcDesignerDialog
+from modules.magnetic.automated_qc import magnetic_stage_descriptors
+from modules.magnetic.magnetic_engine import MAGNETIC_QC_STAGES, PROCESSED_STAGE_KEYS, RAW_STAGE_KEYS
 
 
 _ENMAG_STYLE = """
@@ -156,6 +162,7 @@ class EnMagDataQcScreen(QWidget):
 
     dataset_changed = Signal(object)
     activity_started = Signal(str, str)
+    activity_started_cancellable = Signal(str, str, object)
     activity_progress = Signal(int, str)
     activity_finished = Signal()
 
@@ -183,11 +190,19 @@ class EnMagDataQcScreen(QWidget):
         self._manual_max_text = ""
         self._grid_type_channels: dict[str, str] = {"Mag": RAW_TOTAL_FIELD}
         self._palette_name = "Spectral"
+        self._qc_design = QCPipelineDesign(
+            module_id="magnetic",
+            name="Magnetic Automated QC",
+            profile_name="standard",
+            stage_keys=[key for key, _name, _cls in MAGNETIC_QC_STAGES],
+        )
+        self._last_qc_result: dict | None = None
 
         self.setObjectName("enmagDataQcScreen")
         self.setProperty("module_id", "magnetic")
         self.setStyleSheet(_ENMAG_STYLE)
         self._build_ui()
+        self._connect_qc_controller()
         self._redraw_timer = QTimer(self)
         self._redraw_timer.setSingleShot(True)
         self._redraw_timer.setInterval(180)
@@ -285,7 +300,7 @@ class EnMagDataQcScreen(QWidget):
         self.reset_color_btn.setObjectName("warningAction")
         left.addWidget(self.reset_color_btn, row, 1, alignment=Qt.AlignmentFlag.AlignRight); row += 1
 
-        self.color_palette = QComboBox(); self.color_palette.addItems(["Spectral", "Jet", "Viridis", "Gray"])
+        self.color_palette = PaletteSelectorButton("Spectral", self)
         row = self._add_setting(left, row, "Color Palette", self.color_palette)
 
         self.grid_type = QComboBox(); self.grid_type.addItems(["Mag", "Heading", "Elevation"])
@@ -356,9 +371,11 @@ class EnMagDataQcScreen(QWidget):
         self.status_filter.setObjectName("mutedLabel")
         status_box.addWidget(self.status_primary); status_box.addWidget(self.status_filter)
         bottom.addLayout(status_box, 1)
+        self.designer_btn = QPushButton("QC Designer"); self.designer_btn.setObjectName("accentAction"); self.designer_btn.clicked.connect(self.open_qc_designer)
+        self.auto_qc_btn = QPushButton("Run Automated QC"); self.auto_qc_btn.setObjectName("successAction"); self.auto_qc_btn.clicked.connect(self.run_full_qc)
         self.draw_btn = QPushButton("Draw"); self.draw_btn.setObjectName("drawAction"); self.draw_btn.clicked.connect(lambda: self.draw(show_error=True))
         self.export_btn = QPushButton("Export"); self.export_btn.setObjectName("exportAction"); self.export_btn.clicked.connect(self.export_csv)
-        bottom.addWidget(self.draw_btn); bottom.addWidget(self.export_btn)
+        bottom.addWidget(self.designer_btn); bottom.addWidget(self.auto_qc_btn); bottom.addWidget(self.draw_btn); bottom.addWidget(self.export_btn)
         root.addLayout(bottom)
 
         self.grid_opacity.valueChanged.connect(self._on_opacity_changed)
@@ -374,6 +391,39 @@ class EnMagDataQcScreen(QWidget):
         self.reset_filter_btn.clicked.connect(self.reset_filter)
         self.filter_combo.currentTextChanged.connect(self._on_filter_combo_changed)
         self.canvas.hover_changed.connect(self.hover_info.setText)
+
+    def _connect_qc_controller(self) -> None:
+        controller = self.controller
+        if controller is None:
+            return
+        controller.progress_changed.connect(self._on_qc_progress)
+        controller.run_completed.connect(self._on_qc_completed)
+        controller.run_failed.connect(self._on_qc_failed)
+        controller.run_cancelled.connect(self._on_qc_cancelled)
+
+    def _on_qc_progress(self, current: int, total: int, message: str) -> None:
+        percent = round(100.0 * current / max(total, 1))
+        self.activity_progress.emit(percent, message)
+        self.hover_info.setText(message)
+
+    def _on_qc_completed(self, result: dict) -> None:
+        self._last_qc_result = dict(result or {})
+        score = self._last_qc_result.get("score")
+        status = self._last_qc_result.get("status", "completed")
+        score_text = f" | score {float(score):.1f}" if isinstance(score, (int, float)) else ""
+        self.hover_info.setText(f"Automated Magnetic QC completed: {status}{score_text}")
+        self.activity_progress.emit(100, "Magnetic QC completed")
+        self.activity_finished.emit()
+        self._update_summary()
+
+    def _on_qc_failed(self, error: str) -> None:
+        self.hover_info.setText(f"Magnetic QC failed: {error}")
+        self.activity_finished.emit()
+        QMessageBox.critical(self, "Magnetic Automated QC", error)
+
+    def _on_qc_cancelled(self) -> None:
+        self.hover_info.setText("Magnetic QC cancelled safely after the active stage returned.")
+        self.activity_finished.emit()
 
     def _activate_pan_mode(self) -> None:
         self.pan_btn.setChecked(True)
@@ -934,17 +984,67 @@ class EnMagDataQcScreen(QWidget):
             if vals.size: text.append(f"Line {ln}: n={vals.size}, min={np.nanmin(vals):.3f}, max={np.nanmax(vals):.3f}, mean={np.nanmean(vals):.3f} {unit}")
         QMessageBox.information(self,f"{label} Profile Summary","\n".join(text[:100]) or "No profile values available.")
 
+    def open_qc_designer(self) -> None:
+        dialog = MagneticQcDesignerDialog(magnetic_stage_descriptors(), self._qc_design, self)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            self._qc_design = dialog.design
+            self._run_qc_design(self._qc_design)
+
+    def _run_qc_design(self, design: QCPipelineDesign) -> None:
+        if not self._require_rover():
+            return
+        if self.controller is None:
+            QMessageBox.warning(self, "Magnetic Automated QC", "The Magnetic QC controller is not available in this workspace.")
+            return
+        if getattr(self.controller, "active_job_id", None) is not None:
+            QMessageBox.information(self, "Magnetic Automated QC", "A Magnetic QC pipeline is already running.")
+            return
+        self._last_qc_result = None
+        self.activity_started_cancellable.emit(
+            "Magnetic Automated QC",
+            f"Running {len(design.stage_keys)} QC stages using the {design.profile_name} profile",
+            self.cancel_qc,
+        )
+        try:
+            self.controller.run_pipeline_design(
+                design,
+                self.rover,
+                base=self.base,
+                boundary=self.boundary_data,
+                processing_products={name: values for name, values in self.rover.channels.items() if name != RAW_TOTAL_FIELD},
+            )
+        except Exception as exc:
+            self.activity_finished.emit()
+            QMessageBox.critical(self, "Magnetic Automated QC", str(exc))
+
     def run_full_qc(self) -> None:
-        if not self._require_rover(): return
-        self.process_despike(); self.process_diurnal(); self.process_leveling(); self.process_microlevel()
-        self.hover_info.setText("Full magnetic QC chain completed; derived channels were preserved separately from raw data.")
+        design = QCPipelineDesign(
+            module_id="magnetic", name="Full Magnetic QC", profile_name=self._qc_design.profile_name,
+            stage_keys=[key for key, _name, _cls in MAGNETIC_QC_STAGES],
+            threshold_overrides=dict(self._qc_design.threshold_overrides),
+            stop_on_failure=self._qc_design.stop_on_failure,
+        )
+        self._run_qc_design(design)
 
     def run_raw_qc(self) -> None:
-        if self._require_rover(): self.draw()
-    def run_processed_qc(self) -> None: self.run_full_qc()
+        design = QCPipelineDesign(
+            module_id="magnetic", name="Raw Magnetic QC", profile_name=self._qc_design.profile_name,
+            stage_keys=list(RAW_STAGE_KEYS), threshold_overrides=dict(self._qc_design.threshold_overrides),
+            stop_on_failure=self._qc_design.stop_on_failure,
+        )
+        self._run_qc_design(design)
+
+    def run_processed_qc(self) -> None:
+        design = QCPipelineDesign(
+            module_id="magnetic", name="Processed Magnetic QC", profile_name=self._qc_design.profile_name,
+            stage_keys=list(PROCESSED_STAGE_KEYS), threshold_overrides=dict(self._qc_design.threshold_overrides),
+            stop_on_failure=self._qc_design.stop_on_failure,
+        )
+        self._run_qc_design(design)
+
     def cancel_qc(self) -> None:
-        if self.controller is not None and hasattr(self.controller,"cancel") and self.controller.cancel():
-            self.hover_info.setText("Magnetic QC cancellation requested.")
+        if self.controller is not None and hasattr(self.controller, "cancel") and self.controller.cancel():
+            self.hover_info.setText("Cancellation requested — waiting for the active QC stage to exit safely.")
         else:
             self.hover_info.setText("No active magnetic background QC job to cancel.")
 

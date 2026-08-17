@@ -30,6 +30,9 @@ from PySide6.QtWidgets import (
 )
 
 from modules.electrical.models import ElectricalDataset
+from core.visualization.palette_library import palette_hex, palette_rgb_array
+from ui.widgets.color_palette_dialog import PaletteSelectorButton
+from ui.widgets.palette_colorbar import PaletteColorBar
 
 
 _PROSYS_QSS = """
@@ -37,7 +40,7 @@ QWidget#prosysPanel {
     background:#F3F6FA;
     color:#17212B;
     font-family:"Segoe UI", Arial, sans-serif;
-    font-size:8pt;
+    font-size:7.1pt;
 }
 QFrame#prosysToolbar {
     background:#FFFFFF;
@@ -46,7 +49,7 @@ QFrame#prosysToolbar {
 }
 QLabel#prosysStatus {
     color:#445566;
-    font-size:8pt;
+    font-size:7.1pt;
     font-weight:600;
     padding:3px 6px;
     background:#F4F9FE;
@@ -55,7 +58,7 @@ QLabel#prosysStatus {
 }
 QLabel#prosysSmall {
     color:#53616F;
-    font-size:7.8pt;
+    font-size:7.0pt;
 }
 QFrame#prosysDivider {
     background:#E3E8EC;
@@ -71,10 +74,10 @@ QTabBar::tab {
     background:#EEF3F8;
     color:#344150;
     border:1px solid #C7D1DD;
-    padding:5px 10px;
-    min-height:18px;
+    padding:3px 7px;
+    min-height:16px;
     font-weight:700;
-    font-size:8pt;
+    font-size:7.1pt;
     margin-right:2px;
     border-top-left-radius:6px;
     border-top-right-radius:6px;
@@ -85,13 +88,13 @@ QTabBar::tab:selected {
     border-bottom-color:#FFFFFF;
 }
 QPushButton {
-    min-height:23px;
-    padding:3px 9px;
+    min-height:19px;
+    padding:2px 6px;
     border-radius:6px;
     border:1px solid #C7D1DD;
     background:#FFFFFF;
     color:#2B3846;
-    font-size:8pt;
+    font-size:7.1pt;
     font-weight:700;
 }
 QPushButton:hover { background:#F0F6FC; border-color:#8DB4DC; }
@@ -129,7 +132,7 @@ QTableWidget {
     border:1px solid #D5DCE5;
     border-radius:6px;
     gridline-color:#E5EAF0;
-    font-size:7.9pt;
+    font-size:7.0pt;
     selection-background-color:#D8ECFF;
     selection-color:#17212B;
 }
@@ -140,7 +143,7 @@ QHeaderView::section {
     border-right:1px solid #D5DCE5;
     border-bottom:1px solid #D5DCE5;
     padding:4px;
-    font-size:7.9pt;
+    font-size:7.0pt;
     font-weight:800;
 }
 QComboBox, QDoubleSpinBox {
@@ -149,7 +152,7 @@ QComboBox, QDoubleSpinBox {
     border:1px solid #C7D1DD;
     border-radius:5px;
     padding:1px 5px;
-    font-size:8pt;
+    font-size:7.1pt;
 }
 """
 
@@ -174,6 +177,7 @@ class ProsysQcPanel(QWidget):
         self.numeric_table: QTableWidget | None = None
         self.topo_table: QTableWidget | None = None
         self.track_table: QTableWidget | None = None
+        self._palette_name = "Resistivity"
         self._build_ui()
 
     # ------------------------------------------------------------------
@@ -265,6 +269,11 @@ class ProsysQcPanel(QWidget):
             button.clicked.connect(slot)
             actions.addWidget(button)
         actions.addStretch(1)
+        actions.addWidget(QLabel("Palette:"))
+        self.palette_selector = PaletteSelectorButton(self._palette_name, bar)
+        self.palette_selector.setMinimumWidth(150)
+        self.palette_selector.currentTextChanged.connect(self._on_palette_changed)
+        actions.addWidget(self.palette_selector)
         outer.addLayout(actions)
 
         self.status = QLabel("Open an electrical/IP dataset to start Prosys-style QC.")
@@ -323,6 +332,9 @@ class ProsysQcPanel(QWidget):
         self.section_plot.setLabel("left", "Pseudo depth / value")
         self.section_plot.setLabel("bottom", "Station / profile")
         layout.addWidget(self.section_plot, 1)
+        self.section_colorbar = PaletteColorBar(self.section_tab, orientation=Qt.Horizontal)
+        self.section_colorbar.set_state(0.0, 1.0, self._palette_name, label="Electrical/IP value")
+        layout.addWidget(self.section_colorbar)
 
     def _build_decay_tab(self) -> None:
         layout = QVBoxLayout(self.decay_tab)
@@ -339,6 +351,9 @@ class ProsysQcPanel(QWidget):
         self.decay_plot.setLabel("left", "IP decay")
         self.decay_plot.setLabel("bottom", "Window")
         layout.addWidget(self.decay_plot, 1)
+        self.decay_colorbar = PaletteColorBar(self.decay_tab, orientation=Qt.Horizontal)
+        self.decay_colorbar.set_state(0.0, 1.0, self._palette_name, label="Chargeability / decay")
+        layout.addWidget(self.decay_colorbar)
 
     def _build_track_tab(self) -> None:
         layout = QVBoxLayout(self.track_tab)
@@ -352,6 +367,9 @@ class ProsysQcPanel(QWidget):
         self.track_table = self._table(["Metric", "Value"])
         splitter.addWidget(self.track_table, 1)
         layout.addLayout(splitter, 1)
+        self.track_colorbar = PaletteColorBar(self.track_tab, orientation=Qt.Horizontal)
+        self.track_colorbar.set_state(0.0, 1.0, self._palette_name, label="Acquisition order")
+        layout.addWidget(self.track_colorbar)
 
     def _build_topo_tab(self) -> None:
         layout = QVBoxLayout(self.topo_tab)
@@ -401,7 +419,7 @@ class ProsysQcPanel(QWidget):
             table.setHorizontalHeaderLabels(headers)
         table.setAlternatingRowColors(True)
         table.verticalHeader().setVisible(False)
-        table.verticalHeader().setDefaultSectionSize(21)
+        table.verticalHeader().setDefaultSectionSize(19)
         table.setSelectionBehavior(QAbstractItemView.SelectRows)
         table.setHorizontalScrollMode(QAbstractItemView.ScrollPerPixel)
         table.setVerticalScrollMode(QAbstractItemView.ScrollPerPixel)
@@ -534,22 +552,31 @@ class ProsysQcPanel(QWidget):
         if np.count_nonzero(valid) == 0:
             plot.setTitle("No valid values for section plot")
             return
-        display_values = np.log10(values[valid]) if value_name == "apparent_resistivity_ohm_m" else values[valid]
-        colors = self._value_colors(display_values)
+        raw_values = values[valid]
+        display_values = np.log10(raw_values) if value_name == "apparent_resistivity_ohm_m" else raw_values
+        total = display_values.size
+        idx = self._display_indices(total, 80_000)
+        pxv, pyv, rawv, dv = x[valid][idx], y[valid][idx], raw_values[idx], display_values[idx]
+        colors = self._value_colors(dv)
         spots = []
-        for px, py, color, raw in zip(x[valid], y[valid], colors, values[valid]):
-            spots.append({"pos": (float(px), float(py)), "brush": color, "pen": pg.mkPen("#243746", width=0.35), "size": 9, "data": float(raw)})
+        for px, py, color, raw in zip(pxv, pyv, colors, rawv):
+            spots.append({"pos": (float(px), float(py)), "brush": color, "pen": pg.mkPen("#243746", width=0.25), "size": 7, "data": float(raw)})
         scatter = pg.ScatterPlotItem(spots=spots)
         plot.addItem(scatter)
-        if np.count_nonzero(valid) < 300:
+        if total < 300:
             try:
-                order = np.argsort(x[valid])
-                plot.plot(x[valid][order], y[valid][order], pen=pg.mkPen("#6B7280", width=0.8))
+                order = np.argsort(pxv)
+                plot.plot(pxv[order], pyv[order], pen=pg.mkPen(palette_hex(self._palette_name, 0.55), width=0.8))
             except Exception:
                 pass
+        finite = display_values[np.isfinite(display_values)]
+        lo, hi = (np.nanpercentile(finite, [2, 98]) if finite.size > 3 else (np.nanmin(finite), np.nanmax(finite)))
+        unit = "log10(ohm·m)" if value_name == "apparent_resistivity_ohm_m" else ""
+        self.section_colorbar.set_state(float(lo), float(hi), self._palette_name, unit=unit, label=self._label(value_name))
         plot.setLabel("bottom", "Station / X")
         plot.setLabel("left", y_label)
-        plot.setTitle(f"{self._label(value_name)} apparent section — values shown by colour")
+        suffix = f" — displaying {dv.size:,}/{total:,}" if dv.size < total else ""
+        plot.setTitle(f"{self._label(value_name)} apparent section — values shown by colour{suffix}")
 
     def _refresh_decay_plot(self) -> None:
         if not hasattr(self, "decay_plot"):
@@ -575,7 +602,13 @@ class ProsysQcPanel(QWidget):
         if not np.any(valid):
             plot.setTitle(f"Reading {row + 1}: no valid IP decay windows")
             return
-        plot.plot(x[valid], y[valid], pen=pg.mkPen("#1F78B4", width=2.2), symbol="o", symbolSize=6, symbolBrush="#2E9E5B", symbolPen=pg.mkPen("#174A7C", width=0.8))
+        xv, yv = x[valid], y[valid]
+        plot.plot(xv, yv, pen=pg.mkPen(palette_hex(self._palette_name, 0.62), width=2.0))
+        decay_colors = self._value_colors(yv)
+        spots = [{"pos": (float(a), float(b)), "brush": c, "pen": pg.mkPen("#243746", width=0.5), "size": 6} for a, b, c in zip(xv, yv, decay_colors)]
+        plot.addItem(pg.ScatterPlotItem(spots=spots))
+        lo, hi = (float(np.nanmin(yv)), float(np.nanmax(yv)))
+        self.decay_colorbar.set_state(lo, hi, self._palette_name, label="Chargeability / decay window")
         plot.setLabel("bottom", "IP decay window")
         plot.setLabel("left", "Chargeability / window value")
         plot.setTitle(f"IP decay curve — reading {row + 1}")
@@ -607,10 +640,19 @@ class ProsysQcPanel(QWidget):
             self.track_plot.setTitle("No valid coordinate pairs available")
             self._fill_key_value(self.track_table, [("Valid coordinate points", 0)])
             return
-        self.track_plot.plot(x[valid], y[valid], pen=pg.mkPen("#C24A3A", width=2), symbol="o", symbolSize=5, symbolBrush="#1F78B4", symbolPen=pg.mkPen("#174A7C", width=0.7))
+        xv, yv = x[valid], y[valid]
+        total = xv.size
+        idx = self._display_indices(total, 50_000)
+        xv, yv = xv[idx], yv[idx]
+        order_values = np.linspace(0.0, 1.0, xv.size, dtype=float)
+        track_colors = self._normalized_colors(order_values)
+        self.track_plot.plot(xv, yv, pen=pg.mkPen(palette_hex(self._palette_name, 0.58), width=1.3))
+        spots = [{"pos": (float(a), float(b)), "brush": c, "pen": pg.mkPen("#243746", width=0.25), "size": 4} for a, b, c in zip(xv, yv, track_colors)]
+        self.track_plot.addItem(pg.ScatterPlotItem(spots=spots))
+        self.track_colorbar.set_state(1.0, float(total), self._palette_name, label="Acquisition order")
         self.track_plot.setLabel("bottom", axis[0])
         self.track_plot.setLabel("left", axis[1])
-        self.track_plot.setTitle("GPS / acquisition track")
+        self.track_plot.setTitle("GPS / acquisition track" + (f" — displaying {xv.size:,}/{total:,}" if xv.size < total else ""))
         rows = [
             ("Valid coordinate points", int(np.count_nonzero(valid))),
             ("X min", float(np.nanmin(x[valid]))),
@@ -911,19 +953,37 @@ class ProsysQcPanel(QWidget):
                     break
         self.decay_row_combo.blockSignals(False)
 
+    def _on_palette_changed(self, palette_name: str) -> None:
+        self._palette_name = palette_name
+        self._refresh_section_plot()
+        self._refresh_decay_plot()
+        self._refresh_track()
+
     @staticmethod
-    def _value_colors(values: np.ndarray) -> list[QColor]:
+    def _display_indices(size: int, maximum: int) -> np.ndarray:
+        size = max(0, int(size))
+        if size <= maximum:
+            return np.arange(size, dtype=int)
+        return np.linspace(0, size - 1, maximum, dtype=int)
+
+    def _normalized_colors(self, norm: np.ndarray) -> list[QColor]:
+        values = np.nan_to_num(np.asarray(norm, dtype=float), nan=0.5, posinf=1.0, neginf=0.0)
+        lut = palette_rgb_array(self._palette_name, 256)
+        idx = np.clip(np.rint(np.clip(values, 0.0, 1.0) * 255.0).astype(int), 0, 255)
+        return [QColor(int(r), int(g), int(b)) for r, g, b in lut[idx]]
+
+    def _value_colors(self, values: np.ndarray) -> list[QColor]:
+        values = np.asarray(values, dtype=float)
         if values.size == 0:
             return []
-        low, high = np.nanpercentile(values, [2, 98]) if values.size > 3 else (np.nanmin(values), np.nanmax(values))
+        finite = values[np.isfinite(values)]
+        if finite.size == 0:
+            return self._normalized_colors(np.full(values.size, 0.5))
+        low, high = np.nanpercentile(finite, [2, 98]) if finite.size > 3 else (np.nanmin(finite), np.nanmax(finite))
         if not np.isfinite(high - low) or high == low:
             high = low + 1.0
-        norm = np.clip((values - low) / (high - low), 0, 1)
-        try:
-            cmap = pg.colormap.get("CET-R4")
-        except Exception:
-            cmap = pg.colormap.get("viridis")
-        return list(cmap.map(norm, mode="qcolor"))
+        norm = np.clip((values - low) / (high - low), 0.0, 1.0)
+        return self._normalized_colors(norm)
 
     @staticmethod
     def _filter_fields(ds: ElectricalDataset | None) -> list[str]:

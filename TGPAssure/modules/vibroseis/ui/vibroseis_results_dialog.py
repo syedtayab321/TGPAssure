@@ -20,12 +20,14 @@ from PySide6.QtWidgets import (
     QTableWidget,
     QTableWidgetItem,
     QHeaderView,
-    QComboBox,
     QTabWidget,
     QWidget,
     QMessageBox,
 )
 
+
+from core.visualization.palette_library import palette_hex
+from ui.widgets.color_palette_dialog import PaletteSelectorButton
 
 _DIALOG_QSS = """
 QDialog#vibResultsDialog {
@@ -157,15 +159,11 @@ class _BaseVibroseisResultsDialog(QDialog):
         footer = QHBoxLayout()
         palette_label = QLabel("Colour palette")
         palette_label.setStyleSheet("color:#17384F;font-weight:900;background:transparent;")
-        self.palette_combo = QComboBox()
-        self.palette_combo.addItem("TGP Blue / Amber", ["#0A6EA8", "#D98919", "#15945C", "#AA3377", "#D7191C", "#7B61FF"])
-        self.palette_combo.addItem("High Contrast", ["#003F5C", "#FFA600", "#2F4B7C", "#D45087", "#665191", "#F95D6A"])
-        self.palette_combo.addItem("Geophysical Field", ["#074F57", "#18A999", "#F2C14E", "#F78154", "#4D9078", "#7B2CBF"])
-        self.palette_combo.addItem("Warm Presentation", ["#7A1F1F", "#C65D21", "#E0A100", "#4F772D", "#315C99", "#8A4FFF"])
-        self.palette_combo.setMinimumWidth(185)
-        self.palette_combo.currentIndexChanged.connect(self._apply_palette_to_plots)
+        self.palette_selector = PaletteSelectorButton("Seismic", self)
+        self.palette_selector.setMinimumWidth(185)
+        self.palette_selector.currentTextChanged.connect(self._apply_palette_to_plots)
         footer.addWidget(palette_label)
-        footer.addWidget(self.palette_combo)
+        footer.addWidget(self.palette_selector)
         footer.addStretch(1)
         self.export_btn = QPushButton("Export CSV")
         self.export_btn.setObjectName("vibGreen")
@@ -179,16 +177,14 @@ class _BaseVibroseisResultsDialog(QDialog):
 
 
     def _palette_colors(self) -> list[str]:
-        colors = self.palette_combo.currentData() if hasattr(self, "palette_combo") else None
-        if isinstance(colors, list) and colors:
-            return [str(c) for c in colors]
-        return ["#0A6EA8", "#D98919", "#15945C", "#AA3377", "#D7191C", "#7B61FF"]
+        name = self.palette_selector.currentText() if hasattr(self, "palette_selector") else "Seismic"
+        return [palette_hex(name, value) for value in np.linspace(0.08, 0.92, 6)]
 
     def _palette_pen(self, index: int = 0, width: float = 1.25):
         colors = self._palette_colors()
         return pg.mkPen(colors[index % len(colors)], width=width)
 
-    def _apply_palette_to_plots(self) -> None:
+    def _apply_palette_to_plots(self, *_args) -> None:
         colors = self._palette_colors()
         color_index = 0
         for plot in self.findChildren(pg.PlotWidget):

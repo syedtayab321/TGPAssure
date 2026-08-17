@@ -5,6 +5,7 @@ import numpy as np
 import pyqtgraph as pg
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QCheckBox, QFrame, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
+from core.visualization.palette_library import DEFAULT_PALETTE, palette_hex
 
 
 class SeismicGeometryMap(QWidget):
@@ -13,6 +14,7 @@ class SeismicGeometryMap(QWidget):
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self._geometry: dict[str, np.ndarray] = {}
+        self._palette_name = DEFAULT_PALETTE
         root = QVBoxLayout(self); root.setContentsMargins(0,0,0,0); root.setSpacing(6)
         bar = QFrame(); bar.setObjectName("geometryMapBar")
         row = QHBoxLayout(bar); row.setContentsMargins(8,6,8,6)
@@ -35,6 +37,10 @@ class SeismicGeometryMap(QWidget):
     def _valid_xy(x, y):
         x=np.asarray(x,dtype=float); y=np.asarray(y,dtype=float); m=np.isfinite(x)&np.isfinite(y)&~((x==0)&(y==0)); return x[m],y[m],m
 
+    def set_palette(self, palette_name: str) -> None:
+        self._palette_name = str(palette_name or DEFAULT_PALETTE)
+        self.render()
+
     def set_geometry(self, geometry: dict[str,np.ndarray]) -> None:
         self._geometry = geometry or {}; self.render(); self.fit()
 
@@ -47,11 +53,11 @@ class SeismicGeometryMap(QWidget):
         sx,sy,_=self._valid_xy(g.get("source_x",[]),g.get("source_y",[]))
         rx,ry,_=self._valid_xy(g.get("receiver_x",[]),g.get("receiver_y",[]))
         mx,my,_=self._valid_xy(g.get("midpoint_x",[]),g.get("midpoint_y",[]))
-        if self.sources.isChecked() and sx.size: self.plot.plot(sx,sy,pen=None,symbol="t",symbolSize=6,symbolBrush="#F4A340",name="Sources")
-        if self.receivers.isChecked() and rx.size: self.plot.plot(rx,ry,pen=None,symbol="o",symbolSize=5,symbolBrush="#48B8E8",name="Receivers")
+        if self.sources.isChecked() and sx.size: self.plot.plot(sx,sy,pen=None,symbol="t",symbolSize=6,symbolBrush=palette_hex(self._palette_name, 0.18),name="Sources")
+        if self.receivers.isChecked() and rx.size: self.plot.plot(rx,ry,pen=None,symbol="o",symbolSize=5,symbolBrush=palette_hex(self._palette_name, 0.50),name="Receivers")
         if self.midpoints.isChecked() and mx.size:
-            pen=pg.mkPen("#8BE28B",width=1) if self.connect.isChecked() else None
-            self.plot.plot(mx,my,pen=pen,symbol="s",symbolSize=4,symbolBrush="#8BE28B",name="Midpoints/CDP")
+            pen=pg.mkPen(palette_hex(self._palette_name, 0.82),width=1) if self.connect.isChecked() else None
+            self.plot.plot(mx,my,pen=pen,symbol="s",symbolSize=4,symbolBrush=palette_hex(self._palette_name, 0.82),name="Midpoints/CDP")
         self._update_stats(mx,my)
 
     def _update_stats(self,x,y):

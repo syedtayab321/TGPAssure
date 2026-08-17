@@ -7,7 +7,7 @@ from typing import Any
 
 import numpy as np
 from PySide6.QtCore import Qt, Signal, QRectF, QSize
-from PySide6.QtGui import QColor, QFont, QPainter, QPen, QBrush, QPixmap
+from PySide6.QtGui import QColor, QFont, QPainter, QPen, QBrush, QPixmap, QLinearGradient
 from PySide6.QtWidgets import (
     QCheckBox,
     QDialog,
@@ -33,6 +33,8 @@ from PySide6.QtWidgets import (
 
 from modules.geodetic.dc_reader import DcFileReader
 from modules.geodetic.models import FIELD_LABELS, GeodeticDataset, RECORD_SCHEMAS
+from core.visualization.palette_library import COLOR_PALETTES, palette_hex
+from ui.widgets.color_palette_dialog import PaletteSelectorButton
 
 
 QSS = """
@@ -291,6 +293,7 @@ class MiniPlot(QWidget):
         self.limit = limit
         self.ymin: float | None = None
         self.ymax: float | None = None
+        self.palette_name = "Seismic"
         self.setMinimumHeight(132)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.setAutoFillBackground(False)
@@ -302,6 +305,11 @@ class MiniPlot(QWidget):
         self.ymax = ymax
         self.update()
 
+    def set_palette(self, palette_name: str) -> None:
+        if palette_name in COLOR_PALETTES:
+            self.palette_name = palette_name
+            self.update()
+
     def paintEvent(self, event):  # noqa: N802
         del event
         painter = QPainter(self)
@@ -310,7 +318,7 @@ class MiniPlot(QWidget):
         painter.fillRect(rect, QColor("#F7FBFF"))
         painter.setPen(QPen(QColor("#D4DFEA"), 1))
         painter.drawRoundedRect(rect, 6, 6)
-        plot = rect.adjusted(38, 22, -12, -25)
+        plot = rect.adjusted(38, 22, -60, -25)
         painter.fillRect(plot, QColor("#F1F5F9"))
         painter.setPen(QPen(QColor("#FFFFFF"), 1))
         for i in range(1, 10):
@@ -340,14 +348,34 @@ class MiniPlot(QWidget):
             painter.setPen(QPen(QColor("#D04A02"), 1, Qt.DashLine))
             yy = ymap(float(self.limit))
             painter.drawLine(plot.left(), yy, plot.right(), yy)
-        xs = np.linspace(plot.left()+3, plot.right()-3, max(values.size, 2))[:values.size]
-        painter.setPen(QPen(QColor("#1E7FC0"), 2))
+        # Display-only decimation keeps large GNSS logs responsive while preserving
+        # the full arrays for QC calculations and statistics.
+        if values.size > 5000:
+            idx = np.linspace(0, values.size - 1, 5000, dtype=int)
+            draw_values = values[idx]
+        else:
+            draw_values = values
+        xs = np.linspace(plot.left()+3, plot.right()-3, max(draw_values.size, 2))[:draw_values.size]
         last = None
-        for x, v in zip(xs, values):
+        span = max(ymax - ymin, 1e-12)
+        for x, v in zip(xs, draw_values):
             pt = (int(x), ymap(float(v)))
             if last is not None:
+                norm = min(1.0, max(0.0, (float(v) - ymin) / span))
+                painter.setPen(QPen(QColor(palette_hex(self.palette_name, norm)), 1.7))
                 painter.drawLine(last[0], last[1], pt[0], pt[1])
             last = pt
+        # Numeric per-graph color bar.
+        bar = QRectF(plot.right() + 12, plot.top() + 7, 10, max(24, plot.height() - 14))
+        grad = QLinearGradient(bar.left(), bar.bottom(), bar.left(), bar.top())
+        stops = COLOR_PALETTES.get(self.palette_name, COLOR_PALETTES["Seismic"])
+        for i, color in enumerate(stops):
+            grad.setColorAt(i / max(1, len(stops) - 1), QColor(color))
+        painter.setBrush(grad); painter.setPen(QPen(QColor("#94A3B8"), 0.7)); painter.drawRect(bar)
+        tiny = painter.font(); tiny.setPointSize(6); tiny.setBold(False); painter.setFont(tiny)
+        painter.setPen(QColor("#475569"))
+        painter.drawText(QRectF(bar.right()+3, bar.top()-5, 35, 14), Qt.AlignLeft | Qt.AlignVCenter, f"{ymax:.2g}")
+        painter.drawText(QRectF(bar.right()+3, bar.bottom()-7, 35, 14), Qt.AlignLeft | Qt.AlignVCenter, f"{ymin:.2g}")
         painter.setPen(QColor("#003366"))
         small = painter.font(); small.setPointSize(7); small.setBold(False); painter.setFont(small)
         for k in range(5):
@@ -432,6 +460,8 @@ class DcfGraphsDialog(QDialog):
         super().__init__(parent)
         self.dataset = dataset
         self.page_index = 0
+        self._palette_name = "Seismic"
+        self._plots: list[MiniPlot] = []
         self.setWindowTitle("DCFX Graphs1")
         self.resize(1220, 760)
         self.setMinimumSize(980, 620)
@@ -470,9 +500,16 @@ class DcfGraphsDialog(QDialog):
         rows_layout = QVBoxLayout(rows_panel)
         rows_layout.setContentsMargins(10, 10, 10, 10)
         rows_layout.setSpacing(8)
+        header_row = QHBoxLayout()
         self.graph_header = QLabel("Geodetic QC Graphs")
         self.graph_header.setObjectName("graphHeader")
-        rows_layout.addWidget(self.graph_header)
+        header_row.addWidget(self.graph_header, 1)
+        header_row.addWidget(QLabel("Global palette:"))
+        self.palette_selector = PaletteSelectorButton(self._palette_name, rows_panel)
+        self.palette_selector.setMinimumWidth(150)
+        self.palette_selector.currentTextChanged.connect(self._set_palette)
+        header_row.addWidget(self.palette_selector)
+        rows_layout.addLayout(header_row)
         self.rows_box = QVBoxLayout()
         self.rows_box.setContentsMargins(0, 0, 0, 0)
         self.rows_box.setSpacing(8)
@@ -488,6 +525,7 @@ class DcfGraphsDialog(QDialog):
         return arr[np.isfinite(arr)]
 
     def _clear(self):
+        self._plots.clear()
         while self.rows_box.count():
             item = self.rows_box.takeAt(0)
             w = item.widget()
@@ -503,10 +541,17 @@ class DcfGraphsDialog(QDialog):
             row_layout.setSpacing(6)
             plot = MiniPlot(title, self._series(key), limit)
             plot.set_data(plot.values, limit, ymin, ymax)
+            plot.set_palette(self._palette_name)
+            self._plots.append(plot)
             control = GraphControl(plot, ymax, limit, ymin)
             row_layout.addWidget(control)
             row_layout.addWidget(plot, 1)
             self.rows_box.addWidget(row_widget, 1)
+
+    def _set_palette(self, palette_name: str) -> None:
+        self._palette_name = palette_name
+        for plot in self._plots:
+            plot.set_palette(palette_name)
 
     def next_page(self):
         self.page_index = (self.page_index + 1) % len(self.PAGES)

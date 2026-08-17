@@ -11,7 +11,7 @@ from typing import Iterable
 
 import numpy as np
 from PySide6.QtCore import QPointF, QRectF, Qt
-from PySide6.QtGui import QColor, QFont, QPainter, QPainterPath, QPen
+from PySide6.QtGui import QColor, QFont, QPainter, QPen
 from PySide6.QtWidgets import (
     QFileDialog,
     QFrame,
@@ -28,6 +28,9 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+
+from core.visualization.palette_library import palette_hex
+from ui.widgets.color_palette_dialog import PaletteSelectorButton
 
 
 @dataclass
@@ -55,6 +58,11 @@ class _ClassicPlot(QWidget):
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.setMinimumSize(470, 270)
         self.title = ""
+        self.palette_name = "Seismic"
+
+    def set_palette(self, palette_name: str) -> None:
+        self.palette_name = palette_name
+        self.update()
 
     @staticmethod
     def _font(size: int = 7, bold: bool = False) -> QFont:
@@ -130,21 +138,22 @@ class _LineSpecPlot(_ClassicPlot):
             painter.setPen(QPen(QColor(220, 65, 55), 1))
             painter.drawLine(QPointF(rect.left(), y1), QPointF(rect.right(), y1))
             painter.drawLine(QPointF(rect.left(), y2), QPointF(rect.right(), y2))
-        painter.setPen(QPen(QColor(0, 70, 220), 1.0))
-        path = QPainterPath()
-        started = False
-        for i, value in enumerate(self.values):
+        step = max(1, self.values.size // max(1, int(rect.width() * 1.2)))
+        previous = None
+        span = max(vmax - vmin, 1e-12)
+        for i in range(0, self.values.size, step):
+            value = self.values[i]
             if not np.isfinite(value):
-                started = False
+                previous = None
                 continue
             x = rect.left() + i / max(1, self.values.size - 1) * rect.width()
-            y = rect.bottom() - (value - vmin) / (vmax - vmin) * rect.height()
-            if not started:
-                path.moveTo(x, y)
-                started = True
-            else:
-                path.lineTo(x, y)
-        painter.drawPath(path)
+            y = rect.bottom() - (value - vmin) / span * rect.height()
+            current = QPointF(x, y)
+            if previous is not None:
+                norm = min(1.0, max(0.0, (float(value) - vmin) / span))
+                painter.setPen(QPen(QColor(palette_hex(self.palette_name, norm)), 1.1))
+                painter.drawLine(previous, current)
+            previous = current
         painter.setFont(self._font(7))
         painter.setPen(QColor(185, 0, 0))
         painter.drawText(4, int(rect.top() + 6), f"{vmax:.3g}")
@@ -189,8 +198,8 @@ class _HistogramPlot(_ClassicPlot):
         max_count = int(max(hist) or 1)
         bar_w = rect.width() / len(hist)
         painter.setPen(Qt.NoPen)
-        painter.setBrush(QColor(0, 226, 25))
         for i, count in enumerate(hist):
+            painter.setBrush(QColor(palette_hex(self.palette_name, i / max(1, len(hist) - 1))))
             height = count / max_count * max(1.0, rect.height() - 18)
             painter.drawRect(QRectF(rect.left() + i * bar_w, rect.bottom() - height, max(1.0, bar_w - 1), height))
         lo = float(edges[0])
@@ -253,6 +262,7 @@ class SercelInstrumentTestAnalysisWidget(QWidget):
         self.current_dir: Path | None = None
         self.records: list[InstrumentRecord] = []
         self.sort_by_serial = True
+        self._palette_name = "Seismic"
         self._build_ui()
         self._apply_style()
 
@@ -279,11 +289,22 @@ class SercelInstrumentTestAnalysisWidget(QWidget):
         self.path_label = QLabel("No SITA instrument-test folder selected")
         self.path_label.setObjectName("pathLabel")
         toolbar.addWidget(self.path_label, 1)
+        toolbar.addWidget(QLabel("Palette:"))
+        self.palette_selector = PaletteSelectorButton(self._palette_name, self)
+        self.palette_selector.setMinimumWidth(145)
+        self.palette_selector.currentTextChanged.connect(self._apply_palette)
+        toolbar.addWidget(self.palette_selector)
         self.tabs = QTabWidget()
         self.tabs.setDocumentMode(True)
         root.addWidget(self.tabs, 1)
         self._build_home_tab()
         self._build_result_tabs()
+        self._apply_palette(self._palette_name)
+
+    def _apply_palette(self, palette_name: str) -> None:
+        self._palette_name = palette_name
+        for widget in self.findChildren(_ClassicPlot):
+            widget.set_palette(palette_name)
 
     def _build_home_tab(self) -> None:
         page = QWidget()

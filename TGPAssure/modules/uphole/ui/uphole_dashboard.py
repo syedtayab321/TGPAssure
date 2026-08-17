@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 from pathlib import Path
+import numpy as np
 
 import pyqtgraph as pg
 from PySide6.QtCore import Qt, QTimer, QRectF, QSize
@@ -30,6 +31,9 @@ from PySide6.QtWidgets import (
 )
 
 from modules.uphole import UpholeInterpreter, UpholeReader, UpholeShot
+from core.visualization.palette_library import palette_hex, palette_rgb_array
+from ui.widgets.color_palette_dialog import PaletteSelectorButton
+from ui.widgets.palette_colorbar import PaletteColorBar
 
 _QSS = """
 QWidget#upholeDashboard {
@@ -459,6 +463,7 @@ class UpholeDashboard(QWidget):
         self.wig_color = "#020617"
         self.va_color = "#EF4444"
         self.fill_color = "#0EA5E9"
+        self._palette_name = "Seismic"
         self._build_ui()
         self._refresh_all()
 
@@ -592,6 +597,12 @@ class UpholeDashboard(QWidget):
         self.red_swatch.clicked.connect(lambda: self._choose_plot_color("va"))
         layout.addWidget(self.red_swatch)
 
+        layout.addWidget(QLabel("Palette:"))
+        self.palette_selector = PaletteSelectorButton(self._palette_name, bar)
+        self.palette_selector.setMinimumWidth(140)
+        self.palette_selector.currentTextChanged.connect(self._on_palette_changed)
+        layout.addWidget(self.palette_selector)
+
         self.clear_results_btn = QPushButton("Clear Results File")
         self.clear_results_btn.setObjectName("smallCommand")
         self.clear_results_btn.clicked.connect(self.clear_results)
@@ -693,6 +704,9 @@ class UpholeDashboard(QWidget):
         self.display_plot.getAxis("bottom").setTextPen(pg.mkPen("#65758A"))
         self.display_plot.getAxis("left").setTextPen(pg.mkPen("#65758A"))
         plot_layout.addWidget(self.display_plot, 1)
+        self.display_colorbar = PaletteColorBar(plot_card, orientation=Qt.Horizontal)
+        self.display_colorbar.set_state(0.0, 1.0, self._palette_name, unit="m", label="Depth / time-depth value")
+        plot_layout.addWidget(self.display_colorbar)
 
         self.empty_overlay = QLabel("Open File / Load a Hole to start uphole interpretation")
         self.empty_overlay.setObjectName("emptyTitle")
@@ -746,6 +760,9 @@ class UpholeDashboard(QWidget):
         self.velocity_plot.getAxis("bottom").setTextPen(pg.mkPen("#64748B"))
         self.velocity_plot.getAxis("left").setTextPen(pg.mkPen("#64748B"))
         v_layout.addWidget(self.velocity_plot, 1)
+        self.velocity_colorbar = PaletteColorBar(velocity_card, orientation=Qt.Horizontal)
+        self.velocity_colorbar.set_state(0.0, 1.0, self._palette_name, unit="m/s", label="Interval velocity")
+        v_layout.addWidget(self.velocity_colorbar)
         layout.addWidget(velocity_card, 1, 1)
         layout.setColumnStretch(0, 2)
         layout.setColumnStretch(1, 1)
@@ -1054,11 +1071,19 @@ class UpholeDashboard(QWidget):
             self._update_metrics()
             return
         pen = pg.mkPen(self.wig_color, width=1.25 if mode == "wig" else 1.8)
-        symbol_brush = self.va_color if mode in {"va_plus", "va_both"} else self.wig_color
-        # Time-depth curve.  Y-axis is inverted because depth increases downward.
-        self.display_plot.plot(x, y, pen=pen, symbol="o", symbolBrush=symbol_brush, symbolSize=6, symbolPen=pg.mkPen("#FFFFFF", width=1.2))
+        # Time-depth curve. Y-axis is inverted because depth increases downward.
+        self.display_plot.plot(x, y, pen=pen)
+        yarr = np.asarray(y, dtype=float)
+        lo, hi = float(np.nanmin(yarr)), float(np.nanmax(yarr))
+        span = max(hi - lo, 1e-12)
+        lut = palette_rgb_array(self._palette_name, 256)
+        norm = np.clip((yarr - lo) / span, 0.0, 1.0)
+        idx = np.clip(np.rint(norm * 255).astype(int), 0, 255)
+        brushes = [pg.mkBrush(int(r), int(g), int(b)) for r, g, b in lut[idx]]
+        spots = [{"pos": (float(px), float(py)), "brush": brush, "pen": pg.mkPen("#FFFFFF", width=0.8), "size": 6} for px, py, brush in zip(x, y, brushes)]
+        self.display_plot.addItem(pg.ScatterPlotItem(spots=spots))
+        self.display_colorbar.set_state(lo, hi, self._palette_name, unit="m", label="Depth / time-depth value")
         if mode in {"va_plus", "va_minus", "va_both"}:
-            baseline = min(x) if x else 0.0
             brush_pos = pg.mkBrush(QColor(self.va_color))
             brush_neg = pg.mkBrush(QColor(self.wig_color))
             width = max(0.35, (max(x) - min(x)) / max(len(x) * 4, 1)) if len(x) > 1 else 0.35
@@ -1069,7 +1094,7 @@ class UpholeDashboard(QWidget):
                     self.display_plot.addItem(pg.BarGraphItem(x=[xi - width * 0.55], y0=[0], height=[yi], width=width * 0.45, brush=brush_neg, pen=None))
         if self.grad_fill_check.isChecked() and len(x) > 1:
             fill = QColor(self.fill_color); fill.setAlpha(45)
-            self.display_plot.plot(x, y, pen=pg.mkPen(self.fill_color, width=2), fillLevel=0, brush=pg.mkBrush(fill))
+            self.display_plot.plot(x, y, pen=pg.mkPen(self.wig_color, width=2), fillLevel=0, brush=pg.mkBrush(fill))
         self.display_plot.invertY(True)
         self.plot_title_label.setText(f"UYH Uphole Interpretation — {self._display_mode_label(mode)}")
         self.display_plot.enableAutoRange()
@@ -1098,8 +1123,21 @@ class UpholeDashboard(QWidget):
             return
         x = list(range(1, len(self.layers) + 1))
         y = [float(layer.interval_velocity_m_s) for layer in self.layers]
-        self.velocity_plot.addItem(pg.BarGraphItem(x=x, height=y, width=0.65, brush=pg.mkBrush("#0EA5E9"), pen=pg.mkPen("#0369A1")))
-        self.velocity_plot.plot(x, y, pen=pg.mkPen("#EF4444", width=1.6), symbol="o", symbolBrush="#EF4444", symbolPen=pg.mkPen("#FFFFFF"), symbolSize=5)
+        yarr = np.asarray(y, dtype=float)
+        lo, hi = float(np.nanmin(yarr)), float(np.nanmax(yarr))
+        self.velocity_plot.addItem(pg.BarGraphItem(x=x, height=y, width=0.65, brush=pg.mkBrush(palette_hex(self._palette_name, 0.48)), pen=pg.mkPen(palette_hex(self._palette_name, 0.72))))
+        self.velocity_plot.plot(x, y, pen=pg.mkPen(palette_hex(self._palette_name, 0.72), width=1.5))
+        span = max(hi - lo, 1e-12)
+        lut = palette_rgb_array(self._palette_name, 256)
+        idx = np.clip(np.rint(np.clip((yarr - lo) / span, 0.0, 1.0) * 255).astype(int), 0, 255)
+        spots = [{"pos": (float(px), float(py)), "brush": pg.mkBrush(int(r), int(g), int(b)), "pen": pg.mkPen("#FFFFFF", width=0.8), "size": 6} for px, py, (r, g, b) in zip(x, y, lut[idx])]
+        self.velocity_plot.addItem(pg.ScatterPlotItem(spots=spots))
+        self.velocity_colorbar.set_state(lo, hi, self._palette_name, unit="m/s", label="Interval velocity")
+
+    def _on_palette_changed(self, palette_name: str) -> None:
+        self._palette_name = palette_name
+        self._refresh_display_plot()
+        self._populate_velocity_plot()
 
     def _field_count(self, attr: str) -> int:
         return sum(1 for record in self.records if getattr(record, attr, None) is not None and getattr(record, attr, None) != "")
