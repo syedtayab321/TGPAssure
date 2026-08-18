@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 import numpy as np
-from PySide6.QtCore import QObject, QRunnable, QThreadPool, Qt, Signal, Slot, QTimer
+from PySide6.QtCore import QObject, QRunnable, QThreadPool, Qt, Signal, Slot, QTimer, QSize
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QComboBox,
@@ -57,143 +57,151 @@ except Exception:  # pragma: no cover
 
 _QSS = """
 QWidget#gravityDashboard {
-    background:#ECEFF3;
-    color:#1E2935;
+    background:#F3F6FA;
+    color:#182536;
     font-family:"Segoe UI", Arial, sans-serif;
-    font-size:7pt;
+    font-size:8pt;
 }
-QFrame#gxMenu, QFrame#gxToolStrip, QFrame#gxPanel, QFrame#gxLeft, QFrame#gxRight {
+QFrame#gxToolStrip, QFrame#gxPanel, QFrame#gxLeft, QFrame#gxRight {
     background:#FFFFFF;
-    border:1px solid #CCD4DE;
-    border-radius:5px;
-}
-QFrame#gxMenu {
-    background:qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 #F6F9FC, stop:1 #EAF3FA);
+    border:1px solid #C9D6E2;
+    border-radius:8px;
 }
 QFrame#gxToolStrip {
-    background:#FAFBFC;
+    background:qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 #F8FBFE, stop:1 #EDF6FC);
 }
-QLabel#gxTitle {
-    color:#203243;
-    font-size:8pt;
-    font-weight:900;
+QFrame#gxLeft, QFrame#gxRight {
+    background:#FDFEFF;
+}
+QFrame#gxPanel {
+    background:#FFFFFF;
 }
 QLabel#gxStatus {
     background:#FFFFFF;
-    color:#24485F;
-    border:1px solid #C9D9E8;
-    border-radius:4px;
-    padding:2px 6px;
-    font-weight:700;
+    color:#19384D;
+    border:1px solid #C7D8E8;
+    border-left:4px solid #167C99;
+    border-radius:7px;
+    padding:5px 9px;
+    font-weight:800;
 }
 QLabel#gxMetric {
-    background:#F8FAFC;
-    border:1px solid #D3DAE3;
-    border-left:3px solid #247BA0;
-    border-radius:5px;
-    padding:4px 7px;
-    font-weight:800;
-    color:#263746;
+    background:#FFFFFF;
+    border:1px solid #C7D8E8;
+    border-top:3px solid #167C99;
+    border-radius:7px;
+    padding:5px 10px;
+    font-weight:900;
+    color:#183449;
 }
 QLabel#gxSection {
-    color:#344150;
+    color:#0E5870;
+    background:#E8F5FA;
+    border:1px solid #C0DFEA;
+    border-radius:6px;
+    padding:5px 8px;
     font-weight:900;
-    background:#EEF2F6;
-    padding:2px 5px;
-    border-radius:3px;
 }
 QToolButton, QPushButton {
-    min-height:22px;
-    padding:3px 9px;
-    border:1px solid #B8C3D0;
-    border-radius:5px;
-    background:qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 #FFFFFF, stop:1 #EDF3F8);
-    color:#1E2935;
+    min-height:24px;
+    padding:4px 10px;
+    border:1px solid #AFC1D1;
+    border-radius:7px;
+    background:qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 #FFFFFF, stop:1 #EDF4FA);
+    color:#17283A;
     font-weight:800;
 }
 QToolButton:disabled, QPushButton:disabled {
-    background:#E5EAF0;
-    color:#8492A0;
-    border-color:#CBD3DC;
+    background:#E6ECF2;
+    color:#8997A5;
+    border-color:#CBD5DF;
 }
-QToolButton:hover, QPushButton:hover { background:#EEF6FC; border-color:#6FA4C7; }
+QToolButton:hover, QPushButton:hover { background:#E8F5FC; border-color:#5B9FC5; }
+QToolButton:pressed, QPushButton:pressed { background:#D6EBF8; }
 QToolButton#primaryTool, QPushButton#primaryTool {
-    background:qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 #E5F5FF, stop:1 #CFE9FA);
-    border-color:#63A8D4;
-    color:#0B4F7B;
+    background:qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 #E4F6FF, stop:1 #BFE6FA);
+    border-color:#4A9ECC;
+    color:#074E75;
 }
 QToolButton#greenTool, QPushButton#greenTool {
-    background:qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 #ECFBF1, stop:1 #D2F1DD);
-    border-color:#75C791;
-    color:#176333;
+    background:qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 #EAFBF0, stop:1 #C9EFD9);
+    border-color:#67BE85;
+    color:#145F32;
 }
 QToolButton#purpleTool, QPushButton#purpleTool {
-    background:qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 #F6EEFF, stop:1 #E6D7FB);
-    border-color:#B79DE3;
-    color:#4F2F88;
+    background:qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 #F6EEFF, stop:1 #E2D3FA);
+    border-color:#AB8CDD;
+    color:#4A2D7F;
 }
 QToolButton#orangeTool, QPushButton#orangeTool {
-    background:qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 #FFF8E8, stop:1 #FFE9B7);
-    border-color:#D7B66B;
-    color:#745305;
+    background:qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 #FFF7E2, stop:1 #FFE3A5);
+    border-color:#D5AD55;
+    color:#725003;
 }
 QComboBox, QDoubleSpinBox {
     background:#FFFFFF;
-    border:1px solid #C3CCD7;
-    border-radius:4px;
-    min-height:19px;
-    padding:1px 4px;
+    border:1px solid #B8C8D6;
+    border-radius:6px;
+    min-height:22px;
+    padding:2px 6px;
+    color:#17283A;
 }
+QComboBox:hover, QDoubleSpinBox:hover { border-color:#5B9FC5; }
 QTabWidget::pane {
-    border:1px solid #CCD4DE;
-    border-radius:5px;
+    border:1px solid #C9D6E2;
+    border-radius:8px;
     background:#FFFFFF;
+    top:-1px;
 }
 QTabBar::tab {
-    background:#E9EEF4;
-    border:1px solid #CCD4DE;
-    padding:3px 9px;
-    margin-right:1px;
-    border-top-left-radius:4px;
-    border-top-right-radius:4px;
-    font-weight:700;
+    background:#EAF0F6;
+    border:1px solid #C9D6E2;
+    padding:6px 13px;
+    margin-right:2px;
+    border-top-left-radius:7px;
+    border-top-right-radius:7px;
+    color:#273849;
+    font-weight:800;
 }
 QTabBar::tab:selected {
     background:#FFFFFF;
-    color:#0B4F7B;
-    border-top:3px solid #247BA0;
+    color:#045F7A;
+    border-top:3px solid #0E85A3;
     border-bottom-color:#FFFFFF;
 }
+QTabBar::tab:hover { background:#F6FBFE; }
 QListWidget {
     background:#FFFFFF;
-    border:1px solid #D3DAE3;
-    border-radius:4px;
-    alternate-background-color:#F8FAFC;
+    border:1px solid #C9D6E2;
+    border-radius:7px;
+    alternate-background-color:#F7FAFD;
+    outline:0;
 }
-QListWidget::item { padding:3px 4px; }
-QListWidget::item:selected { background:#D9EAF7; color:#083B66; }
+QListWidget::item { padding:5px 6px; border-radius:4px; }
+QListWidget::item:selected { background:#D8EDF8; color:#063F5A; font-weight:800; }
 QTableWidget {
     background:#FFFFFF;
     alternate-background-color:#F8FAFC;
-    border:1px solid #D3DAE3;
-    gridline-color:#E5EAF0;
-    selection-background-color:#D9EAF7;
-    selection-color:#1E2935;
+    border:1px solid #C9D6E2;
+    border-radius:7px;
+    gridline-color:#E3EAF1;
+    selection-background-color:#D8EDF8;
+    selection-color:#17283A;
 }
 QHeaderView::section {
-    background:#E8EEF5;
-    color:#263746;
+    background:#E8F0F7;
+    color:#213449;
     border:0;
-    border-right:1px solid #CCD4DE;
-    border-bottom:1px solid #CCD4DE;
-    padding:3px;
-    font-weight:800;
+    border-right:1px solid #C9D6E2;
+    border-bottom:1px solid #C9D6E2;
+    padding:5px;
+    font-weight:900;
 }
 QTextEdit {
     background:#FFFFFF;
-    border:1px solid #D3DAE3;
-    border-radius:4px;
-    padding:5px;
+    border:1px solid #C9D6E2;
+    border-radius:7px;
+    padding:7px;
 }
 """
 
@@ -281,7 +289,6 @@ class GravityDashboard(QWidget):
         root.setContentsMargins(5, 5, 5, 5)
         root.setSpacing(4)
 
-        root.addWidget(self._menu_bar())
         root.addWidget(self._tool_strip())
 
         body = QSplitter(Qt.Horizontal)
@@ -289,7 +296,7 @@ class GravityDashboard(QWidget):
         body.addWidget(self._left_explorer())
         body.addWidget(self._center_workspace())
         body.addWidget(self._right_inspector())
-        body.setSizes([220, 1050, 230])
+        body.setSizes([285, 1050, 250])
         root.addWidget(body, 1)
 
         bottom = QHBoxLayout()
@@ -323,39 +330,49 @@ class GravityDashboard(QWidget):
         return frame
 
     def _tool_strip(self) -> QFrame:
+        """Compact in-workspace control strip.
+
+        The old File/Edit/View/Database/Map/Grid/Profile menu row duplicated the
+        main application ribbon and consumed vertical space. The operational
+        controls remain here, while the full command set is exposed in the top
+        Gravity ribbon provider.
+        """
         frame = QFrame(objectName="gxToolStrip")
+        frame.setMaximumHeight(62)
         lay = QHBoxLayout(frame)
-        lay.setContentsMargins(5, 4, 5, 4)
-        lay.setSpacing(5)
+        lay.setContentsMargins(7, 5, 7, 5)
+        lay.setSpacing(6)
 
         tools = [
-            ("Open Workspace", self.open_workspace_folder, "primaryTool"),
-            ("Open Observations", self.open_observations, "orangeTool"),
-            ("Open Base", self.open_base, "orangeTool"),
-            ("Standard Reduction", self.process_standard, "greenTool"),
-            ("Create Grid", self.generate_grid, "primaryTool"),
-            ("Map", self.show_map, "primaryTool"),
-            ("Profile", self.show_profile, "primaryTool"),
-            ("Export CSV", self.export_csv, "purpleTool"),
-            ("Report", lambda: self.generate_report("pdf"), "purpleTool"),
+            ("Open Workspace", self.open_workspace_folder, "primaryTool", "Open a folder containing gravity observations/base files"),
+            ("Open Observations", self.open_observations, "orangeTool", "Open station observation CSV/TXT/DAT/XYZ/XLSX"),
+            ("Open Base", self.open_base, "orangeTool", "Open base/drift observations"),
+            ("Reduction", self.process_standard, "greenTool", "Run standard gravity reduction"),
+            ("Create Grid", self.generate_grid, "primaryTool", "Create interpolated grid from active channel"),
+            ("Map", self.show_map, "primaryTool", "Show map view"),
+            ("Profile", self.show_profile, "primaryTool", "Show profile view"),
+            ("Export CSV", self.export_csv, "purpleTool", "Export gravity database"),
+            ("Report", lambda: self.generate_report("pdf"), "purpleTool", "Generate report summary"),
         ]
-        for text, slot, obj in tools:
+        for text, slot, obj, tip in tools:
             b = QToolButton(text=text)
             b.setObjectName(obj)
             b.setToolButtonStyle(Qt.ToolButtonTextOnly)
+            b.setToolTip(tip)
+            b.setMinimumWidth(88)
             b.clicked.connect(slot)
             self._tool_buttons.append(b)
             lay.addWidget(b)
 
-        lay.addSpacing(10)
+        lay.addSpacing(8)
         lay.addWidget(QLabel("Channel:"))
         self.channel_combo = QComboBox()
-        self.channel_combo.setMinimumWidth(190)
+        self.channel_combo.setMinimumWidth(170)
         self.channel_combo.currentIndexChanged.connect(lambda *_: self._refresh_views())
-        lay.addWidget(self.channel_combo)
+        lay.addWidget(self.channel_combo, 1)
         lay.addWidget(QLabel("Line:"))
         self.line_combo = QComboBox()
-        self.line_combo.setMinimumWidth(120)
+        self.line_combo.setMinimumWidth(96)
         self.line_combo.currentIndexChanged.connect(lambda *_: self._refresh_profile())
         lay.addWidget(self.line_combo)
         lay.addWidget(QLabel("Density:"))
@@ -367,22 +384,29 @@ class GravityDashboard(QWidget):
         lay.addWidget(self.density_spin)
         lay.addWidget(QLabel("Palette:"))
         self.palette_selector = PaletteSelectorButton(self._palette_name, frame)
-        self.palette_selector.setMinimumWidth(142)
+        self.palette_selector.setMinimumWidth(132)
         self.palette_selector.currentTextChanged.connect(self._on_palette_changed)
         lay.addWidget(self.palette_selector)
-        lay.addStretch(1)
         return frame
 
     def _left_explorer(self) -> QFrame:
         frame = QFrame(objectName="gxLeft")
-        frame.setMinimumWidth(190)
+        frame.setMinimumWidth(260)
+        frame.setMaximumWidth(390)
         lay = QVBoxLayout(frame)
-        lay.setContentsMargins(5, 5, 5, 5)
-        lay.setSpacing(4)
+        lay.setContentsMargins(6, 6, 6, 6)
+        lay.setSpacing(6)
+        header = QLabel("Gravity Project Explorer")
+        header.setObjectName("gxSection")
+        lay.addWidget(header)
         self.left_tabs = QTabWidget()
+        self.left_tabs.setDocumentMode(True)
         self.project_list = QListWidget()
         self.data_list = QListWidget()
         self.window_list = QListWidget()
+        for widget in (self.project_list, self.data_list, self.window_list):
+            widget.setAlternatingRowColors(True)
+            widget.setUniformItemSizes(False)
         self.left_tabs.addTab(self.project_list, "Project")
         self.left_tabs.addTab(self.data_list, "Data")
         self.left_tabs.addTab(self.window_list, "Windows")
@@ -395,6 +419,7 @@ class GravityDashboard(QWidget):
         lay.setContentsMargins(5, 5, 5, 5)
         lay.setSpacing(4)
         self.tabs = QTabWidget()
+        self.tabs.setDocumentMode(True)
         self.table = self._make_table()
         self.tabs.addTab(self.table, "Database")
 
@@ -441,11 +466,16 @@ class GravityDashboard(QWidget):
 
     def _right_inspector(self) -> QFrame:
         frame = QFrame(objectName="gxRight")
-        frame.setMinimumWidth(200)
+        frame.setMinimumWidth(220)
+        frame.setMaximumWidth(360)
         lay = QVBoxLayout(frame)
-        lay.setContentsMargins(5, 5, 5, 5)
-        lay.setSpacing(4)
+        lay.setContentsMargins(6, 6, 6, 6)
+        lay.setSpacing(6)
+        header = QLabel("Map Inspector")
+        header.setObjectName("gxSection")
+        lay.addWidget(header)
         self.right_tabs = QTabWidget()
+        self.right_tabs.setDocumentMode(True)
         self.layer_list = QListWidget()
         self.channel_list = QListWidget()
         self.properties = QTextEdit()
@@ -473,7 +503,7 @@ class GravityDashboard(QWidget):
     def can_execute(self, action_id: str) -> bool:
         if action_id in {"gravity_open", "gravity_open_observations", "gravity_open_base"}:
             return True
-        return self.observations is not None or action_id in {"gravity_wall", "gravity_oasis"}
+        return self.observations is not None or action_id in {"gravity_wall", "gravity_oasis", "gravity_database", "gravity_channels", "gravity_layers"}
 
     def handle_ribbon_action(self, action_id: str) -> None:
         mapping = {
@@ -487,6 +517,9 @@ class GravityDashboard(QWidget):
             "gravity_map": self.show_map,
             "gravity_profile": self.show_profile,
             "gravity_view_2d": self.show_map,
+            "gravity_database": lambda: self.tabs.setCurrentIndex(self.TAB_DATABASE),
+            "gravity_channels": lambda: self.right_tabs.setCurrentIndex(1),
+            "gravity_layers": lambda: self.right_tabs.setCurrentIndex(0),
             "gravity_view_3d": lambda: self._info("3D viewer", "3D visualization is reserved for the next Gravity submodule. Current Oasis workspace is 2D map/profile."),
             "gravity_satellite": lambda: self._info("Satellite", "Satellite view removed from this Gravity Mapping submodule."),
             "gravity_export_csv": self.export_csv,
@@ -847,8 +880,10 @@ class GravityDashboard(QWidget):
         self.data_list.clear()
         self.window_list.clear()
         if self.observations is None:
-            for text in ["No project loaded", "Open Observations from ribbon/toolstrip"]:
+            for text in ["No gravity project loaded", "Use Gravity ribbon: Open Observations", "Or use the compact toolbar above", "Supported: CSV, TXT, DAT, XYZ, XLSX"]:
                 self.project_list.addItem(text)
+            self.data_list.addItem("No gravity database loaded")
+            self.window_list.addItems(["Database", "Map", "Profile", "Reduction", "Report"])
             return
         ds = self.reduced or self.observations
         self.project_list.addItems([
